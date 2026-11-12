@@ -90,6 +90,8 @@ pub struct App {
     drafts: composer::Drafts,
     /// The pictures asked for.
     pictures: pictures::Pictures,
+    /// Whether the last search's matches are shown, with `'hlsearch'`: `:noh` hides them until the next search.
+    highlighting: bool,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -335,6 +337,7 @@ impl App {
             composing: None,
             drafts: composer::Drafts::new(),
             pictures: pictures::Pictures::default(),
+            highlighting: false,
         }
     }
 
@@ -610,6 +613,31 @@ impl App {
         self.mode = AppMode::MorePrompt { lines };
     }
 
+    /// The search being typed after `/` or `?`, with `'incsearch'`: its pattern, direction and count. `None` while
+    /// it is empty or not a valid pattern yet.
+    fn typed_search(&self) -> Option<(Pattern, Direction, usize)> {
+        let AppMode::Cmdline(cmdline) = &self.mode else {
+            return None;
+        };
+        let Purpose::Search(direction) = cmdline.purpose else {
+            return None;
+        };
+        let text = cmdline.text();
+        if !self.options.incsearch || text.is_empty() {
+            return None;
+        }
+        let pattern = Pattern::new(&text, self.options.case_mode()).ok()?;
+        Some((pattern, direction, cmdline.count.unwrap_or(1)))
+    }
+
+    /// The last search's pattern, while its matches are shown: with `'hlsearch'`, and not since `:noh`.
+    fn searched(&self) -> Option<&Pattern> {
+        self.last_search
+            .as_ref()
+            .filter(|_| self.highlighting)
+            .map(|search| &search.pattern)
+    }
+
     /// The alternate buffer, as Vim calls it: the listed buffer shown last before the current one.
     fn alternate(&self) -> Option<usize> {
         let current = self.windows.current().buffer;
@@ -822,6 +850,7 @@ impl App {
                 {
                     window.record_jump(&layout, from);
                     self.last_search = Some(LastSearch { pattern, direction });
+                    self.highlighting = true;
                     self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
                 } else {
@@ -839,6 +868,8 @@ impl App {
                     if outcome != SearchOutcome::NotFound {
                         window.record_jump(&layout, from);
                     }
+                    // A search again: its matches show again, after `:noh`.
+                    self.highlighting = true;
                     self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
                 }
@@ -976,6 +1007,7 @@ impl App {
             Command::Profile(handle) => return self.following(|app| app.profile(handle)),
             Command::Pop => return self.pop_tag(),
             Command::Jumps => self.list_jumps(),
+            Command::Nohlsearch => self.highlighting = false,
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Star => return self.star(),
             Command::Commit => return self.compose(composer::Answering::Nothing),
@@ -1172,6 +1204,7 @@ impl App {
             window.record_jump(&layout, from);
         }
         self.last_search = Some(LastSearch { pattern, direction });
+        self.highlighting = true;
         self.open_fold_at_cursor();
         self.report_search(outcome, direction, text);
     }

@@ -138,6 +138,19 @@ impl App {
         };
         let buffer = &self.buffers[window.buffer];
         let layout = Layout::new(&buffer.doc, area.width);
+        // While a search is typed, the current window shows where it would go, its cursor left where it is.
+        let typed = is_current.then(|| self.typed_search()).flatten();
+        let moved;
+        let window = match &typed {
+            Some((pattern, direction, count)) => {
+                let mut shown = window.clone();
+                // Where the view goes follows from the cursor: nothing else needs moving.
+                let _ = shown.cursor.search(&layout, pattern, *direction, *count);
+                moved = shown;
+                &moved
+            }
+            None => window,
+        };
         let top = window.top(&layout, viewport);
         let rows: Vec<Line<'_>> = (top..top + usize::from(area.height))
             .map(|row| {
@@ -166,6 +179,28 @@ impl App {
                     let cells = Rect::new(area.x + col, y, area.width - col, 1);
                     self.pictures
                         .draw(frame.buffer_mut(), cells, picture, &self.theme);
+                }
+            }
+        }
+        let highlighted = match &typed {
+            Some((pattern, ..)) => Some((pattern, Group::IncSearch)),
+            None => self.searched().map(|pattern| (pattern, Group::CurSearch)),
+        };
+        if let Some((pattern, current)) = highlighted {
+            for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+                for (cells, holds_cursor) in layout.matches(row, pattern, &window.cursor) {
+                    let group = if holds_cursor {
+                        current
+                    } else if self.options.hlsearch {
+                        Group::Search
+                    } else {
+                        continue;
+                    };
+                    let x = area.x.saturating_add(to_u16(cells.start));
+                    let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
+                    frame
+                        .buffer_mut()
+                        .set_style(Rect::new(x, y, width, 1), self.theme.style(group));
                 }
             }
         }

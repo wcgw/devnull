@@ -189,6 +189,42 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::Search,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: Some(Color::Rgb(0x3d, 0x59, 0xa1)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::IncSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x15, 0x16, 0x1e)),
+            bg: Some(Color::Rgb(0xff, 0x9e, 0x64)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::CurSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x15, 0x16, 0x1e)),
+            bg: Some(Color::Rgb(0xff, 0x9e, 0x64)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuMatch,
+        Spec {
+            fg: Some(Color::Rgb(0x2a, 0xc3, 0xde)),
+            bg: Some(Color::Rgb(0x16, 0x16, 0x1e)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::StatusLineModeNormal,
         Spec {
             fg: Some(Color::Rgb(0x15, 0x16, 0x1e)),
@@ -458,6 +494,42 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Spec {
             fg: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
             bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Search,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: Some(Color::Rgb(0x3d, 0x59, 0xa1)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::IncSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x1d, 0x20, 0x2f)),
+            bg: Some(Color::Rgb(0xff, 0x9e, 0x64)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::CurSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x1d, 0x20, 0x2f)),
+            bg: Some(Color::Rgb(0xff, 0x9e, 0x64)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuMatch,
+        Spec {
+            fg: Some(Color::Rgb(0x2a, 0xc3, 0xde)),
+            bg: Some(Color::Rgb(0x1f, 0x23, 0x35)),
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -737,6 +809,42 @@ pub(super) const MOON: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::Search,
+        Spec {
+            fg: Some(Color::Rgb(0xc8, 0xd3, 0xf5)),
+            bg: Some(Color::Rgb(0x3e, 0x68, 0xd7)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::IncSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x1b, 0x1d, 0x2b)),
+            bg: Some(Color::Rgb(0xff, 0x96, 0x6c)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::CurSearch,
+        Spec {
+            fg: Some(Color::Rgb(0x1b, 0x1d, 0x2b)),
+            bg: Some(Color::Rgb(0xff, 0x96, 0x6c)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuMatch,
+        Spec {
+            fg: Some(Color::Rgb(0x65, 0xbc, 0xff)),
+            bg: Some(Color::Rgb(0x1e, 0x20, 0x30)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::StatusLineModeNormal,
         Spec {
             fg: Some(Color::Rgb(0x1b, 0x1d, 0x2b)),
@@ -1006,6 +1114,42 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Spec {
             fg: Some(Color::Rgb(0x2e, 0x7d, 0xe9)),
             bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Search,
+        Spec {
+            fg: Some(Color::Rgb(0x37, 0x60, 0xbf)),
+            bg: Some(Color::Rgb(0x78, 0x90, 0xdd)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::IncSearch,
+        Spec {
+            fg: Some(Color::Rgb(0xb4, 0xb5, 0xb9)),
+            bg: Some(Color::Rgb(0xb1, 0x5c, 0x00)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::CurSearch,
+        Spec {
+            fg: Some(Color::Rgb(0xb4, 0xb5, 0xb9)),
+            bg: Some(Color::Rgb(0xb1, 0x5c, 0x00)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuMatch,
+        Spec {
+            fg: Some(Color::Rgb(0x18, 0x80, 0x92)),
+            bg: Some(Color::Rgb(0xd0, 0xd5, 0xe3)),
             sp: None,
             attrs: Attrs::NONE,
         },

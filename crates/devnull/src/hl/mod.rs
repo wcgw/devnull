@@ -84,6 +84,14 @@ groups! {
     WhichKeyDesc => "WhichKeyDesc",
     /// A key that leads to more keys, in the which-key popup.
     WhichKeyGroup => "WhichKeyGroup",
+    /// Matches of the last search, while `'hlsearch'` shows them.
+    Search => "Search",
+    /// The match a search being typed would go to, with `'incsearch'`.
+    IncSearch => "IncSearch",
+    /// The match of the last search under the cursor.
+    CurSearch => "CurSearch",
+    /// What matched the query in a picker's list.
+    PmenuMatch => "PmenuMatch",
     /// A user or organization handle.
     Handle => "DevnullHandle",
     /// A commit author's name.
@@ -246,6 +254,10 @@ const DEFAULT: &[(Group, Spec)] = &[
     (Group::WarningMsg, fg(Color::Yellow)),
     (Group::MoreMsg, fg(Color::Green)),
     (Group::Visual, attrs(Attrs::REVERSE)),
+    (Group::Search, attrs(Attrs::REVERSE)),
+    (Group::IncSearch, attrs(Attrs::REVERSE)),
+    (Group::CurSearch, attrs(Attrs::REVERSE)),
+    (Group::PmenuMatch, attrs(Attrs::BOLD)),
     (Group::Folded, fg(Color::Cyan)),
     (Group::FloatBorder, fg(Color::DarkGray)),
     (Group::WhichKey, fg(Color::Cyan)),

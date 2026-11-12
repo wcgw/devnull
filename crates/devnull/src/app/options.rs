@@ -17,6 +17,10 @@ pub(super) struct Options {
     pub(super) timeoutlen: u64,
     /// How pictures are drawn.
     pub(super) graphics: Graphics,
+    /// Whether the last search's matches are shown, as Neovim does by default.
+    pub(super) hlsearch: bool,
+    /// Whether a search being typed shows where it would go, as Neovim does by default.
+    pub(super) incsearch: bool,
 }
 
 impl Default for Options {
@@ -27,6 +31,8 @@ impl Default for Options {
             scrolloff: 0,
             timeoutlen: 1000,
             graphics: Graphics::HalfBlocks,
+            hlsearch: true,
+            incsearch: true,
         }
     }
 }
@@ -63,6 +69,8 @@ enum Opt {
 const OPTIONS: &[(&str, &str, Opt)] = &[
     ("ignorecase", "ic", Opt::Flag(|o| &mut o.ignorecase)),
     ("smartcase", "scs", Opt::Flag(|o| &mut o.smartcase)),
+    ("hlsearch", "hls", Opt::Flag(|o| &mut o.hlsearch)),
+    ("incsearch", "is", Opt::Flag(|o| &mut o.incsearch)),
     ("scrolloff", "so", Opt::Count(|o| &mut o.scrolloff)),
     ("timeoutlen", "tm", Opt::Number(|o| &mut o.timeoutlen)),
     ("leader", "", Opt::Leader),

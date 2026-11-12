@@ -92,6 +92,8 @@ pub enum Command {
     Pop,
     /// `:jumps`: lists the current window's jumplist.
     Jumps,
+    /// `:nohlsearch`: stops showing the last search's matches until the next search.
+    Nohlsearch,
     /// `:star`: stars the commit under the cursor, or takes its star back.
     Star,
     /// `:commit`: writes a new commit in `$EDITOR`.
@@ -217,6 +219,7 @@ enum Name {
     Hover,
     Pop,
     Jumps,
+    Nohlsearch,
     Pick,
     Star,
     Commit,
@@ -272,6 +275,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("hover", 3, Name::Hover),
     ("pop", 2, Name::Pop),
     ("jumps", 2, Name::Jumps),
+    ("nohlsearch", 3, Name::Nohlsearch),
     ("pick", 2, Name::Pick),
     ("star", 4, Name::Star),
     ("commit", 4, Name::Commit),
@@ -353,6 +357,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Hover => Command::Hover,
         Name::Pop => Command::Pop,
         Name::Jumps => Command::Jumps,
+        Name::Nohlsearch => Command::Nohlsearch,
         Name::Star => Command::Star,
         Name::Commit => Command::Commit,
         Name::Reply => Command::Reply,

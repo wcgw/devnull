@@ -92,6 +92,22 @@ impl Pattern {
         Self::new(&regex::escape(text), case).expect("escaped text is a valid regex")
     }
 
+    /// The grapheme ranges matches cover in `line`, in order; empty matches are left out.
+    pub(super) fn ranges(&self, line: &Shaped) -> Vec<std::ops::Range<usize>> {
+        self.regex
+            .find_iter(&line.text)
+            .filter(|m| !m.is_empty())
+            .map(|m| {
+                let start = line
+                    .graphemes
+                    .partition_point(|g| g.start <= m.start())
+                    .saturating_sub(1);
+                let end = line.graphemes.partition_point(|g| g.start < m.end());
+                start..end
+            })
+            .collect()
+    }
+
     /// The grapheme columns where matches start in `line`, in order.
     fn starts(&self, line: &Shaped) -> Vec<usize> {
         self.regex

@@ -3842,8 +3842,92 @@ fn groups_linked_in_a_loop_still_draw() {
     use crate::hl::Group;
     let mut app = app_with(&["one"], 40, 6);
 
-    let _ = press(&mut app, ":hi link DevnullHash DevnullHandle<CR>:hi link DevnullHandle DevnullHash<CR>");
+    let _ = press(
+        &mut app,
+        ":hi link DevnullHash DevnullHandle<CR>:hi link DevnullHandle DevnullHash<CR>",
+    );
 
     let _ = app.style(Group::Hash);
     let _ = screen(&app);
+}
+
+#[test]
+fn hlsearch_shows_the_last_search_s_matches_and_noh_hides_them_until_the_next() {
+    use crate::hl::Group;
+    let mut app = app_with(&["one fish", "two fish", "red"], 40, 8);
+
+    let _ = press(&mut app, "/fish<CR>");
+
+    assert_eq!(
+        style_at(&app, 4, 1).bg,
+        app.style(Group::CurSearch).bg,
+        "under the cursor"
+    );
+    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Search).bg);
+    assert_eq!(style_at(&app, 0, 2).bg, app.style(Group::Normal).bg);
+    let _ = press(&mut app, ":noh<CR>");
+    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Normal).bg);
+    let _ = press(&mut app, "n");
+    assert_eq!(
+        style_at(&app, 4, 1).bg,
+        app.style(Group::Search).bg,
+        "back, the cursor on the other match"
+    );
+    let _ = press(&mut app, ":set nohls<CR>");
+    assert_eq!(style_at(&app, 4, 1).bg, app.style(Group::Normal).bg);
+}
+
+#[test]
+fn incsearch_shows_where_a_search_being_typed_goes_and_escape_goes_back() {
+    use crate::hl::Group;
+    let mut lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
+    lines[24] = "a needle here".into();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let mut app = app_with(&lines, 40, 10);
+
+    let _ = press(&mut app, "/need");
+
+    let rows = screen(&app).rows;
+    let at = rows
+        .iter()
+        .position(|row| row.contains("a needle here"))
+        .expect("scrolled to the match");
+    assert_eq!(
+        style_at(&app, 2, at as u16).bg,
+        app.style(Group::IncSearch).bg
+    );
+    let _ = press(&mut app, "<Esc>");
+    assert!(shows(&app, "line 1"), "back where it was");
+    assert!(!shows(&app, "a needle here"));
+}
+
+#[test]
+fn a_match_is_highlighted_whole_and_on_the_rows_it_wraps_to_only() {
+    use crate::hl::Group;
+    let mut app = app_with(&["aaaa fish bbbb"], 7, 8);
+
+    let _ = press(&mut app, ":set nohls<CR>/fish<CR>");
+
+    // Rows: "aaaa ", "fish ", "bbbb"; the first ends two cells short of the window.
+    assert_eq!(style_at(&app, 5, 1).bg, app.style(Group::Normal).bg);
+    assert_eq!(
+        style_at(&app, 3, 2).bg,
+        app.style(Group::CurSearch).bg,
+        "the whole match"
+    );
+}
+
+#[test]
+fn star_shows_the_matches_again_after_noh_and_noincsearch_keeps_the_view() {
+    use crate::hl::Group;
+    let mut lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
+    lines[24] = "a needle here".into();
+    let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+    let mut app = app_with(&lines, 40, 10);
+
+    let _ = press(&mut app, ":set nois<CR>/need");
+    assert!(shows(&app, "line 1") && !shows(&app, "a needle here"));
+
+    let _ = press(&mut app, "<Esc>/line<CR>:noh<CR>*");
+    assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::Search).bg);
 }

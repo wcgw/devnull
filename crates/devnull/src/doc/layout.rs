@@ -1,4 +1,4 @@
-use super::{Document, Pos, Shaped};
+use super::{Cursor, Document, Pattern, Pos, Shaped};
 use unicode_width::UnicodeWidthStr;
 
 use crate::hl::Group;
@@ -154,6 +154,37 @@ impl<'d> Layout<'d> {
             ));
         }
         pictures
+    }
+
+    /// The cells of `row` that matches of `pattern` cover, in order, each with whether it holds `cursor`.
+    #[must_use]
+    pub fn matches(
+        &self,
+        row: usize,
+        pattern: &Pattern,
+        cursor: &Cursor,
+    ) -> Vec<(std::ops::Range<usize>, bool)> {
+        let Some(&Row {
+            line,
+            start,
+            end,
+            folded: false,
+        }) = self.rows.get(row)
+        else {
+            return Vec::new();
+        };
+        let at = cursor.pos(self.doc);
+        pattern
+            .ranges(self.doc.line(line))
+            .into_iter()
+            .filter_map(|matched| {
+                let (lo, hi) = (matched.start.max(start), matched.end.min(end));
+                (lo < hi).then(|| {
+                    let holds = at.line == line && matched.contains(&at.col);
+                    (self.cell_of(row, lo)..self.cell_of(row, hi), holds)
+                })
+            })
+            .collect()
     }
 
     /// The number of screen rows.
