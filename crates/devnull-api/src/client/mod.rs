@@ -12,7 +12,9 @@ use serde::de::DeserializeOwned;
 use ssh_key::rand_core::{OsRng, RngCore};
 use url::Url;
 
-use crate::model::{Account, Commit, Cursor, Me, OrganizationPage, Page, Profile, Thread};
+use crate::model::{
+    Account, AccountPage, Commit, Cursor, Me, OrganizationPage, Page, Profile, Thread,
+};
 use crate::signing::{Namespace, SignError, Signer, canonical_message};
 
 /// The server everyone uses.
@@ -343,6 +345,26 @@ impl Client {
     pub async fn profile(&self, handle: &str) -> Result<Profile, ApiError> {
         self.get(&format!("/api/v1/users/{}", segment(handle)?), &[], None)
             .await
+    }
+
+    /// What `handle` names: a person's profile, or else an organization's page. For when the kind of account is not
+    /// known, as for a handle typed in; it costs a second request for an organization.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::profile`]; [`ApiError::NotFound`] when neither a person nor an organization has the handle.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn account(&self, handle: &str) -> Result<AccountPage, ApiError> {
+        match self.profile(handle).await {
+            Err(ApiError::NotFound) => self
+                .organization(handle)
+                .await
+                .map(AccountPage::Organization),
+            other => other.map(|profile| AccountPage::Person(Box::new(profile))),
+        }
     }
 
     /// A page of a person's commits, or of their replies.

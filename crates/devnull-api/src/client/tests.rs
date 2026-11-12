@@ -8,7 +8,7 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
 use super::*;
-use crate::model::{AccountKind, Lane, Segment};
+use crate::model::{AccountKind, AccountPage, Lane, Segment};
 use crate::signing::{Signer, canonical_message};
 use crate::{OrganizationTab, People};
 
@@ -427,6 +427,36 @@ async fn an_organization_has_its_admins_and_tabs() {
         ("Acme", 1, false)
     );
     assert_eq!(mentions.items[0].id, "m1");
+}
+
+#[tokio::test]
+async fn an_account_is_a_person_or_else_an_organization() {
+    let (server, client, _) = server_and_client().await;
+    let person = serde_json::json!({ "data": { "id": "u1", "handle": "ada", "name": "Ada" } });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/ada"))
+        .respond_with(json(&person.to_string()))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/acme"))
+        .respond_with(ResponseTemplate::new(404).set_body_string(r#"{"message":"Not found."}"#))
+        .mount(&server)
+        .await;
+    let org = serde_json::json!({ "data": { "handle": "acme", "name": "Acme" } });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/organizations/acme"))
+        .respond_with(json(&org.to_string()))
+        .mount(&server)
+        .await;
+
+    let ada = client.account("ada").await.expect("ada");
+    let acme = client.account("acme").await.expect("acme");
+    let nobody = client.account("nobody").await;
+
+    assert!(matches!(ada, AccountPage::Person(profile) if profile.account.name == "Ada"));
+    assert!(matches!(acme, AccountPage::Organization(page) if page.organization.name == "Acme"));
+    assert!(matches!(nobody, Err(ApiError::NotFound)), "{nobody:?}");
 }
 
 #[tokio::test]

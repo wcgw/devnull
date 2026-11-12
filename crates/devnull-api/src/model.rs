@@ -417,6 +417,16 @@ pub struct Organization {
     pub admins: Vec<Account>,
 }
 
+/// What a handle names: a person's profile or an organization's page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AccountPage {
+    /// A person's profile; boxed, as it carries a whole pinned commit.
+    Person(Box<Profile>),
+    /// An organization's page.
+    Organization(OrganizationPage),
+}
+
 /// An organization's page, from `GET /api/v1/organizations/{handle}`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[non_exhaustive]
