@@ -328,8 +328,7 @@ from M1 even though graphics land in M6.
   - `V` selects screen rows; its yank joins the rows of a wrapped line without a break and ends with `\n`.
   - Folds are declared by buffers per block (`Content { lines, folds }`), keep their state across block replacement,
     and count as one stop for text motions.
-  - Known gaps: search landing in a closed fold doesn't open it yet (the window will, Vim's `'foldopen'`); `*` only
-    picks keywords, not Vim's fallback to any non-blank string; folds don't nest; fold state lives in the document,
+  - Known gaps: `*` only picks keywords, not Vim's fallback to any non-blank string; folds don't nest; fold state lives in the document,
     not per window.
 - [x] **M1.4** Runtime: tokio (current-thread) loop, Elm core (`App::update(Msg) -> Vec<Effect>`), terminal
   setup/teardown with panic hook, focus events, bracketed paste (pastes never run commands), kitty keyboard protocol
@@ -407,7 +406,8 @@ from M1 even though graphics land in M6.
 - [x] **M2.7** Buffers: `<leader>1/2/3` and `:e log/…` open the logs; the bufferline lists the listed buffers
   (`connect` is an unlisted status page); `:ls`/`:buffers`, `:b {N|name}` (unique partial names, E93/E94), `:bn`,
   `:bp`; a window returns to where it left each buffer (cursor, scroll, jumps). `:ls` numbers listed buffers in
-  order rather than Vim's stable buffer numbers.
+  order, which is as stable as Vim's numbers while buffers are never deleted (there is no `:bdelete`); it marks the
+  alternate buffer `#`, which `:b#` and `<C-^>` go to.
 
 ### M3 Navigation
 

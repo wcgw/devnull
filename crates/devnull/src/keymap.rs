@@ -691,10 +691,13 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
             "jump forward",
         );
     }
-    let commands: [(&str, &str, &str); 31] = [
+    let commands: [(&str, &str, &str); 33] = [
         ("q", "quit", "close window"),
         ("<CR>", "open", "open under cursor"),
         ("<C-]>", "open", "open under cursor"),
+        // Terminals send <C-^> as <C-6> unless the kitty keyboard protocol tells them apart.
+        ("<C-^>", "buffer #", "alternate buffer"),
+        ("<C-6>", "buffer #", "alternate buffer"),
         ("<C-t>", "pop", "back from what was opened"),
         ("gd", "profile", "author's profile"),
         ("K", "hover", "hover card"),

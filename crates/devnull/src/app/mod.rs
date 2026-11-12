@@ -574,9 +574,19 @@ impl App {
             .collect()
     }
 
-    /// `:ls`: the listed buffers, the current one marked `%a`.
+    /// The alternate buffer, as Vim calls it: the listed buffer shown last before the current one.
+    fn alternate(&self) -> Option<usize> {
+        let current = self.windows.current().buffer;
+        self.recent
+            .iter()
+            .copied()
+            .find(|&index| index != current && self.buffers[index].is_listed())
+    }
+
+    /// `:ls`: the listed buffers, the current one marked `%a` and the alternate one `#`.
     fn list_buffers(&mut self) {
         let current = self.windows.current().buffer;
+        let alternate = self.alternate();
         let lines = self
             .listed()
             .into_iter()
@@ -585,7 +595,13 @@ impl App {
                 text: format!(
                     "{:>3} {:2} \"{}\"",
                     number + 1,
-                    if index == current { "%a" } else { "" },
+                    if index == current {
+                        "%a"
+                    } else if Some(index) == alternate {
+                        "#"
+                    } else {
+                        ""
+                    },
                     self.buffers[index].name
                 ),
                 kind: MessageKind::Info,
@@ -594,9 +610,14 @@ impl App {
         self.mode = AppMode::MorePrompt { lines };
     }
 
-    /// `:b {arg}`: the listed buffer numbered `arg`, else named exactly `arg`, else the only one whose name contains
+    /// `:b {arg}`: the alternate buffer for `#`, else the listed buffer numbered `arg`, else named exactly `arg`, else the only one whose name contains
     /// it.
     fn buffer_named(&self, arg: &str) -> Result<usize, String> {
+        if arg == "#" {
+            return self
+                .alternate()
+                .ok_or_else(|| "E23: No alternate file".to_owned());
+        }
         let listed = self.listed();
         if let Ok(number) = arg.parse::<usize>() {
             return listed

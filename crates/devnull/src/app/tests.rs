@@ -1427,7 +1427,7 @@ fn going_back_to_a_buffer_returns_to_where_the_cursor_was() {
 }
 
 #[test]
-fn ls_lists_the_buffers_and_marks_the_current_one() {
+fn ls_lists_the_buffers_and_marks_the_current_and_the_alternate_ones() {
     let mut app = with_log(Log::Following, page_of(1, 3, None));
     let _ = press(&mut app, "<Space>2");
 
@@ -1437,7 +1437,7 @@ fn ls_lists_the_buffers_and_marks_the_current_one() {
     assert_eq!(
         rows[rows.len() - 3..],
         [
-            "  1    \"log/following\"",
+            "  1 #  \"log/following\"",
             "  2 %a \"log/latest\"",
             "Press ENTER or type command to continue"
         ]
@@ -3721,4 +3721,25 @@ fn an_avatar_further_along_a_row_is_drawn_where_it_is() {
     // The gutter and the icon come first: "● + ".
     let rows = screen(&app).rows;
     assert!(rows[1].starts_with("● + ▀▀ Lin @lin"), "{rows:#?}");
+}
+
+#[test]
+fn ctrl_caret_and_b_hash_go_to_the_alternate_buffer() {
+    let mut app = three_logs();
+
+    let _ = press(&mut app, ":b#<CR>");
+    assert!(statusline(&app).contains("log/latest"));
+    let _ = press(&mut app, "<C-^>");
+    assert!(statusline(&app).contains("log/trending"));
+    let _ = press(&mut app, "<C-6>");
+    assert!(statusline(&app).contains("log/latest"));
+}
+
+#[test]
+fn without_an_alternate_buffer_b_hash_says_so() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let _ = press(&mut app, ":b#<CR>");
+
+    assert_eq!(cmdline(&app), "E23: No alternate file");
 }
