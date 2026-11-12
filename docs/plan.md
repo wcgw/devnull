@@ -114,9 +114,15 @@ Older pages load automatically as the cursor nears the end of a buffer; there is
   frame timer.
 - **No sixel or iTerm2 protocol**: grid-painted images fight the scrolling buffer model.
 - **Scope**: viewing inline images, avatars and link-card pictures moves to **v1**; attaching images stays in v2.
-- **Unverified, spike first**: sources disagree on whether Ghostty supports Unicode placeholders; 1.4.0 release notes
-  confirm animation. M0 includes a probe run in Ghostty 1.4.0 (installed locally) for placeholders + animation +
-  placeholder-based animation together.
+- **Verified in Ghostty 1.4.0 (M0.1)**, by a probe that draws images purely through `U+10EEEE` cells (24-bit fg
+  colour = image id, row and column diacritics) in a redrawn alternate-screen buffer:
+  - Placeholders render; images partially scrolled past an edge are **cropped** to their surviving rows, not squashed.
+  - Native animation (`a=f` frames, `a=a,s=3,v=1`) keeps running inside placeholders, also while scrolling.
+  - The same image can be placed twice at once; two images can share a row; no ghosts after scrolling off and back.
+  - Cell size reported by `CSI 16 t`: 10×20 px.
+- **Detection**: Ghostty 1.4.0 does **not** implement feature queries (`e=` key); it answers them as plain queries
+  (`EINVAL: dimensions required`). Detect with a plain `a=q` query plus `TERM`/`TERM_PROGRAM`
+  (`xterm-ghostty`, `xterm-kitty`); override with `:set graphics=kitty|halfblocks`.
 
 ### D8. Identity
 
@@ -196,9 +202,8 @@ from M1 even though graphics land in M6.
 
 ### M0 Spikes (scratchpad, throwaway)
 
-- [ ] **M0.1 Graphics probe**: scratch binary that (a) places a PNG via Kitty Unicode placeholders inside scrolling
-  text, (b) uploads GIF frames and starts native animation, (c) both at once. User runs it in Ghostty 1.4.0 and
-  reports. Decides D7 or its fallback.
+- [x] **M0.1 Graphics probe**: placeholders inside a scrolling buffer, native animation, and both at once, run by the
+  user in Ghostty 1.4.0. All passed; D7 holds as designed (results in D7).
 - [ ] **M0.2 Signing**: generate a key, SSHSIG-sign from file and via `ssh-agent`, verify with `ssh-keygen -Y verify`,
   and compare with the Go implementation's output for the same input.
 - [ ] **M0.3 Enrollment**: read the Go `auth/flow.go`, `callback.go` and `handler_linux.go`, run enrollment against
