@@ -1,18 +1,13 @@
-//! What buffers ask dev-null.sh for, and how the answers reach them. Lists, such as logs and replies, come a page at
-//! a time.
+//! What feeds ask dev-null.sh for, and how the answers reach their buffers.
 
 use devnull_api::Log;
 use devnull_api::model::{Commit, Cursor, Page, Thread};
 
-use super::{App, Effect, Kind, NetEvent, logs, threads};
-use crate::doc::{Document, Layout, Line, Span};
+use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
+use super::{App, Buffer, Effect, Kind, NetEvent, threads};
+use crate::doc::{Content, Cursor as DocCursor, Document, Layout};
 use crate::hl::Group;
-
-/// The key of the "Loading more…" block at the end of a list while its next page loads.
-const MORE: &str = "~more";
-
-/// The key of the block of a buffer that says one thing, while it has nothing else to show.
-pub(super) const NOTICE: &str = "notice";
+use crate::render::commit_block;
 
 /// Something to ask dev-null.sh for, on the app's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,172 +75,58 @@ pub enum FetchError {
     Failed(String),
 }
 
-/// Where loading a list a page at a time stands.
-#[derive(Debug, Clone, Default)]
-pub(super) struct Paging {
-    /// Where the next page starts, once a page said there is one.
-    pub(super) next: Option<Cursor>,
-    /// Whether the first page or the next page is on its way.
-    loading: bool,
-    /// Whether a fresh first page is on its way for a list that has one already.
-    refreshing: bool,
-    /// Whether a page ever arrived.
-    pub(super) loaded: bool,
-}
-
-impl Paging {
-    /// Notes the first page as asked for, unless it arrived or is on its way: whether to ask for it.
-    pub(super) fn start(&mut self) -> bool {
-        let ask = !self.loaded && !self.loading;
-        self.loading |= ask;
-        ask
+impl App {
+    /// The buffer showing `source`, if there is one.
+    pub(super) fn feed_buffer(&self, source: &Source) -> Option<usize> {
+        self.buffers
+            .iter()
+            .position(|buffer| matches!(&buffer.kind, Kind::Feed(feed) if feed.source == *source))
     }
 
-    /// Notes the first page as asked for again, unless it is on its way: whether to ask for it.
-    pub(super) fn refresh(&mut self) -> bool {
-        if !self.loaded {
-            return self.start();
-        }
-        let ask = !self.refreshing;
-        self.refreshing = true;
-        ask
-    }
-
-    /// Whether there is a next page and it is not on its way yet.
-    fn has_more(&self) -> bool {
-        !self.loading && self.next.is_some()
-    }
-
-    /// Notes the next page as asked for: where it starts, unless there is none or it is on its way.
-    fn more(&mut self) -> Option<Cursor> {
-        let next = self.next.clone().filter(|_| !self.loading)?;
-        self.loading = true;
-        Some(next)
-    }
-
-    /// Notes a page as no longer on its way: the next one when `next_page`, else the first.
-    fn answered(&mut self, next_page: bool) {
-        if next_page || !self.loaded {
-            self.loading = false;
-        } else {
-            self.refreshing = false;
-        }
-    }
-}
-
-impl Kind {
-    /// The list the buffer shows a page at a time, if any.
-    fn paging(&self) -> Option<&Paging> {
-        match self {
-            Self::Log { paging, .. } => Some(paging),
-            Self::Thread(thread) => Some(&thread.replies),
-            Self::Status | Self::Fixed => None,
-        }
-    }
-
-    fn paging_mut(&mut self) -> Option<&mut Paging> {
-        match self {
-            Self::Log { paging, .. } => Some(paging),
-            Self::Thread(thread) => Some(&mut thread.replies),
-            Self::Status | Self::Fixed => None,
-        }
-    }
-
-    /// The requests for what the buffer shows, noted as asked for: none when it has it or is getting it.
-    fn start(&mut self) -> Vec<Request> {
-        match self {
-            Self::Log { log, paging } => paging
-                .start()
-                .then_some(Request::Log {
-                    log: *log,
-                    after: None,
-                })
-                .into_iter()
-                .collect(),
-            Self::Thread(thread) => thread.start(),
-            Self::Status | Self::Fixed => Vec::new(),
-        }
-    }
-
-    /// The requests for what the buffer shows, again; `None` when it shows nothing from the server.
-    fn refresh(&mut self) -> Option<Vec<Request>> {
-        Some(match self {
-            Self::Log { log, paging } => paging
-                .refresh()
-                .then_some(Request::Log {
-                    log: *log,
-                    after: None,
-                })
-                .into_iter()
-                .collect(),
-            Self::Thread(thread) => thread.refresh(),
-            Self::Status | Self::Fixed => return None,
+    /// The buffer showing `source`, created empty if there is none yet.
+    pub(super) fn feed_buffer_or_new(&mut self, source: Source) -> usize {
+        self.feed_buffer(&source).unwrap_or_else(|| {
+            self.buffers.push(Buffer {
+                name: source.name(),
+                doc: Document::new(),
+                kind: Kind::Feed(Feed::new(source)),
+            });
+            self.buffers.len() - 1
         })
     }
 
-    /// The request for the next page, noted as asked for, unless there is none or it is on its way.
-    fn more(&mut self) -> Option<Request> {
-        match self {
-            Self::Log { log, paging } => paging.more().map(|after| Request::Log {
-                log: *log,
-                after: Some(after),
-            }),
-            Self::Thread(thread) => thread.replies.more().map(|after| Request::Replies {
-                id: thread.id.clone(),
-                after: Some(after),
-            }),
-            Self::Status | Self::Fixed => None,
-        }
+    /// Shows `source` in the current window, loading it if needed; the cursor starts at `start` when the window
+    /// never showed it.
+    pub(super) fn open_feed(&mut self, source: Source, start: DocCursor) -> Vec<Effect> {
+        let index = self.feed_buffer_or_new(source);
+        self.show_buffer_at(index, start)
     }
 
-    /// Whether the buffer shows anything from the server yet.
-    fn has_content(&self) -> bool {
-        match self {
-            Self::Log { paging, .. } => paging.loaded,
-            Self::Thread(thread) => thread.has_content(),
-            Self::Status | Self::Fixed => true,
-        }
-    }
-}
-
-/// A document saying one thing, while there is nothing else to show.
-pub(super) fn notice(text: &str, group: Group) -> Document {
-    let mut doc = Document::new();
-    doc.push_back(NOTICE, notice_lines(text, group));
-    doc
-}
-
-fn notice_lines(text: &str, group: Group) -> Vec<Line> {
-    vec![Line::Text(vec![Span::new(text, group)])]
-}
-
-/// Appends the commits of `page` that `doc` does not show yet.
-pub(super) fn append(doc: &mut Document, page: &Page<Commit>, now: u64) {
-    for commit in &page.items {
-        if !doc.contains(commit.id.as_str()) {
-            doc.push_back(commit.id.as_str(), crate::render::commit_block(commit, now));
-        }
-    }
-}
-
-impl App {
     /// Asks for what buffer `index` shows, unless it has it or is getting it.
     pub(super) fn load(&mut self, index: usize) -> Vec<Effect> {
-        let requests = self.buffers[index].kind.start();
+        let requests = match &mut self.buffers[index].kind {
+            Kind::Feed(feed) => feed.start(),
+            Kind::Status | Kind::Fixed => Vec::new(),
+        };
         self.ask(index, requests)
     }
 
     /// `:e!`: asks for what buffer `index` shows again, keeping what is shown until it arrives. `None` when the
     /// buffer shows nothing from the server.
     pub(super) fn refresh(&mut self, index: usize) -> Option<Vec<Effect>> {
-        let requests = self.buffers[index].kind.refresh()?;
+        let requests = match &mut self.buffers[index].kind {
+            Kind::Feed(feed) => feed.refresh(),
+            Kind::Status | Kind::Fixed => return None,
+        };
         Some(self.ask(index, requests))
     }
 
     /// Sends `requests` for buffer `index`, saying it is loading while it has nothing else to show.
     fn ask(&mut self, index: usize, requests: Vec<Request>) -> Vec<Effect> {
         let buffer = &mut self.buffers[index];
-        if !buffer.kind.has_content() {
+        if let Kind::Feed(feed) = &buffer.kind
+            && !feed.has_content()
+        {
             buffer.doc = notice(&format!("Loading {}…", buffer.name), Group::Time);
         }
         requests.into_iter().map(Effect::Fetch).collect()
@@ -257,7 +138,7 @@ impl App {
         let window = self.windows.current();
         let index = window.buffer;
         let buffer = &self.buffers[index];
-        if !buffer.kind.paging().is_some_and(Paging::has_more) {
+        if !matches!(&buffer.kind, Kind::Feed(feed) if feed.has_more()) {
             return Vec::new();
         }
         let layout = Layout::new(&buffer.doc, area.width);
@@ -265,73 +146,84 @@ impl App {
             return Vec::new();
         }
         let buffer = &mut self.buffers[index];
-        let Some(request) = buffer.kind.more() else {
+        let Kind::Feed(feed) = &mut buffer.kind else {
             return Vec::new();
         };
-        buffer.doc.push_back(
-            MORE,
-            vec![Line::Text(vec![Span::new("Loading more…", Group::Time)])],
-        );
-        vec![Effect::Fetch(request)]
+        feed.more(&mut buffer.doc)
+            .map(Effect::Fetch)
+            .into_iter()
+            .collect()
     }
 
     /// An answer from the server; `now` (Unix seconds) is when it arrived, for ages.
     pub(super) fn fetched(&mut self, fetched: Fetched, now: u64) -> Vec<Effect> {
+        let commits = |page: Page<Commit>| {
+            let items = page
+                .items
+                .iter()
+                .map(|commit| (commit.id.clone(), commit_block(commit, now)))
+                .collect();
+            Page::new(items, page.next)
+        };
         match fetched {
             Fetched::Log { log, after, result } => {
-                let index = self.log_buffer(log);
-                self.page_arrived(index, after.is_some(), result, now)
+                self.page_arrived(&Source::Log(log), after.is_some(), result.map(commits))
             }
-            Fetched::Replies { id, after, result } => match self.thread_buffer(&id) {
-                Some(index) => self.page_arrived(index, after.is_some(), result, now),
-                None => Vec::new(),
-            },
-            Fetched::Thread { id, result } => self.thread_arrived(&id, result, now),
+            Fetched::Replies { id, after, result } => {
+                self.page_arrived(&Source::Thread(id), after.is_some(), result.map(commits))
+            }
+            Fetched::Thread { id, result } => self.head_arrived(
+                &Source::Thread(id),
+                result.map(|thread| threads::head(&thread, now)),
+            ),
         }
     }
 
-    /// A page of the list of buffer `index` arrived, or failed to: the next page when `next_page`, else the first.
-    fn page_arrived(
+    /// The head of the feed of `source` arrived as blocks, or failed to.
+    fn head_arrived(
         &mut self,
-        index: usize,
-        next_page: bool,
-        result: Result<Page<Commit>, FetchError>,
-        now: u64,
+        source: &Source,
+        result: Result<Vec<(String, Content)>, FetchError>,
     ) -> Vec<Effect> {
-        let top_before = self.top_row(index);
-        let buffer = &mut self.buffers[index];
-        let Some(paging) = buffer.kind.paging_mut() else {
+        let Some(index) = self.feed_buffer(source) else {
             return Vec::new();
         };
-        paging.answered(next_page);
-        if next_page {
-            buffer.doc.remove(MORE);
+        let buffer = &mut self.buffers[index];
+        let Kind::Feed(feed) = &mut buffer.kind else {
+            return Vec::new();
+        };
+        feed.head_answered();
+        match result {
+            Ok(blocks) => {
+                feed.head_arrived(&mut buffer.doc, blocks);
+                Vec::new()
+            }
+            Err(error) => self.failed(index, error),
         }
+    }
+
+    /// A page of the list of the feed of `source` arrived as blocks, or failed to: the next page when `next_page`,
+    /// else the first.
+    fn page_arrived(
+        &mut self,
+        source: &Source,
+        next_page: bool,
+        result: Result<Page<(String, Content)>, FetchError>,
+    ) -> Vec<Effect> {
+        let Some(index) = self.feed_buffer(source) else {
+            return Vec::new();
+        };
+        let top_before = self.top_row(index);
+        let buffer = &mut self.buffers[index];
+        let Kind::Feed(feed) = &mut buffer.kind else {
+            return Vec::new();
+        };
+        feed.page_answered(&mut buffer.doc, next_page);
         let page = match result {
             Ok(page) => page,
             Err(error) => return self.failed(index, error),
         };
-        let mut arrived = 0;
-        if next_page {
-            append(&mut buffer.doc, &page, now);
-            if let Some(paging) = buffer.kind.paging_mut() {
-                paging.next = page.next;
-            }
-        } else {
-            match &mut buffer.kind {
-                Kind::Log { log, paging } => {
-                    arrived = logs::merge(&mut buffer.doc, *log, paging, page, now);
-                }
-                Kind::Thread(thread) => threads::merge(&mut buffer.doc, thread, page, now),
-                Kind::Status | Kind::Fixed => {}
-            }
-        }
-        if buffer.doc.is_empty() {
-            buffer.doc = notice("Nothing here yet.", Group::Time);
-        }
-        if let Some(paging) = buffer.kind.paging_mut() {
-            paging.loaded = true;
-        }
+        let arrived = feed.page_arrived(&mut buffer.doc, next_page, page);
         if arrived > 0 && top_before.is_some_and(|top| top > 0) {
             self.info(format!(
                 "{arrived} new commit{}",
@@ -342,13 +234,13 @@ impl App {
     }
 
     /// A request for buffer `index` failed: says why, also in the buffer while it has nothing else to show.
-    pub(super) fn failed(&mut self, index: usize, error: FetchError) -> Vec<Effect> {
+    fn failed(&mut self, index: usize, error: FetchError) -> Vec<Effect> {
         match error {
             FetchError::NotApproved => self.net(NetEvent::NotApproved),
             FetchError::Failed(reason) => {
                 let buffer = &mut self.buffers[index];
                 let text = format!("Cannot load {}: {reason}", buffer.name);
-                if !buffer.kind.has_content() {
+                if matches!(&buffer.kind, Kind::Feed(feed) if !feed.has_content()) {
                     buffer.doc = notice(&text, Group::ErrorMsg);
                 } else if buffer.doc.contains(NOTICE) {
                     // Such as "Loading…" above replies that arrived when their commit did not.

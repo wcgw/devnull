@@ -1,15 +1,12 @@
-//! The log buffers: their names, polling chronological logs for new commits, and how a fresh first page joins what
-//! is shown.
+//! The log buffers: their names, and polling chronological logs for new commits.
 
 use std::time::Duration;
 
 use devnull_api::Log;
-use devnull_api::model::{Commit, Page};
 
-use super::fetch::{Paging, append};
-use super::{App, Buffer, Effect, Kind, Wake, WakePurpose};
-use crate::doc::Document;
-use crate::render::commit_block;
+use super::feed::Source;
+use super::{App, Effect, Kind, Wake, WakePurpose};
+use crate::doc::Cursor;
 
 /// How often chronological logs are checked for new commits while the terminal has focus, and without it.
 const POLL_FOCUSED: Duration = Duration::from_secs(15);
@@ -28,23 +25,6 @@ pub(super) fn named(name: &str) -> Option<Log> {
 }
 
 impl App {
-    /// The buffer of `log`, created empty if it does not exist yet.
-    pub(super) fn log_buffer(&mut self, log: Log) -> usize {
-        let name = buffer_name(log);
-        if let Some(index) = self.buffers.iter().position(|buffer| buffer.name == name) {
-            return index;
-        }
-        self.buffers.push(Buffer {
-            name,
-            doc: Document::new(),
-            kind: Kind::Log {
-                log,
-                paging: Paging::default(),
-            },
-        });
-        self.buffers.len() - 1
-    }
-
     /// Starts polling chronological logs for new commits, once.
     pub(super) fn start_polling(&mut self) -> Vec<Effect> {
         if self.polling {
@@ -71,12 +51,12 @@ impl App {
 
     /// Time to poll: refresh every loaded chronological log, and plan the next poll.
     pub(super) fn poll(&mut self) -> Vec<Effect> {
-        let chronological: Vec<usize> = (0..self.buffers.len())
-            .filter(|&index| {
-                matches!(&self.buffers[index].kind, Kind::Log { log, paging } if *log != Log::Trending && paging.loaded)
-            })
+        let polled: Vec<usize> = (0..self.buffers.len())
+            .filter(
+                |&index| matches!(&self.buffers[index].kind, Kind::Feed(feed) if feed.is_polled()),
+            )
             .collect();
-        let mut effects: Vec<Effect> = chronological
+        let mut effects: Vec<Effect> = polled
             .into_iter()
             .filter_map(|index| self.refresh(index))
             .flatten()
@@ -87,41 +67,6 @@ impl App {
 
     /// `:e {name}`: shows the log of that name in the current window, loading it if needed.
     pub(super) fn open_log(&mut self, log: Log) -> Vec<Effect> {
-        let index = self.log_buffer(log);
-        self.show_buffer(index)
-    }
-}
-
-/// The first page of `log` arrived: new commits of a chronological log go above the ones shown, which are updated
-/// where they are; otherwise the page replaces what is shown. Returns how many new commits went above.
-pub(super) fn merge(
-    doc: &mut Document,
-    log: Log,
-    paging: &mut Paging,
-    page: Page<Commit>,
-    now: u64,
-) -> usize {
-    let known = page
-        .items
-        .iter()
-        .position(|commit| doc.contains(commit.id.as_str()));
-    match known.filter(|_| paging.loaded && log != Log::Trending) {
-        Some(first_known) => {
-            for commit in page.items[..first_known].iter().rev() {
-                doc.push_front(commit.id.as_str(), commit_block(commit, now));
-            }
-            for commit in &page.items[first_known..] {
-                let _ = doc.replace(commit.id.as_str(), commit_block(commit, now));
-            }
-            first_known
-        }
-        // A first load, a ranked log, or nothing in common with what is shown: the page replaces it all. Cursors stay
-        // on commits that are still there, since they are anchored by key.
-        None => {
-            *doc = Document::new();
-            append(doc, &page, now);
-            paging.next = page.next;
-            0
-        }
+        self.open_feed(Source::Log(log), Cursor::new())
     }
 }

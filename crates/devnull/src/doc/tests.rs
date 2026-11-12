@@ -409,7 +409,7 @@ fn the_target_under_the_cursor_is_the_one_of_the_span_it_sits_in() {
         "a",
         vec![Line::Text(vec![
             Span::new("hi ", Group::Normal),
-            Span::new("@ada", Group::Normal).with_target(Target::Mention("ada".into())),
+            Span::new("@ada", Group::Normal).with_target(Target::Buffer("@ada".into())),
             Span::new(" 🦀 ", Group::Normal),
             Span::new("dev-null.sh", Group::Normal)
                 .with_target(Target::Url("https://dev-null.sh".into())),
@@ -425,11 +425,11 @@ fn the_target_under_the_cursor_is_the_one_of_the_span_it_sits_in() {
     assert_eq!(target_after(Motion::Left, 1), None);
     assert_eq!(
         target_after(Motion::Right, 3),
-        Some(Target::Mention("ada".into()))
+        Some(Target::Buffer("@ada".into()))
     );
     assert_eq!(
         target_after(Motion::Right, 3),
-        Some(Target::Mention("ada".into()))
+        Some(Target::Buffer("@ada".into()))
     );
     assert_eq!(target_after(Motion::Right, 2), None);
     assert_eq!(
@@ -444,7 +444,7 @@ fn text_without_a_target_of_its_own_refers_to_its_block_s() {
     let lines = vec![
         Line::Text(vec![
             Span::new("by ", Group::Normal),
-            Span::new("@ada", Group::Normal).with_target(Target::Mention("ada".into())),
+            Span::new("@ada", Group::Normal).with_target(Target::Buffer("@ada".into())),
         ]),
         Line::text(""),
     ];
@@ -452,7 +452,7 @@ fn text_without_a_target_of_its_own_refers_to_its_block_s() {
         "a",
         Content {
             lines,
-            target: Some(Target::Commit("c1".into())),
+            target: Some(Target::Buffer("c1".into())),
             ..Content::default()
         },
     );
@@ -465,15 +465,15 @@ fn text_without_a_target_of_its_own_refers_to_its_block_s() {
 
     assert_eq!(
         target_after(Motion::Left, 1),
-        Some(Target::Commit("c1".into()))
+        Some(Target::Buffer("c1".into()))
     );
     assert_eq!(
         target_after(Motion::Right, 3),
-        Some(Target::Mention("ada".into()))
+        Some(Target::Buffer("@ada".into()))
     );
     assert_eq!(
         target_after(Motion::Down, 1),
-        Some(Target::Commit("c1".into())),
+        Some(Target::Buffer("c1".into())),
         "an empty line too"
     );
 }
@@ -524,6 +524,46 @@ fn removing_the_cursor_block_leaves_the_cursor_on_what_took_its_place() {
 
     assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(1, 0));
     assert_eq!(Layout::new(&doc, 80).row_text(1), "charlie");
+}
+
+fn row_texts(doc: &Document) -> Vec<String> {
+    let layout = Layout::new(doc, 80);
+    (0..layout.row_count())
+        .map(|row| layout.row_text(row).to_owned())
+        .collect()
+}
+
+#[test]
+fn a_block_can_go_just_before_another_or_at_the_end_without_it() {
+    let mut doc = doc(&[("a", &["alpha"]), ("c", &["charlie"])]);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+
+    doc.insert_before("c", "b", vec![Line::text("bravo")]);
+    doc.insert_before("nothing", "d", vec![Line::text("delta")]);
+
+    assert_eq!(row_texts(&doc), ["alpha", "bravo", "charlie", "delta"]);
+    assert_eq!(
+        cursor.screen(&Layout::new(&doc, 80)),
+        at(2, 0),
+        "still on charlie"
+    );
+}
+
+#[test]
+fn retain_keeps_only_the_blocks_asked_for() {
+    let mut doc = doc(&[("a", &["alpha"]), ("b", &["bravo"]), ("c", &["charlie"])]);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 2);
+
+    doc.retain(|key| key != "b");
+
+    assert_eq!(row_texts(&doc), ["alpha", "charlie"]);
+    assert_eq!(
+        cursor.screen(&Layout::new(&doc, 80)),
+        at(1, 0),
+        "still on charlie"
+    );
 }
 
 #[test]

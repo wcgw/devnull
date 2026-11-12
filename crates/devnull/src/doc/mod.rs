@@ -23,6 +23,8 @@ pub use layout::{Layout, ScreenPos};
 pub use search::{CaseMode, Direction, Pattern, PatternError, SearchOutcome};
 pub use visual::{Selection, SelectionKind};
 
+use devnull_api::model::AccountKind;
+
 use crate::hl::Group;
 
 /// Identifies a block across document edits, such as a commit id or `"header"`.
@@ -146,10 +148,36 @@ impl Span {
 pub enum Target {
     /// A web link, opened in the browser.
     Url(String),
-    /// A user or organization handle, without the `@`.
-    Mention(String),
-    /// A commit id.
-    Commit(String),
+    /// A person or an organization.
+    Account(AccountRef),
+    /// A commit.
+    Commit {
+        /// Its id.
+        id: String,
+        /// Who wrote it; `None` for a deleted commit.
+        author: Option<AccountRef>,
+    },
+    /// A buffer, by name, such as a profile's list of followers.
+    Buffer(String),
+}
+
+/// A person or an organization, as text refers to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountRef {
+    /// The handle, without the `@`.
+    pub handle: String,
+    /// Whether it is a person or an organization; `None` when the text does not say.
+    pub kind: Option<AccountKind>,
+}
+
+impl AccountRef {
+    /// `handle`, of `kind`; a kind this version does not know counts as not saying.
+    pub fn new(handle: impl Into<String>, kind: Option<AccountKind>) -> Self {
+        Self {
+            handle: handle.into(),
+            kind: kind.filter(|kind| *kind != AccountKind::Other),
+        }
+    }
 }
 
 /// A read-only document of keyed blocks of lines.
@@ -372,6 +400,26 @@ impl Document {
         self.insert(0, key.into(), content.into());
     }
 
+    /// Inserts a block just before the block `before`, or at the end when there is no such block. Cursors stay on
+    /// their text.
+    ///
+    /// # Panics
+    ///
+    /// If a block with the same key is already present.
+    pub fn insert_before(
+        &mut self,
+        before: impl Into<BlockKey>,
+        key: impl Into<BlockKey>,
+        content: impl Into<Content>,
+    ) {
+        let at = self
+            .index
+            .get(&before.into())
+            .copied()
+            .unwrap_or(self.blocks.len());
+        self.insert(at, key.into(), content.into());
+    }
+
     fn insert(&mut self, at: usize, key: BlockKey, content: Content) {
         assert!(
             !self.index.contains_key(&key),
@@ -403,6 +451,15 @@ impl Document {
                 .retain(|(block_key, _), _| *block_key != key);
             self.reindex();
         }
+    }
+
+    /// Removes every block whose key `keep` says not to keep. Cursors in them move to whatever takes their place.
+    pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.blocks.retain(|block| keep(&block.key.0));
+        self.reindex();
+        let index = &self.index;
+        self.fold_states
+            .retain(|(key, _), _| index.contains_key(key));
     }
 
     /// `zo`, `zc`, `za`: opens, closes or toggles the fold holding the cursor's line, if any. The cursor keeps its

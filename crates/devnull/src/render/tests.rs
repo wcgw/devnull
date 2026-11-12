@@ -3,7 +3,7 @@
 use devnull_api::model::Commit;
 
 use super::*;
-use crate::doc::{Content, Cursor, Document, Layout, Motion, Target};
+use crate::doc::{AccountRef, Content, Cursor, Document, Layout, Motion, Target};
 
 /// 2026-11-12T15:13:40Z, a little after the fixtures' commits.
 const NOW: u64 = 1_794_496_420;
@@ -19,6 +19,10 @@ fn commit(json: serde_json::Value) -> Commit {
         base.extend(extra.clone());
     }
     serde_json::from_value(base).expect("commit")
+}
+
+fn account(handle: &str, kind: AccountKind) -> Target {
+    Target::Account(AccountRef::new(handle, Some(kind)))
 }
 
 fn text(segment: &str) -> serde_json::Value {
@@ -90,7 +94,7 @@ fn mentions_and_links_in_the_text_are_targets() {
     assert_eq!(
         targets(block, 1),
         [
-            Target::Mention("ada".into()),
+            account("ada", AccountKind::User),
             Target::Url("https://example.org/x".into())
         ]
     );
@@ -100,7 +104,7 @@ fn mentions_and_links_in_the_text_are_targets() {
 fn the_header_points_at_the_author() {
     let block = commit_block(&commit(serde_json::json!({})), NOW);
 
-    assert_eq!(targets(block, 0), [Target::Mention("grace".into())]);
+    assert_eq!(targets(block, 0), [account("grace", AccountKind::User)]);
 }
 
 #[test]
@@ -145,12 +149,12 @@ fn a_quote_is_indented_under_a_bar_and_points_at_the_quoted_commit() {
         rows[1..3],
         ["┃ Acme (org) @acme · 1h · 82e820a", "┃ quoted text"]
     );
-    assert_eq!(targets(block.clone(), 1)[0], Target::Commit("q1".into()));
-    assert_eq!(
-        targets(block, 2),
-        [Target::Commit("q1".into())],
-        "the quote's text too"
-    );
+    let quoted = Target::Commit {
+        id: "q1".into(),
+        author: Some(AccountRef::new("acme", Some(AccountKind::Organization))),
+    };
+    assert_eq!(targets(block.clone(), 1)[0], quoted);
+    assert_eq!(targets(block, 2), [quoted], "the quote's text too");
 }
 
 #[test]
@@ -164,10 +168,19 @@ fn the_rest_of_a_commit_points_at_it() {
     )
     .expect("commit");
 
-    assert_eq!(block.target, Some(Target::Commit("c1".into())));
+    assert_eq!(
+        block.target,
+        Some(Target::Commit {
+            id: "c1".into(),
+            author: Some(AccountRef::new("grace", Some(AccountKind::User)))
+        })
+    );
     assert_eq!(
         commit_block(&deleted, NOW).target,
-        Some(Target::Commit("d1".into()))
+        Some(Target::Commit {
+            id: "d1".into(),
+            author: None
+        })
     );
 }
 

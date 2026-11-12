@@ -2,6 +2,7 @@
 
 mod cmdline;
 mod connection;
+mod feed;
 mod fetch;
 mod logs;
 mod options;
@@ -29,10 +30,9 @@ use crate::keymap::{Action, Invocation, Keymap, Mode};
 use cmdline::{Cmdline, Edit, Purpose};
 use connection::Connection;
 pub use connection::NetEvent;
-use fetch::Paging;
+use feed::{Feed, Source};
 pub use fetch::{FetchError, Fetched, Request};
 use options::Options;
-use threads::ThreadState;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
 
@@ -177,13 +177,8 @@ enum Kind {
     Status,
     /// A document given whole, as to [`App::with_buffer`].
     Fixed,
-    /// A log, a page at a time.
-    Log {
-        log: devnull_api::Log,
-        paging: Paging,
-    },
-    /// A commit's thread.
-    Thread(ThreadState),
+    /// What dev-null.sh sends, such as a log or a thread.
+    Feed(Feed),
 }
 
 impl Buffer {
@@ -795,8 +790,11 @@ impl App {
         let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
         match window.cursor.target(&layout).cloned() {
             Some(Target::Url(url)) => Ok(vec![Effect::OpenUrl(url)]),
-            Some(Target::Commit(id)) => Ok(self.open_thread(&id)),
-            Some(Target::Mention(handle)) => Err(format!("Cannot open @{handle}'s profile yet")),
+            Some(Target::Commit { id, .. }) => Ok(self.open_thread(&id)),
+            Some(Target::Account(account)) => {
+                Err(format!("Cannot open @{}'s profile yet", account.handle))
+            }
+            Some(Target::Buffer(name)) => self.execute(Command::Edit(Some(name))),
             None => Ok(Vec::new()),
         }
     }
@@ -993,7 +991,7 @@ impl App {
                 (index, Vec::new())
             }
             None => (
-                self.log_buffer(devnull_api::Log::Following),
+                self.feed_buffer_or_new(Source::Log(devnull_api::Log::Following)),
                 self.start_polling(),
             ),
         };

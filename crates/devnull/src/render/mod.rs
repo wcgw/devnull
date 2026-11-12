@@ -5,7 +5,7 @@ mod tests;
 
 use devnull_api::model::{AccountKind, Author, Commit, Segment};
 
-use crate::doc::{Content, Fold, Line, Span, Target};
+use crate::doc::{AccountRef, Content, Fold, Line, Span, Target};
 use crate::hl::Group;
 
 /// Lines of text shown before the rest of a long commit folds away.
@@ -38,7 +38,7 @@ enum Shown {
 }
 
 fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
-    let target = Some(Target::Commit(commit.id.clone()));
+    let target = Some(commit_target(commit));
     if commit.is_deleted() {
         let lines = vec![
             Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
@@ -136,6 +136,17 @@ fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
     Line::Text(spans)
 }
 
+/// What a commit's text refers to.
+fn commit_target(commit: &Commit) -> Target {
+    Target::Commit {
+        id: commit.id.clone(),
+        author: commit
+            .author
+            .as_ref()
+            .map(|author| AccountRef::new(author.handle.clone(), Some(author.kind))),
+    }
+}
+
 /// `Name @handle`, or `Name (org) @handle` for an organization.
 fn author_spans(author: &Author) -> Vec<Span> {
     let mut spans = vec![Span::new(author.name.clone(), Group::Author)];
@@ -143,12 +154,14 @@ fn author_spans(author: &Author) -> Vec<Span> {
         spans.push(Span::new(" (org)", Group::Time));
     }
     spans.push(Span::new(" ", Group::Normal));
-    spans.push(mention(&author.handle));
+    spans.push(mention(&author.handle, Some(author.kind)));
     spans
 }
 
-fn mention(handle: &str) -> Span {
-    Span::new(format!("@{handle}"), Group::Handle).with_target(Target::Mention(handle.to_owned()))
+/// `@handle`, referring to the account.
+fn mention(handle: &str, kind: Option<AccountKind>) -> Span {
+    Span::new(format!("@{handle}"), Group::Handle)
+        .with_target(Target::Account(AccountRef::new(handle, kind)))
 }
 
 /// The quoted commit, indented under a bar. Its text refers to it, unless it refers to something of its own.
@@ -174,7 +187,7 @@ fn quote(quoted: &Commit, now: u64) -> Vec<Line> {
     for line in &mut lines {
         if let Line::Text(spans) = line {
             for span in spans.iter_mut().filter(|span| span.target.is_none()) {
-                span.target = Some(Target::Commit(quoted.id.clone()));
+                span.target = Some(commit_target(quoted));
             }
         }
     }
@@ -211,10 +224,10 @@ fn reply_line(reply: &Commit) -> Line {
 /// The commit's text as lines: text segments break at newlines, inline code stays in its line, code blocks get
 /// lines of their own.
 fn body_lines(commit: &Commit) -> Vec<Line> {
-    let mentioned: Vec<String> = commit
+    let mentioned: Vec<(String, AccountKind)> = commit
         .mentions
         .iter()
-        .map(|m| m.handle.to_lowercase())
+        .map(|m| (m.handle.to_lowercase(), m.kind))
         .collect();
     let mut lines = Vec::new();
     let mut current: Vec<Span> = Vec::new();
@@ -260,7 +273,7 @@ fn body_lines(commit: &Commit) -> Vec<Line> {
 }
 
 /// Plain text with mentions (only of handles the commit mentions) and links made into targets.
-fn text_spans(text: &str, mentioned: &[String]) -> Vec<Span> {
+fn text_spans(text: &str, mentioned: &[(String, AccountKind)]) -> Vec<Span> {
     let mut spans = Vec::new();
     let mut plain = String::new();
     let mut rest = text;
@@ -275,9 +288,10 @@ fn text_spans(text: &str, mentioned: &[String]) -> Vec<Span> {
                 .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-'))
                 .map_or(rest.len(), |e| e + 1);
             let handle = &rest[1..end];
-            if !handle.is_empty() && mentioned.contains(&handle.to_lowercase()) {
+            let lowercase = handle.to_lowercase();
+            if let Some((_, kind)) = mentioned.iter().find(|(known, _)| *known == lowercase) {
                 flush(&mut plain, &mut spans);
-                spans.push(mention(handle));
+                spans.push(mention(handle, Some(*kind)));
                 rest = &rest[end..];
                 continue;
             }
