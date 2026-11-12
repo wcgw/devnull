@@ -117,6 +117,8 @@ enum WakePurpose {
     Poll,
     /// Typing paused in the user picker: time to search.
     Search,
+    /// Time for animations drawn with half blocks to show their next frames.
+    Frame,
 }
 
 /// Something that happened, for [`App::update`] to react to.
@@ -358,7 +360,7 @@ impl App {
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         let mut effects = self.react(msg);
         if !effects.contains(&Effect::Quit) {
-            effects.extend(self.wanted_pictures());
+            effects.extend(self.pictures_in_view());
         }
         effects
     }
@@ -386,6 +388,10 @@ impl App {
                 }
                 WakePurpose::Poll => self.poll(),
                 WakePurpose::Search => self.search_people(),
+                WakePurpose::Frame => {
+                    self.next_frames();
+                    Vec::new()
+                }
             },
             Msg::Paste(text) => match &mut self.mode {
                 AppMode::Cmdline(cmdline) => {
@@ -516,6 +522,7 @@ impl App {
             WakePurpose::KeyTimeout | WakePurpose::WhichKey => self.generation,
             WakePurpose::Poll => self.poll_generation,
             WakePurpose::Search => self.search_generation,
+            WakePurpose::Frame => self.pictures.frame_generation(),
         }
     }
 

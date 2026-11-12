@@ -1,15 +1,17 @@
 //! Pictures in buffers (D7): asked for once they come into view, then drawn in the space their lines take, by the
-//! terminal through placeholders (kitty) or as half blocks.
+//! terminal through placeholders (kitty) or as half blocks. The terminal runs animations it is sent; those drawn with
+//! half blocks move on frame by frame while in view, as wake-ups say.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use ratatui::buffer::Buffer as Cells;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
-use super::{App, Effect};
+use super::{App, Effect, Wake, WakePurpose};
 use crate::doc::PictureRow;
-use crate::graphics::{self, Graphics, HalfBlock};
+use crate::graphics::{self, Graphics, HalfBlock, HalfBlockFrame};
 use crate::hl::Group;
 
 /// The narrowest picture that says, while it is not drawn, that it is loading or unavailable.
@@ -21,8 +23,8 @@ const STATUS_COLS: u16 = 12;
 pub enum Prepared {
     /// The escapes that send it to the terminal, to write as they are; then placeholders show it.
     Kitty(String),
-    /// Its cells, by rows.
-    HalfBlocks(Vec<Vec<HalfBlock>>),
+    /// Its frames: one for a still picture. Those of an animation show for some time each.
+    HalfBlocks(Vec<HalfBlockFrame>),
 }
 
 /// A picture at one size.
@@ -40,10 +42,53 @@ enum State {
     Loading(Option<u32>),
     /// Sent to the terminal as image `id`.
     Kitty(u32),
-    /// Its cells, by rows.
-    HalfBlocks(Vec<Vec<HalfBlock>>),
+    /// Drawn with half blocks.
+    HalfBlocks(Playing),
     /// It could not be had.
     Failed,
+}
+
+/// A picture drawn with half blocks: its frames, and where it is in them.
+#[derive(Debug)]
+struct Playing {
+    frames: Vec<HalfBlockFrame>,
+    /// The frame shown.
+    shown: usize,
+    /// How much longer it shows, for an animation.
+    left: Duration,
+}
+
+impl Playing {
+    fn new(frames: Vec<HalfBlockFrame>) -> Self {
+        let left = frames.first().map_or(Duration::ZERO, |frame| frame.delay);
+        Self {
+            frames,
+            shown: 0,
+            left,
+        }
+    }
+
+    /// Whether it moves: it has frames to move on to, each showing for some time.
+    fn is_animated(&self) -> bool {
+        self.frames.len() > 1 && !self.left.is_zero()
+    }
+
+    /// The cells of the frame shown, by rows.
+    fn cells(&self) -> &[Vec<HalfBlock>] {
+        self.frames
+            .get(self.shown)
+            .map_or(&[], |frame| &frame.cells[..])
+    }
+
+    /// Moves on by `elapsed`, to the frame showing then.
+    fn advance(&mut self, mut elapsed: Duration) {
+        while self.is_animated() && elapsed >= self.left {
+            elapsed -= self.left;
+            self.shown = (self.shown + 1) % self.frames.len();
+            self.left = self.frames[self.shown].delay;
+        }
+        self.left = self.left.saturating_sub(elapsed);
+    }
 }
 
 /// The pictures asked for.
@@ -52,6 +97,10 @@ pub(super) struct Pictures {
     states: HashMap<Key, State>,
     /// The id the next picture sent to the terminal gets.
     next_id: u32,
+    /// How long after it was asked for the wake-up for the next frames comes, while one is to come.
+    frame_wake: Option<Duration>,
+    /// That wake-up's generation: those of another are stale, and none comes while there is no `frame_wake`.
+    frame_generation: u64,
 }
 
 impl Default for Pictures {
@@ -59,13 +108,21 @@ impl Default for Pictures {
         Self {
             states: HashMap::new(),
             next_id: 1,
+            frame_wake: None,
+            frame_generation: 0,
         }
     }
 }
 
 impl Pictures {
+    /// The generation of the wake-up for the next frames.
+    pub(super) fn frame_generation(&self) -> u64 {
+        self.frame_generation
+    }
+
     /// Frees what was sent to the terminal and forgets every picture: the escapes to write.
     pub(super) fn clear(&mut self) -> Vec<Effect> {
+        self.frame_wake = None;
         self.states
             .drain()
             .filter_map(|(_, state)| match state {
@@ -100,8 +157,8 @@ impl Pictures {
                     }
                 }
             }
-            Some(State::HalfBlocks(grid)) => {
-                let Some(row) = grid.get(usize::from(picture.row)) else {
+            Some(State::HalfBlocks(playing)) => {
+                let Some(row) = playing.cells().get(usize::from(picture.row)) else {
                     return;
                 };
                 for (col, half) in (0..width).zip(row) {
@@ -155,10 +212,68 @@ impl App {
         self.pictures.next_id = id.clamp(1, 0x00ff_ffff);
     }
 
-    /// The pictures in view in any window that were never asked for, asked for now.
-    pub(super) fn wanted_pictures(&mut self) -> Vec<Effect> {
+    /// What the pictures in view in any window need: those never asked for, asked for now; a wake-up for the next
+    /// frame of an animation drawn with half blocks, unless one is to come.
+    pub(super) fn pictures_in_view(&mut self) -> Vec<Effect> {
+        let in_view = self.in_view();
+        let mut effects = Vec::new();
+        for key in &in_view {
+            if self.pictures.states.contains_key(key) {
+                continue;
+            }
+            let kitty = (self.options.graphics == Graphics::Kitty).then(|| {
+                let id = self.pictures.next_id;
+                // Ids are 24 bits, the colour of the placeholder cells; past the last, they start over.
+                self.pictures.next_id = if id >= 0x00ff_ffff { 1 } else { id + 1 };
+                id
+            });
+            effects.push(Effect::Picture {
+                source: key.source.clone(),
+                cols: key.cols,
+                rows: key.rows,
+                kitty,
+            });
+            self.pictures
+                .states
+                .insert(key.clone(), State::Loading(kitty));
+        }
+        let next = in_view
+            .iter()
+            .filter_map(|key| match self.pictures.states.get(key) {
+                Some(State::HalfBlocks(playing)) if playing.is_animated() => Some(playing.left),
+                _ => None,
+            })
+            .min();
+        if let (Some(after), None) = (next, self.pictures.frame_wake) {
+            self.pictures.frame_wake = Some(after);
+            self.pictures.frame_generation += 1;
+            effects.push(Effect::Wake {
+                after,
+                token: Wake {
+                    purpose: WakePurpose::Frame,
+                    generation: self.pictures.frame_generation,
+                },
+            });
+        }
+        effects
+    }
+
+    /// The wake-up for the next frames came: the animations in view move on by the time it waited.
+    pub(super) fn next_frames(&mut self) {
+        let Some(elapsed) = self.pictures.frame_wake.take() else {
+            return;
+        };
+        for key in self.in_view() {
+            if let Some(State::HalfBlocks(playing)) = self.pictures.states.get_mut(&key) {
+                playing.advance(elapsed);
+            }
+        }
+    }
+
+    /// The pictures in view in any window, each once.
+    fn in_view(&self) -> Vec<Key> {
         let arrangement = self.windows.arrange(self.windows_area());
-        let mut wanted = Vec::new();
+        let mut wanted: Vec<Key> = Vec::new();
         for &(id, rect) in &arrangement.windows {
             let window = self.windows.get(id);
             let area = super::text_area(rect);
@@ -174,34 +289,18 @@ impl App {
                     .into_iter()
                     .map(|(_, picture)| picture);
                 for picture in layout.picture(row).into_iter().chain(inline) {
-                    wanted.push(Key {
+                    let key = Key {
                         source: picture.source.to_owned(),
                         cols: picture.cols,
                         rows: picture.rows,
-                    });
+                    };
+                    if !wanted.contains(&key) {
+                        wanted.push(key);
+                    }
                 }
             }
         }
-        let mut effects = Vec::new();
-        for key in wanted {
-            if self.pictures.states.contains_key(&key) {
-                continue;
-            }
-            let kitty = (self.options.graphics == Graphics::Kitty).then(|| {
-                let id = self.pictures.next_id;
-                // Ids are 24 bits, the colour of the placeholder cells; past the last, they start over.
-                self.pictures.next_id = if id >= 0x00ff_ffff { 1 } else { id + 1 };
-                id
-            });
-            effects.push(Effect::Picture {
-                source: key.source.clone(),
-                cols: key.cols,
-                rows: key.rows,
-                kitty,
-            });
-            self.pictures.states.insert(key, State::Loading(kitty));
-        }
-        effects
+        wanted
     }
 
     /// A picture prepared, or why it could not be; ignored when no longer asked for as such.
@@ -221,7 +320,9 @@ impl App {
             (Ok(Prepared::Kitty(sent)), Some(id)) => {
                 (State::Kitty(id), vec![Effect::Graphics(sent)])
             }
-            (Ok(Prepared::HalfBlocks(grid)), None) => (State::HalfBlocks(grid), Vec::new()),
+            (Ok(Prepared::HalfBlocks(frames)), None) => {
+                (State::HalfBlocks(Playing::new(frames)), Vec::new())
+            }
             // Prepared for other graphics than asked for, or not at all.
             _ => (State::Failed, Vec::new()),
         };

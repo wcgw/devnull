@@ -505,8 +505,12 @@ from M1 even though graphics land in M6.
   arrives). Pictures keep their shape in their box (centred, transparent around). GitHub avatars are asked at the
   size shown. Small pictures say nothing while loading (it would cover the name). Checked live: 27 pictures sent
   and freed (kitty), 4139 half blocks.
-- [ ] **M6.5** Animation: commit pictures are JPEG, PNG or WebP (the server refuses others), so only link cards could
-  move.
+- [x] **M6.5** Animation: animated GIF, WebP and PNG keep their frames (at most 200, and 8 megapixels in all; a
+  longer or larger one shows its first), each shown as long as it says, or 100 ms if it says 10 ms or less, as
+  browsers do. With kitty graphics every frame is sent once (`a=f`) and the terminal runs the animation, looping
+  (`a=a,s=3,v=1`), as D7 planned. With half blocks a frame wake-up moves the animations in view on; those out of
+  view wait. Rarely seen so far: of 103 pictures in the captures (avatars, link cards, commit pictures, all WebP),
+  none moved. The escapes were checked against those M0.1 verified; not yet seen moving in Ghostty from `dn`.
 
 ### Then
 

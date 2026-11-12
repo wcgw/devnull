@@ -6,11 +6,15 @@
 mod tests;
 
 use std::io::Cursor;
+use std::time::Duration;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use image::codecs::gif::GifDecoder;
+use image::codecs::png::PngDecoder;
+use image::codecs::webp::WebPDecoder;
 use image::imageops::FilterType;
-use image::{DynamicImage, ImageFormat, ImageReader, RgbaImage};
+use image::{AnimationDecoder, DynamicImage, Frames, ImageFormat, ImageReader, RgbaImage};
 
 /// The most cells a picture takes across: no more than the placeholder diacritics below can number.
 pub const MAX_COLS: u16 = 96;
@@ -122,10 +126,37 @@ fn rounded(value: f64) -> u16 {
     cells
 }
 
-/// A decoded picture.
+/// The most frames an animation keeps; a longer one stays on its first.
+const MAX_FRAMES: usize = 200;
+
+/// A frame said to show this briefly or less shows for [`BRIEF_FRAME`] instead, as browsers do.
+const BRIEFEST_FRAME: Duration = Duration::from_millis(10);
+
+/// How long a frame said to show too briefly shows.
+const BRIEF_FRAME: Duration = Duration::from_millis(100);
+
+/// A decoded picture: a still one, or an animation.
 #[derive(Debug, Clone)]
 pub struct Picture {
+    /// Never empty: a still picture is one frame.
+    frames: Vec<Frame>,
+}
+
+/// A frame of a picture, all of it.
+#[derive(Debug, Clone)]
+struct Frame {
     pixels: RgbaImage,
+    /// How long it shows before the next, in an animation.
+    delay: Duration,
+}
+
+/// A frame of a picture drawn with half blocks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HalfBlockFrame {
+    /// Its cells, by rows.
+    pub cells: Vec<Vec<HalfBlock>>,
+    /// How long it shows before the next, in an animation.
+    pub delay: Duration,
 }
 
 /// One cell of a picture drawn with half blocks: `▀` in the upper pixel's colour over the lower's. `None` is a
@@ -139,8 +170,9 @@ pub struct HalfBlock {
 }
 
 impl Picture {
-    /// The picture `bytes` hold: PNG, JPEG, WebP or GIF (its first frame), of at most 8 megapixels. `None` for
-    /// anything else.
+    /// The picture `bytes` hold: PNG, JPEG, WebP or GIF, of at most 8 megapixels. An animated GIF, WebP or PNG
+    /// keeps its frames, up to [`MAX_FRAMES`] and 8 megapixels in all; a longer or larger one only its first. `None`
+    /// for anything else.
     #[must_use]
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let reader = ImageReader::new(Cursor::new(bytes))
@@ -154,77 +186,163 @@ impl Picture {
             return None;
         }
         let (width, height) = reader.into_dimensions().ok()?;
-        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
+        let canvas = u64::from(width) * u64::from(height);
+        if canvas == 0 || canvas > MAX_PIXELS {
             return None;
+        }
+        if let Some(frames) = animation(bytes, format, canvas) {
+            return Some(Self { frames });
         }
         let picture = image::load_from_memory_with_format(bytes, format).ok()?;
         Some(Self {
-            pixels: picture.to_rgba8(),
+            frames: vec![Frame {
+                pixels: picture.to_rgba8(),
+                delay: Duration::ZERO,
+            }],
         })
     }
 
     /// Its size in pixels, as (width, height).
     #[must_use]
     pub fn size(&self) -> (u32, u32) {
-        self.pixels.dimensions()
+        self.frames[0].pixels.dimensions()
     }
 
     /// The kitty protocol escapes that send it as image `id`, shown in `cols` × `rows` cells by placeholders (a
-    /// virtual placement), quietly: a PNG of at most [`CELL_PIXELS`] per cell, base64 in chunks.
+    /// virtual placement), quietly: a PNG of at most [`CELL_PIXELS`] per cell, base64 in chunks. An animation sends
+    /// its other frames too, then has the terminal run it, looping (D7).
     #[must_use]
     pub fn kitty(&self, id: u32, cols: u16, rows: u16) -> String {
-        let boxed = self.boxed(
+        let (width, height) = (
             u32::from(cols) * CELL_PIXELS.0,
             u32::from(rows) * CELL_PIXELS.1,
-            Fill::Shape,
         );
-        let mut png = Cursor::new(Vec::new());
-        if DynamicImage::ImageRgba8(boxed)
-            .write_to(&mut png, ImageFormat::Png)
-            .is_err()
-        {
-            return String::new();
-        }
-        let encoded = STANDARD.encode(png.into_inner());
-        let chunks: Vec<&[u8]> = encoded.as_bytes().chunks(CHUNK).collect();
-        let mut sent = String::with_capacity(encoded.len() + chunks.len() * 64);
-        for (i, chunk) in chunks.iter().enumerate() {
-            let more = u8::from(i + 1 < chunks.len());
-            // Chunks are base64, so ASCII.
-            let chunk = std::str::from_utf8(chunk).unwrap_or_default();
+        let mut sent = String::new();
+        for (i, frame) in self.frames.iter().enumerate() {
+            let Some(png) = png(&boxed(&frame.pixels, width, height, Fill::Shape)) else {
+                return String::new();
+            };
             if i == 0 {
-                sent.push_str(&format!(
-                    "\x1b_Ga=T,f=100,t=d,i={id},c={cols},r={rows},U=1,q=2,m={more};{chunk}\x1b\\"
-                ));
+                let keys = format!("a=T,f=100,t=d,i={id},c={cols},r={rows},U=1,q=2");
+                transmit(&mut sent, &keys, "", &png);
             } else {
-                sent.push_str(&format!("\x1b_Gm={more},q=2;{chunk}\x1b\\"));
+                let keys = format!("a=f,f=100,i={id},z={},q=2", frame.delay.as_millis());
+                transmit(&mut sent, &keys, "a=f,", &png);
             }
+        }
+        if let [first, _, ..] = &self.frames[..] {
+            // The root frame's gap can only be set once it is there.
+            let gap = first.delay.as_millis();
+            sent.push_str(&format!("\x1b_Ga=a,i={id},r=1,z={gap},q=2\x1b\\"));
+            sent.push_str(&format!("\x1b_Ga=a,i={id},s=3,v=1,q=2\x1b\\"));
         }
         sent
     }
 
-    /// The picture as `cols` × `rows` cells of half blocks, by rows.
+    /// The picture as `cols` × `rows` cells of half blocks, frame by frame.
     #[must_use]
-    pub fn half_blocks(&self, cols: u16, rows: u16) -> Vec<Vec<HalfBlock>> {
-        if cols == 0 || rows == 0 {
-            return Vec::new();
-        }
-        let scaled = self.boxed(u32::from(cols), u32::from(rows) * 2, Fill::Exactly);
-        let colour = |x: u32, y: u32| {
-            let [r, g, b, a] = scaled.get_pixel(x, y).0;
-            (a >= 128).then_some((r, g, b))
-        };
-        (0..u32::from(rows))
-            .map(|row| {
-                (0..u32::from(cols))
-                    .map(|col| HalfBlock {
-                        upper: colour(col, row * 2),
-                        lower: colour(col, row * 2 + 1),
-                    })
-                    .collect()
+    pub fn half_blocks(&self, cols: u16, rows: u16) -> Vec<HalfBlockFrame> {
+        self.frames
+            .iter()
+            .map(|frame| HalfBlockFrame {
+                cells: half_blocks(&frame.pixels, cols, rows),
+                delay: frame.delay,
             })
             .collect()
     }
+}
+
+/// The frames of the GIF, or animated WebP or PNG, `bytes` hold as `format`, each of `canvas` pixels, how long each
+/// shows made sensible; `None` for anything else, or when they are more than [`MAX_FRAMES`] or [`MAX_PIXELS`] in all.
+fn animation(bytes: &[u8], format: ImageFormat, canvas: u64) -> Option<Vec<Frame>> {
+    // A still WebP or PNG is not decoded as frames, then again as a picture.
+    let frames: Frames<'_> = match format {
+        ImageFormat::Gif => GifDecoder::new(Cursor::new(bytes)).ok()?.into_frames(),
+        ImageFormat::WebP => {
+            let decoder = WebPDecoder::new(Cursor::new(bytes)).ok()?;
+            if !decoder.has_animation() {
+                return None;
+            }
+            decoder.into_frames()
+        }
+        ImageFormat::Png => {
+            let decoder = PngDecoder::new(Cursor::new(bytes)).ok()?;
+            if !decoder.is_apng().ok()? {
+                return None;
+            }
+            decoder.apng().ok()?.into_frames()
+        }
+        _ => return None,
+    };
+    let most = usize::try_from(MAX_PIXELS / canvas)
+        .unwrap_or(usize::MAX)
+        .min(MAX_FRAMES);
+    let mut kept = Vec::new();
+    for frame in frames {
+        if kept.len() == most {
+            return None;
+        }
+        let frame = frame.ok()?;
+        let delay = Duration::from(frame.delay());
+        kept.push(Frame {
+            delay: if delay <= BRIEFEST_FRAME {
+                BRIEF_FRAME
+            } else {
+                delay
+            },
+            pixels: frame.into_buffer(),
+        });
+    }
+    (!kept.is_empty()).then_some(kept)
+}
+
+/// `pixels` as a PNG, if it can be encoded.
+fn png(pixels: &RgbaImage) -> Option<Vec<u8>> {
+    let mut png = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(pixels.clone())
+        .write_to(&mut png, ImageFormat::Png)
+        .ok()?;
+    Some(png.into_inner())
+}
+
+/// Appends to `sent` the escapes that send `data` in base64 chunks: the first with `keys`, the others with
+/// `continued` (`a=f,` for a frame, which every chunk must say) before their own.
+fn transmit(sent: &mut String, keys: &str, continued: &str, data: &[u8]) {
+    let encoded = STANDARD.encode(data);
+    let chunks: Vec<&[u8]> = encoded.as_bytes().chunks(CHUNK).collect();
+    sent.reserve(encoded.len() + chunks.len() * 64);
+    for (i, chunk) in chunks.iter().enumerate() {
+        let more = u8::from(i + 1 < chunks.len());
+        // Chunks are base64, so ASCII.
+        let chunk = std::str::from_utf8(chunk).unwrap_or_default();
+        if i == 0 {
+            sent.push_str(&format!("\x1b_G{keys},m={more};{chunk}\x1b\\"));
+        } else {
+            sent.push_str(&format!("\x1b_G{continued}m={more},q=2;{chunk}\x1b\\"));
+        }
+    }
+}
+
+/// `pixels` as `cols` × `rows` cells of half blocks, by rows.
+fn half_blocks(pixels: &RgbaImage, cols: u16, rows: u16) -> Vec<Vec<HalfBlock>> {
+    if cols == 0 || rows == 0 {
+        return Vec::new();
+    }
+    let scaled = boxed(pixels, u32::from(cols), u32::from(rows) * 2, Fill::Exactly);
+    let colour = |x: u32, y: u32| {
+        let [r, g, b, a] = scaled.get_pixel(x, y).0;
+        (a >= 128).then_some((r, g, b))
+    };
+    (0..u32::from(rows))
+        .map(|row| {
+            (0..u32::from(cols))
+                .map(|col| HalfBlock {
+                    upper: colour(col, row * 2),
+                    lower: colour(col, row * 2 + 1),
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// How [`Picture::boxed`] fills its box.
@@ -237,39 +355,37 @@ enum Fill {
     Shape,
 }
 
-impl Picture {
-    /// The picture centred in a transparent canvas filling a `width` × `height` pixel box as `fill` says, keeping
-    /// its own shape.
-    fn boxed(&self, width: u32, height: u32, fill: Fill) -> RgbaImage {
-        let (w, h) = self.size();
-        let (box_w, box_h) = (f64::from(width.max(1)), f64::from(height.max(1)));
-        let mut scale = (box_w / f64::from(w)).min(box_h / f64::from(h));
-        if fill == Fill::Shape {
-            scale = scale.min(1.0);
-        }
-        let scaled_w = pixels(f64::from(w) * scale);
-        let scaled_h = pixels(f64::from(h) * scale);
-        let scaled = if (scaled_w, scaled_h) == (w, h) {
-            self.pixels.clone()
-        } else {
-            image::imageops::resize(&self.pixels, scaled_w, scaled_h, FilterType::CatmullRom)
-        };
-        let (canvas_w, canvas_h) = match fill {
-            Fill::Exactly => (width.max(1), height.max(1)),
-            Fill::Shape => (
-                scaled_w.max(pixels(f64::from(scaled_h) * box_w / box_h)),
-                scaled_h.max(pixels(f64::from(scaled_w) * box_h / box_w)),
-            ),
-        };
-        let mut canvas = RgbaImage::new(canvas_w, canvas_h);
-        image::imageops::overlay(
-            &mut canvas,
-            &scaled,
-            i64::from((canvas_w - scaled_w.min(canvas_w)) / 2),
-            i64::from((canvas_h - scaled_h.min(canvas_h)) / 2),
-        );
-        canvas
+/// `source` centred in a transparent canvas filling a `width` × `height` pixel box as `fill` says, keeping its
+/// own shape.
+fn boxed(source: &RgbaImage, width: u32, height: u32, fill: Fill) -> RgbaImage {
+    let (w, h) = source.dimensions();
+    let (box_w, box_h) = (f64::from(width.max(1)), f64::from(height.max(1)));
+    let mut scale = (box_w / f64::from(w)).min(box_h / f64::from(h));
+    if fill == Fill::Shape {
+        scale = scale.min(1.0);
     }
+    let scaled_w = pixels(f64::from(w) * scale);
+    let scaled_h = pixels(f64::from(h) * scale);
+    let scaled = if (scaled_w, scaled_h) == (w, h) {
+        source.clone()
+    } else {
+        image::imageops::resize(source, scaled_w, scaled_h, FilterType::CatmullRom)
+    };
+    let (canvas_w, canvas_h) = match fill {
+        Fill::Exactly => (width.max(1), height.max(1)),
+        Fill::Shape => (
+            scaled_w.max(pixels(f64::from(scaled_h) * box_w / box_h)),
+            scaled_h.max(pixels(f64::from(scaled_w) * box_h / box_w)),
+        ),
+    };
+    let mut canvas = RgbaImage::new(canvas_w, canvas_h);
+    image::imageops::overlay(
+        &mut canvas,
+        &scaled,
+        i64::from((canvas_w - scaled_w.min(canvas_w)) / 2),
+        i64::from((canvas_h - scaled_h.min(canvas_h)) / 2),
+    );
+    canvas
 }
 
 /// `value`, a positive size in pixels, rounded to at least one.

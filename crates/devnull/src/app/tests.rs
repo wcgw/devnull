@@ -3704,6 +3704,14 @@ fn pictures(effects: &[Effect]) -> Vec<(String, u16, u16, Option<u32>)> {
         .collect()
 }
 
+/// A still picture of `cells`, drawn with half blocks.
+fn still(cells: Vec<Vec<crate::graphics::HalfBlock>>) -> Prepared {
+    Prepared::HalfBlocks(vec![crate::graphics::HalfBlockFrame {
+        cells,
+        delay: Duration::ZERO,
+    }])
+}
+
 #[test]
 fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
     let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
@@ -3724,7 +3732,7 @@ fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
         upper: Some((255, 0, 0)),
         lower: Some((0, 0, 255)),
     };
-    let prepared = Prepared::HalfBlocks(vec![vec![red; 48]; 12]);
+    let prepared = still(vec![vec![red; 48]; 12]);
     let _ = app.update(Msg::Picture {
         source: "https://example.org/p.png".into(),
         cols: 48,
@@ -3740,6 +3748,209 @@ fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
         (style.fg, style.bg),
         (Some(Color::Rgb(255, 0, 0)), Some(Color::Rgb(0, 0, 255)))
     );
+}
+
+/// An animation drawn with half blocks for `with_picture`'s 48 × 12 cells: each frame one colour, shown for its
+/// delay in milliseconds.
+fn animated(frames: &[((u8, u8, u8), u64)]) -> Prepared {
+    Prepared::HalfBlocks(
+        frames
+            .iter()
+            .map(|&(colour, delay)| crate::graphics::HalfBlockFrame {
+                cells: vec![
+                    vec![
+                        crate::graphics::HalfBlock {
+                            upper: Some(colour),
+                            lower: Some(colour),
+                        };
+                        48
+                    ];
+                    12
+                ],
+                delay: Duration::from_millis(delay),
+            })
+            .collect(),
+    )
+}
+
+/// The wake-ups for the next frames of animations that `effects` ask for: how long after, and the token.
+fn frame_wakes(effects: &[Effect]) -> Vec<(Duration, Wake)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Wake { after, token } if token.purpose == WakePurpose::Frame => {
+                Some((*after, *token))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The colour the picture of `with_picture` shows, in its first cell.
+fn picture_colour(app: &App) -> Option<Color> {
+    style_at(app, 0, 3).fg
+}
+
+/// The picture of `with_picture`, arrived.
+fn picture_arrives(app: &mut App, prepared: Prepared) -> Vec<Effect> {
+    app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols: 48,
+        rows: 12,
+        result: Ok(prepared),
+    })
+}
+
+#[test]
+fn an_animation_drawn_with_half_blocks_moves_on_after_each_frame_s_delay() {
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let red = Some(Color::Rgb(255, 0, 0));
+    let blue = Some(Color::Rgb(0, 0, 255));
+
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
+    assert_eq!(picture_colour(&app), red);
+    let [(after, token)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    assert_eq!(after, Duration::from_millis(50));
+    assert_eq!(frame_wakes(&press(&mut app, "j")), [], "one at a time");
+
+    let effects = app.update(Msg::Wake(token));
+    assert_eq!(picture_colour(&app), blue);
+    let [(after, token)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    assert_eq!(after, Duration::from_millis(120));
+
+    let effects = app.update(Msg::Wake(token));
+    assert_eq!(picture_colour(&app), red, "and round again");
+    assert_eq!(frame_wakes(&effects).len(), 1);
+}
+
+#[test]
+fn animations_in_view_move_on_each_after_its_own_delay() {
+    let page = one_commit(
+        "look",
+        serde_json::json!({
+            "images": [{ "id": "i1", "url": "https://example.org/p.png", "width": 400, "height": 200 }],
+            "author": { "id": "u", "handle": "ada", "name": "Ada", "avatar_url": "https://example.org/ada.png" },
+        }),
+    );
+    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+    let asked = pictures(&effects);
+    let Some((avatar, cols, rows, _)) = asked
+        .iter()
+        .find(|(source, ..)| source.ends_with("ada.png"))
+    else {
+        panic!("an avatar: {asked:?}");
+    };
+    let frames = |colour, delay| crate::graphics::HalfBlockFrame {
+        cells: vec![
+            vec![
+                crate::graphics::HalfBlock {
+                    upper: Some(colour),
+                    lower: None
+                };
+                usize::from(*cols)
+            ];
+            usize::from(*rows)
+        ],
+        delay: Duration::from_millis(delay),
+    };
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
+    let effects_of_avatar = app.update(Msg::Picture {
+        source: avatar.clone(),
+        cols: *cols,
+        rows: *rows,
+        result: Ok(Prepared::HalfBlocks(vec![
+            frames((0, 255, 0), 120),
+            frames((0, 0, 0), 120),
+        ])),
+    });
+    assert_eq!(frame_wakes(&effects_of_avatar), [], "one is to come");
+    let [(after, token)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    assert_eq!(after, Duration::from_millis(50));
+
+    let effects = app.update(Msg::Wake(token));
+
+    let [(after, _)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    assert_eq!(
+        after,
+        Duration::from_millis(70),
+        "the avatar's frame, 50 ms in"
+    );
+}
+
+#[test]
+fn an_animation_out_of_view_waits_until_it_is_back() {
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
+    let [(_, token)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+
+    let _ = press(&mut app, ":e log/latest<CR>");
+    assert_eq!(frame_wakes(&app.update(Msg::Wake(token))), []);
+    let effects = press(&mut app, "<C-^>");
+
+    assert_eq!(
+        picture_colour(&app),
+        Some(Color::Rgb(255, 0, 0)),
+        "where it was left"
+    );
+    let [(after, _)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    assert_eq!(after, Duration::from_millis(50));
+}
+
+#[test]
+fn still_pictures_and_animations_the_terminal_runs_need_no_wake_ups() {
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50)]));
+    assert_eq!(frame_wakes(&effects), [], "one frame");
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let still = animated(&[((255, 0, 0), 0), ((0, 0, 255), 0)]);
+    assert_eq!(
+        frame_wakes(&picture_arrives(&mut app, still)),
+        [],
+        "no time to move"
+    );
+
+    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
+        panic!("one picture with an id: {effects:?}");
+    };
+    let effects = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols,
+        rows,
+        result: Ok(Prepared::Kitty(format!("frames of {id}"))),
+    });
+    assert_eq!(frame_wakes(&effects), []);
+}
+
+#[test]
+fn a_wake_up_for_pictures_since_forgotten_is_ignored() {
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
+    let [(_, stale)] = frame_wakes(&effects)[..] else {
+        panic!("one wake-up: {effects:?}");
+    };
+    let _ = press(
+        &mut app,
+        ":set graphics=kitty<CR>:set graphics=halfblocks<CR>",
+    );
+    let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
+    assert_eq!(frame_wakes(&effects).len(), 1);
+
+    let _ = app.update(Msg::Wake(stale));
+
+    assert_eq!(picture_colour(&app), Some(Color::Rgb(255, 0, 0)));
 }
 
 #[test]
@@ -3863,7 +4074,7 @@ fn an_avatar_beside_a_name_is_asked_for_and_drawn_in_its_cells() {
         upper: Some((1, 2, 3)),
         lower: Some((4, 5, 6)),
     };
-    let prepared = Prepared::HalfBlocks(vec![vec![face; 2]]);
+    let prepared = still(vec![vec![face; 2]]);
     let _ = app.update(Msg::Picture {
         source: "https://example.org/ada.png".into(),
         cols: 2,
@@ -3901,7 +4112,7 @@ fn an_avatar_further_along_a_row_is_drawn_where_it_is() {
         upper: Some((1, 2, 3)),
         lower: Some((4, 5, 6)),
     };
-    let prepared = Prepared::HalfBlocks(vec![vec![face; 2]]);
+    let prepared = still(vec![vec![face; 2]]);
     let _ = app.update(Msg::Picture {
         source: "https://example.org/lin.png".into(),
         cols: 2,
