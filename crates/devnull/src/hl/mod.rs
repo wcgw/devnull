@@ -84,6 +84,18 @@ groups! {
     WhichKeyGroup => "WhichKeyGroup",
     /// A user or organization handle.
     Handle => "DevnullHandle",
+    /// A commit author's name.
+    Author => "DevnullAuthor",
+    /// When a commit was made.
+    Time => "DevnullTime",
+    /// A commit's short hash.
+    Hash => "DevnullHash",
+    /// A commit's counts: stars, replies.
+    Stats => "DevnullStats",
+    /// A link in a commit.
+    Link => "DevnullLink",
+    /// Inline code in a commit.
+    Code => "DevnullCode",
 }
 
 impl Group {
@@ -237,6 +249,18 @@ const DEFAULT: &[(Group, Spec)] = &[
     (Group::WhichKeySeparator, fg(Color::DarkGray)),
     (Group::WhichKeyGroup, fg(Color::Magenta)),
     (Group::Handle, fg(Color::Cyan)),
+    (Group::Author, attrs(Attrs::BOLD)),
+    (Group::Time, fg(Color::DarkGray)),
+    (Group::Hash, fg(Color::DarkGray)),
+    (
+        Group::Link,
+        Spec {
+            fg: Some(Color::Blue),
+            attrs: Attrs::UNDERLINE,
+            ..EMPTY
+        },
+    ),
+    (Group::Code, fg(Color::Green)),
 ];
 
 const EMPTY: Spec = Spec {

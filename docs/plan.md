@@ -348,7 +348,10 @@ from M1 even though graphics land in M6.
   - `:set nofoo`/`invfoo` prefixes are resolved by the options, so unknown names report as typed.
   - Known gaps: no `:hi link`; `:colorscheme` drops `:hi` changes (as Vim's `:hi clear` does) with no `ColorScheme`
     autocommand to reapply them.
-- [ ] **M1.8** Fake log buffer wired end to end; `insta` screen snapshots. ⏸ try it in Ghostty.
+- [x] **M1.8** `dn` starts on a made-up `log/following` (`fake.rs`, invented people and posts): commit blocks with
+  header, body (mentions and links carry targets, inline code), counts, and long commits folded ("… N more
+  lines"); new groups `DevnullAuthor|Time|Hash|Stats|Link|Code`. Full-screen `insta` snapshot. 150 tests; both pty
+  smoke tests pass. ⏸ try it in Ghostty.
 
 ### M2 Auth & logs
 

@@ -215,6 +215,60 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
             attrs: Attrs::NONE,
         },
     ),
+    (
+        Group::Author,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::BOLD,
+        },
+    ),
+    (
+        Group::Time,
+        Spec {
+            fg: Some(Color::Rgb(0x56, 0x5f, 0x89)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Hash,
+        Spec {
+            fg: Some(Color::Rgb(0x73, 0x7a, 0xa2)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Stats,
+        Spec {
+            fg: Some(Color::Rgb(0xa9, 0xb1, 0xd6)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Link,
+        Spec {
+            fg: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::UNDERLINE,
+        },
+    ),
+    (
+        Group::Code,
+        Spec {
+            fg: Some(Color::Rgb(0x9e, 0xce, 0x6a)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
 ];
 
 /// tokyonight-storm.
@@ -421,6 +475,60 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Group::Handle,
         Spec {
             fg: Some(Color::Rgb(0x7d, 0xcf, 0xff)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Author,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::BOLD,
+        },
+    ),
+    (
+        Group::Time,
+        Spec {
+            fg: Some(Color::Rgb(0x56, 0x5f, 0x89)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Hash,
+        Spec {
+            fg: Some(Color::Rgb(0x73, 0x7a, 0xa2)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Stats,
+        Spec {
+            fg: Some(Color::Rgb(0xa9, 0xb1, 0xd6)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Link,
+        Spec {
+            fg: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::UNDERLINE,
+        },
+    ),
+    (
+        Group::Code,
+        Spec {
+            fg: Some(Color::Rgb(0x9e, 0xce, 0x6a)),
             bg: None,
             sp: None,
             attrs: Attrs::NONE,
@@ -637,6 +745,60 @@ pub(super) const MOON: &[(Group, Spec)] = &[
             attrs: Attrs::NONE,
         },
     ),
+    (
+        Group::Author,
+        Spec {
+            fg: Some(Color::Rgb(0xc8, 0xd3, 0xf5)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::BOLD,
+        },
+    ),
+    (
+        Group::Time,
+        Spec {
+            fg: Some(Color::Rgb(0x63, 0x6d, 0xa6)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Hash,
+        Spec {
+            fg: Some(Color::Rgb(0x73, 0x7a, 0xa2)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Stats,
+        Spec {
+            fg: Some(Color::Rgb(0x82, 0x8b, 0xb8)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Link,
+        Spec {
+            fg: Some(Color::Rgb(0x82, 0xaa, 0xff)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::UNDERLINE,
+        },
+    ),
+    (
+        Group::Code,
+        Spec {
+            fg: Some(Color::Rgb(0xc3, 0xe8, 0x8d)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
 ];
 
 /// tokyonight-day.
@@ -843,6 +1005,60 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Group::Handle,
         Spec {
             fg: Some(Color::Rgb(0x00, 0x71, 0x97)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Author,
+        Spec {
+            fg: Some(Color::Rgb(0x37, 0x60, 0xbf)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::BOLD,
+        },
+    ),
+    (
+        Group::Time,
+        Spec {
+            fg: Some(Color::Rgb(0x84, 0x8c, 0xb5)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Hash,
+        Spec {
+            fg: Some(Color::Rgb(0x68, 0x70, 0x9a)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Stats,
+        Spec {
+            fg: Some(Color::Rgb(0x61, 0x72, 0xb0)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Link,
+        Spec {
+            fg: Some(Color::Rgb(0x2e, 0x7d, 0xe9)),
+            bg: None,
+            sp: None,
+            attrs: Attrs::UNDERLINE,
+        },
+    ),
+    (
+        Group::Code,
+        Spec {
+            fg: Some(Color::Rgb(0x58, 0x75, 0x39)),
             bg: None,
             sp: None,
             attrs: Attrs::NONE,

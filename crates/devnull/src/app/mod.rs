@@ -14,8 +14,7 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Direction, Document, FoldOp, Layout, Line, Motion, Pattern, SearchOutcome, Selection,
-    SelectionKind,
+    Direction, Document, FoldOp, Layout, Motion, Pattern, SearchOutcome, Selection, SelectionKind,
 };
 use crate::ex::{self, Command};
 use crate::hl::Theme;
@@ -171,10 +170,10 @@ impl Default for App {
 }
 
 impl App {
-    /// A fresh session showing the intro.
+    /// A fresh session on the following log; made up until M2 (see [`crate::fake`]).
     #[must_use]
     pub fn new() -> Self {
-        Self::with_buffer("intro", intro())
+        Self::with_buffer("log/following", crate::fake::following())
     }
 
     /// A fresh session showing `doc` as a buffer called `name`.
@@ -773,20 +772,4 @@ fn remember(history: &mut Vec<String>, entry: &str) {
     }
     history.retain(|old| old != entry);
     history.push(entry.to_owned());
-}
-
-/// What `dn` shows before anything is loaded, like Vim's intro screen.
-fn intro() -> Document {
-    let mut doc = Document::new();
-    let lines = [
-        format!("dn v{}", env!("CARGO_PKG_VERSION")),
-        "a Neovim-flavoured client for dev-null.sh".to_owned(),
-        String::new(),
-        "type  :q<Enter>  to exit".to_owned(),
-    ];
-    doc.push_back(
-        "intro",
-        lines.into_iter().map(Line::text).collect::<Vec<_>>(),
-    );
-    doc
 }

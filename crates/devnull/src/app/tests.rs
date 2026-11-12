@@ -885,3 +885,35 @@ fn long_messages_wrap_in_the_message_view() {
         ]
     );
 }
+
+/// The app as `dn` starts it, in an 80 × 24 terminal.
+fn started() -> App {
+    let mut app = App::new();
+    let _ = app.update(Msg::Resize {
+        width: 80,
+        height: 24,
+    });
+    app
+}
+
+#[test]
+fn dn_starts_on_the_following_log() {
+    let app = started();
+
+    insta::assert_snapshot!(screen(&app).rows.join("\n"));
+}
+
+#[test]
+fn double_brackets_go_from_commit_to_commit_and_zo_shows_the_rest_of_a_long_one() {
+    let mut app = started();
+
+    let _ = press(&mut app, "2]]");
+    assert!(screen(&app).rows[screen(&app).cursor.1 as usize].starts_with("Ines Varga @ivarga"));
+    let _ = press(&mut app, "jjjzo");
+    let rows = screen(&app).rows;
+    assert!(
+        rows.iter()
+            .any(|row| row.starts_with("Moral: never let a test read the clock")),
+        "{rows:#?}"
+    );
+}
