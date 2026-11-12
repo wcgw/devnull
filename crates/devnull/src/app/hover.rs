@@ -26,6 +26,11 @@ pub(super) struct Hover {
 }
 
 impl Hover {
+    /// What the card says.
+    pub(super) fn doc(&self) -> &Document {
+        &self.doc
+    }
+
     fn new(lines: Vec<Line>) -> Self {
         let mut doc = Document::new();
         doc.push_back("card", lines);
@@ -205,5 +210,6 @@ impl App {
             })
             .collect();
         frame.render_widget(Paragraph::new(rows), inner);
+        self.draw_pictures(frame.buffer_mut(), &layout, 0, inner);
     }
 }

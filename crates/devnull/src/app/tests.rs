@@ -2497,6 +2497,51 @@ fn k_on_a_mention_shows_the_account_s_card_until_the_next_key() {
 }
 
 #[test]
+fn k_shows_the_account_s_avatar_in_its_card() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    let _ = app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    let _ = press(&mut app, "j$K");
+    let profile = serde_json::from_value(serde_json::json!({
+        "data": { "id": "u2", "handle": "lin", "name": "Lin", "avatar_url": "https://example.org/lin.png",
+                  "commits_count": 3, "followers_count": 2, "following_count": 1 }
+    }))
+    .expect("profile");
+
+    let effects = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(devnull_api::model::AccountPage::Person(Box::new(profile))),
+        },
+    );
+
+    let asked = pictures(&effects);
+    let Some((source, cols, rows, _)) =
+        asked.iter().find(|(source, ..)| source.contains("lin.png"))
+    else {
+        panic!("the avatar asked for: {asked:?}");
+    };
+    let red = crate::graphics::HalfBlock {
+        upper: Some((255, 0, 0)),
+        lower: Some((255, 0, 0)),
+    };
+    let cells = vec![vec![red; usize::from(*cols)]; usize::from(*rows)];
+    let _ = app.update(Msg::Picture {
+        source: source.clone(),
+        cols: *cols,
+        rows: *rows,
+        result: Ok(still(cells)),
+    });
+    let shown = screen(&app).rows;
+    assert!(
+        shown
+            .iter()
+            .any(|row| row.contains(&format!("│{}", "▀".repeat(usize::from(*cols))))),
+        "drawn in the card: {shown:#?}"
+    );
+}
+
+#[test]
 fn k_elsewhere_in_a_commit_shows_its_author_s_card() {
     let mut app = with_log(Log::Following, one_commit("hello", serde_json::json!({})));
 

@@ -179,21 +179,7 @@ impl App {
             })
             .collect();
         frame.render_widget(Paragraph::new(rows), area);
-        for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
-            if let Some(picture) = layout.picture(row) {
-                let line = Rect::new(area.x, y, area.width, 1);
-                self.pictures
-                    .draw(frame.buffer_mut(), line, picture, &self.theme);
-            }
-            for (col, picture) in layout.inline_pictures(row) {
-                let col = u16::try_from(col).unwrap_or(u16::MAX);
-                if col < area.width {
-                    let cells = Rect::new(area.x + col, y, area.width - col, 1);
-                    self.pictures
-                        .draw(frame.buffer_mut(), cells, picture, &self.theme);
-                }
-            }
-        }
+        self.draw_pictures(frame.buffer_mut(), &layout, top, area);
         let highlighted = match &typed {
             Some((pattern, ..)) => Some((pattern, Group::IncSearch)),
             None => self.searched().map(|pattern| (pattern, Group::CurSearch)),

@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
 use super::{App, Effect, Wake, WakePurpose};
-use crate::doc::PictureRow;
+use crate::doc::{Layout, PictureRow};
 use crate::graphics::{self, Graphics, HalfBlock, HalfBlockFrame};
 use crate::hl::Group;
 
@@ -270,7 +270,30 @@ impl App {
         }
     }
 
-    /// The pictures in view in any window, each once.
+    /// Draws the pictures of `layout`'s rows from `top` on, a row of `area` each.
+    pub(super) fn draw_pictures(
+        &self,
+        cells: &mut Cells,
+        layout: &Layout<'_>,
+        top: usize,
+        area: Rect,
+    ) {
+        for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+            if let Some(picture) = layout.picture(row) {
+                let line = Rect::new(area.x, y, area.width, 1);
+                self.pictures.draw(cells, line, picture, &self.theme);
+            }
+            for (col, picture) in layout.inline_pictures(row) {
+                let col = u16::try_from(col).unwrap_or(u16::MAX);
+                if col < area.width {
+                    let rest = Rect::new(area.x + col, y, area.width - col, 1);
+                    self.pictures.draw(cells, rest, picture, &self.theme);
+                }
+            }
+        }
+    }
+
+    /// The pictures in view, each once: in any window, and on the hover card.
     fn in_view(&self) -> Vec<Key> {
         let arrangement = self.windows.arrange(self.windows_area());
         let mut wanted: Vec<Key> = Vec::new();
@@ -283,22 +306,13 @@ impl App {
                 scrolloff: self.options.scrolloff,
             };
             let top = window.top(&layout, viewport);
-            for row in top..(top + usize::from(area.height)).min(layout.row_count()) {
-                let inline = layout
-                    .inline_pictures(row)
-                    .into_iter()
-                    .map(|(_, picture)| picture);
-                for picture in layout.picture(row).into_iter().chain(inline) {
-                    let key = Key {
-                        source: picture.source.to_owned(),
-                        cols: picture.cols,
-                        rows: picture.rows,
-                    };
-                    if !wanted.contains(&key) {
-                        wanted.push(key);
-                    }
-                }
-            }
+            let bottom = (top + usize::from(area.height)).min(layout.row_count());
+            add_pictures(&layout, top..bottom, &mut wanted);
+        }
+        if let Some(hover) = &self.hover {
+            // Which pictures it has does not depend on the width it is laid out to.
+            let layout = Layout::new(hover.doc(), u16::MAX);
+            add_pictures(&layout, 0..layout.row_count(), &mut wanted);
         }
         wanted
     }
@@ -333,5 +347,25 @@ impl App {
     /// Frees the pictures sent to the terminal, before quitting.
     pub(super) fn free_pictures(&mut self) -> Vec<Effect> {
         self.pictures.clear()
+    }
+}
+
+/// Adds to `wanted` the pictures on `rows` of `layout` it does not have yet.
+fn add_pictures(layout: &Layout<'_>, rows: std::ops::Range<usize>, wanted: &mut Vec<Key>) {
+    for row in rows {
+        let inline = layout
+            .inline_pictures(row)
+            .into_iter()
+            .map(|(_, picture)| picture);
+        for picture in layout.picture(row).into_iter().chain(inline) {
+            let key = Key {
+                source: picture.source.to_owned(),
+                cols: picture.cols,
+                rows: picture.rows,
+            };
+            if !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
     }
 }
