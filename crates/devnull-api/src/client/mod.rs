@@ -12,11 +12,24 @@ use serde::de::DeserializeOwned;
 use ssh_key::rand_core::{OsRng, RngCore};
 use url::Url;
 
-use crate::model::{Commit, Cursor, Me, Page};
+use crate::model::{Account, Commit, Cursor, Me, OrganizationPage, Page, Profile, Thread};
 use crate::signing::{Namespace, SignError, Signer, canonical_message};
 
 /// The server everyone uses.
 pub const ORIGIN: &str = "https://dev-null.sh";
+
+/// `value` when it can go into a URL path as one segment: a handle or an id, made of letters, digits, `-` and `_`.
+fn segment(value: &str) -> Result<&str, ApiError> {
+    let fits = !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if fits {
+        Ok(value)
+    } else {
+        Err(ApiError::Invalid(format!("not a handle or id: {value:?}")))
+    }
+}
 
 /// How long a request may take.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -51,6 +64,46 @@ impl Log {
             Self::Following => "following",
             Self::Latest => "latest",
             Self::Trending => "trending",
+        }
+    }
+}
+
+/// A profile's lists of people.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum People {
+    /// Who follows them.
+    Followers,
+    /// Whom they follow.
+    Following,
+}
+
+impl People {
+    /// Its name in paths and buffer names: `followers`, `following`.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Followers => "followers",
+            Self::Following => "following",
+        }
+    }
+}
+
+/// An organization page's lists of commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OrganizationTab {
+    /// Commits made as the organization.
+    Commits,
+    /// Commits mentioning it.
+    Mentions,
+}
+
+impl OrganizationTab {
+    /// Its name in paths and buffer names: `commits`, `mentions`.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Commits => "commits",
+            Self::Mentions => "mentions",
         }
     }
 }
@@ -179,7 +232,7 @@ impl Client {
     ///
     /// Cancel safe: it only reads.
     pub async fn me(&self) -> Result<Me, ApiError> {
-        let envelope: Envelope<Me> = self.get("/api/v1/me", None).await?;
+        let envelope: Envelope<Me> = self.get("/api/v1/me", &[], None).await?;
         Ok(Me {
             unread_notifications: envelope.unread_notifications_count,
             ..envelope.data
@@ -196,16 +249,8 @@ impl Client {
     ///
     /// Cancel safe: it only reads.
     pub async fn log(&self, log: Log, next: Option<&Cursor>) -> Result<Page<Commit>, ApiError> {
-        let path = format!("/api/v1/log/{}", log.name());
-        let list: List<Commit> = self.get(&path, next).await?;
-        Ok(Page {
-            items: list.data,
-            next: list
-                .meta
-                .next_cursor
-                .filter(|cursor| !cursor.is_empty())
-                .map(Cursor),
-        })
+        self.list(&format!("/api/v1/log/{}", log.name()), &[], next)
+            .await
     }
 
     /// `POST /api/v1/devices`: exchanges an approval `code` and its PKCE `verifier` for this device's approval.
@@ -248,15 +293,177 @@ impl Client {
         Ok(envelope.data)
     }
 
+    /// A commit and what it replies to.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::NotFound`] for a commit that does not exist, [`ApiError::Invalid`] without a
+    /// request for an id that is not one.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn thread(&self, id: &str) -> Result<Thread, ApiError> {
+        self.get(&format!("/api/v1/commits/{}", segment(id)?), &[], None)
+            .await
+    }
+
+    /// A page of a commit's replies, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::thread`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn replies(
+        &self,
+        id: &str,
+        after: Option<&Cursor>,
+    ) -> Result<Page<Commit>, ApiError> {
+        self.list(
+            &format!("/api/v1/commits/{}/replies", segment(id)?),
+            &[],
+            after,
+        )
+        .await
+    }
+
+    /// A person's profile.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::NotFound`] for no such person, [`ApiError::Invalid`] without a request for a
+    /// handle that is not one.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn profile(&self, handle: &str) -> Result<Profile, ApiError> {
+        self.get(&format!("/api/v1/users/{}", segment(handle)?), &[], None)
+            .await
+    }
+
+    /// A page of a person's commits, or of their replies.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::profile`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn commits_of(
+        &self,
+        handle: &str,
+        replies: bool,
+        after: Option<&Cursor>,
+    ) -> Result<Page<Commit>, ApiError> {
+        let query: &[(&str, &str)] = if replies { &[("replies", "1")] } else { &[] };
+        self.list(
+            &format!("/api/v1/users/{}/commits", segment(handle)?),
+            query,
+            after,
+        )
+        .await
+    }
+
+    /// A page of who follows a person, or whom they follow.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::profile`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn people(
+        &self,
+        handle: &str,
+        which: People,
+        after: Option<&Cursor>,
+    ) -> Result<Page<Account>, ApiError> {
+        self.list(
+            &format!("/api/v1/users/{}/{}", segment(handle)?, which.name()),
+            &[],
+            after,
+        )
+        .await
+    }
+
+    /// An organization's page.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::profile`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn organization(&self, handle: &str) -> Result<OrganizationPage, ApiError> {
+        self.get(
+            &format!("/api/v1/organizations/{}", segment(handle)?),
+            &[],
+            None,
+        )
+        .await
+    }
+
+    /// A page of an organization's commits, or of commits mentioning it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::profile`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn organization_commits(
+        &self,
+        handle: &str,
+        tab: OrganizationTab,
+        after: Option<&Cursor>,
+    ) -> Result<Page<Commit>, ApiError> {
+        self.list(
+            &format!("/api/v1/organizations/{}/{}", segment(handle)?, tab.name()),
+            &[],
+            after,
+        )
+        .await
+    }
+
+    /// A page of a list at `path`.
+    async fn list<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        query: &[(&str, &str)],
+        after: Option<&Cursor>,
+    ) -> Result<Page<T>, ApiError> {
+        let list: List<T> = self.get(path, query, after).await?;
+        Ok(Page {
+            items: list.data,
+            next: list
+                .meta
+                .next_cursor
+                .filter(|cursor| !cursor.is_empty())
+                .map(Cursor),
+        })
+    }
+
     async fn get<T: DeserializeOwned>(
         &self,
         path: &str,
+        query: &[(&str, &str)],
         cursor: Option<&Cursor>,
     ) -> Result<T, ApiError> {
         let mut url = self
             .origin
             .join(path)
             .map_err(|error| ApiError::Invalid(error.to_string()))?;
+        for (key, value) in query {
+            url.query_pairs_mut().append_pair(key, value);
+        }
         if let Some(Cursor(cursor)) = cursor {
             url.query_pairs_mut().append_pair("cursor", cursor);
         }

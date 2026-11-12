@@ -10,6 +10,7 @@ use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 use super::*;
 use crate::model::{AccountKind, Lane, Segment};
 use crate::signing::{Signer, canonical_message};
+use crate::{OrganizationTab, People};
 
 fn fixture(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -282,4 +283,169 @@ async fn accepting_terms_is_a_signed_put_that_must_be_confirmed() {
         client.accept_terms("v3").await,
         Err(ApiError::Invalid(_))
     ));
+}
+
+fn commit_json(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "short_hash": "0000000", "body": "", "body_segments": [], "created_at": "2026-11-12T15:13:40Z",
+        "author": { "id": "u1", "handle": "ada", "name": "Ada", "type": "user" }, "images": []
+    })
+}
+
+#[tokio::test]
+async fn a_thread_is_the_commit_and_its_ancestors_and_replies_come_in_pages() {
+    let (server, client, signed) = server_and_client().await;
+    let thread = serde_json::json!({ "data": commit_json("c-2"), "ancestors": [commit_json("c-1")], "reply_participants": [] });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/commits/c-2"))
+        .and(signed)
+        .respond_with(json(&thread.to_string()))
+        .mount(&server)
+        .await;
+    let replies =
+        serde_json::json!({ "data": [commit_json("c-3")], "meta": { "next_cursor": "r2" } });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/commits/c-2/replies"))
+        .respond_with(json(&replies.to_string()))
+        .mount(&server)
+        .await;
+
+    let thread = client.thread("c-2").await.expect("thread");
+    let replies = client.replies("c-2", None).await.expect("replies");
+
+    assert_eq!(
+        (thread.commit.id.as_str(), thread.ancestors.len()),
+        ("c-2", 1)
+    );
+    assert_eq!(replies.items[0].id, "c-3");
+    assert!(replies.next.is_some());
+}
+
+#[tokio::test]
+async fn a_profile_has_the_account_its_relationship_and_pinned_commit() {
+    let (server, client, signed) = server_and_client().await;
+    let profile = serde_json::json!({
+        "data": { "id": "u1", "handle": "ada", "name": "Ada", "bio": null, "company": "Acme", "location": "Lisbon",
+                  "website": "https://ada.dev", "commits_count": 77, "followers_count": 197, "following_count": 48 },
+        "is_following": true, "follows_you": false, "pinned_commit": commit_json("p1"),
+        "streaks": { "current": 3, "longest": 9 }
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/ada"))
+        .and(signed)
+        .respond_with(json(&profile.to_string()))
+        .mount(&server)
+        .await;
+    let commits =
+        serde_json::json!({ "data": [commit_json("c1")], "meta": { "next_cursor": null } });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/ada/commits"))
+        .and(query_param("replies", "1"))
+        .respond_with(json(&commits.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let profile = client.profile("ada").await.expect("profile");
+    let replies = client
+        .commits_of("ada", true, None)
+        .await
+        .expect("replies tab");
+
+    assert_eq!(
+        (
+            profile.account.followers_count,
+            profile.is_following,
+            profile.follows_you
+        ),
+        (Some(197), true, false)
+    );
+    assert_eq!(profile.account.bio, "");
+    assert_eq!(
+        profile.pinned.map(|commit| commit.id),
+        Some("p1".to_owned())
+    );
+    assert_eq!(replies.items.len(), 1);
+}
+
+#[tokio::test]
+async fn followers_and_following_are_pages_of_accounts() {
+    let (server, client, _) = server_and_client().await;
+    let people = serde_json::json!({ "data": [{ "id": "u2", "handle": "lin", "name": "Lin", "follows_you": true, "is_followed": false }], "meta": {} });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/users/ada/followers"))
+        .respond_with(json(&people.to_string()))
+        .mount(&server)
+        .await;
+
+    let followers = client
+        .people("ada", People::Followers, None)
+        .await
+        .expect("followers");
+
+    assert_eq!(
+        (
+            followers.items[0].handle.as_str(),
+            followers.items[0].follows_you
+        ),
+        ("lin", Some(true))
+    );
+}
+
+#[tokio::test]
+async fn an_organization_has_its_admins_and_tabs() {
+    let (server, client, _) = server_and_client().await;
+    let org = serde_json::json!({
+        "data": { "handle": "acme", "name": "Acme", "bio": "We make things", "followers_count": 12,
+                  "admins": [{ "id": "u1", "handle": "ada", "name": "Ada" }] },
+        "is_following": false, "can_claim": false, "settings_url": null
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/organizations/acme"))
+        .respond_with(json(&org.to_string()))
+        .mount(&server)
+        .await;
+    let page = serde_json::json!({ "data": [commit_json("m1")], "meta": {} });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/organizations/acme/mentions"))
+        .respond_with(json(&page.to_string()))
+        .mount(&server)
+        .await;
+
+    let org = client.organization("acme").await.expect("organization");
+    let mentions = client
+        .organization_commits("acme", OrganizationTab::Mentions, None)
+        .await
+        .expect("mentions");
+
+    assert_eq!(
+        (
+            org.organization.name.as_str(),
+            org.organization.admins.len(),
+            org.is_following
+        ),
+        ("Acme", 1, false)
+    );
+    assert_eq!(mentions.items[0].id, "m1");
+}
+
+#[tokio::test]
+async fn handles_and_ids_that_could_leave_their_path_are_refused_without_a_request() {
+    let (server, client, _) = server_and_client().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    for bad in ["../me", "ada/followers", "a?b", "", "a b"] {
+        assert!(
+            matches!(client.profile(bad).await, Err(ApiError::Invalid(_))),
+            "{bad:?}"
+        );
+        assert!(
+            matches!(client.thread(bad).await, Err(ApiError::Invalid(_))),
+            "{bad:?}"
+        );
+    }
 }

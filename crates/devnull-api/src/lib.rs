@@ -8,4 +8,4 @@ pub mod enroll;
 pub mod model;
 pub mod signing;
 
-pub use client::{ApiError, Client, InvalidOrigin, Log, ORIGIN};
+pub use client::{ApiError, Client, InvalidOrigin, Log, ORIGIN, OrganizationTab, People};

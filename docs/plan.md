@@ -394,7 +394,18 @@ from M1 even though graphics land in M6.
 
 ### M3 Navigation
 
-- Thread and profile buffers, followers/following, jumplist, `<CR>`/`gd`/`gx`/`K`, buffer and user pickers.
+- [x] **M3.1** `devnull-api`: thread (commit and ancestors), replies, user profile and its commits,
+  followers/following, organization page and its commits and mentions. Handles and ids are validated before they go
+  into a path. Checked live (thread, replies, profile, both lists, own commits, organization and tabs) and
+  against the M0.4 captures.
+- [ ] **M3.2** Thread buffers: `<CR>` opens the thread of the commit under the cursor, or of a hash or quote under it;
+  ancestors, the commit whole, then paged replies.
+- [ ] **M3.3** Profile buffers (`gd`, `<CR>` on a mention): header, pinned commit, commits; followers/following
+  lists; organization pages. Mention targets know user from organization; `Target::Buffer` links text to a buffer
+  (a profile's counts open its lists).
+- [ ] **M3.4** `gx` (link under the cursor), `gX` (commit on the web), `gy` (yank its link); `K` hover card.
+- [ ] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed.
+- [ ] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`).
 
 ### M4 Inbox
 

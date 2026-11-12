@@ -298,3 +298,133 @@ impl Cursor {
         Self(cursor.into())
     }
 }
+
+/// A commit with the commits it replies to, from `GET /api/v1/commits/{id}`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Thread {
+    /// The commit.
+    #[serde(rename = "data")]
+    pub commit: Commit,
+    /// What it replies to, the root first.
+    #[serde(default, deserialize_with = "or_default")]
+    pub ancestors: Vec<Commit>,
+}
+
+/// An account as profiles and people lists show it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Account {
+    /// Account id.
+    #[serde(default, deserialize_with = "or_default")]
+    pub id: String,
+    /// Handle, without the `@`.
+    pub handle: String,
+    /// Display name.
+    #[serde(default, deserialize_with = "or_default")]
+    pub name: String,
+    /// Bio.
+    #[serde(default, deserialize_with = "or_default")]
+    pub bio: String,
+    /// Company.
+    #[serde(default, deserialize_with = "or_default")]
+    pub company: String,
+    /// Location.
+    #[serde(default, deserialize_with = "or_default")]
+    pub location: String,
+    /// Website.
+    #[serde(default, deserialize_with = "or_default")]
+    pub website: String,
+    /// The profile on the web.
+    #[serde(default, deserialize_with = "or_default")]
+    pub html_url: String,
+    /// Commits, when the server counts them here.
+    #[serde(default)]
+    pub commits_count: Option<u64>,
+    /// Followers, when the server counts them here.
+    #[serde(default)]
+    pub followers_count: Option<u64>,
+    /// Accounts followed, when the server counts them here.
+    #[serde(default)]
+    pub following_count: Option<u64>,
+    /// Whether it follows the connected account, in people lists.
+    #[serde(default)]
+    pub follows_you: Option<bool>,
+    /// Whether the connected account follows it, in people lists.
+    #[serde(default)]
+    pub is_followed: Option<bool>,
+}
+
+/// A person's profile, from `GET /api/v1/users/{handle}`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Profile {
+    /// The account.
+    #[serde(rename = "data")]
+    pub account: Account,
+    /// Whether the connected account follows them.
+    #[serde(default, deserialize_with = "or_default")]
+    pub is_following: bool,
+    /// Whether they follow the connected account.
+    #[serde(default, deserialize_with = "or_default")]
+    pub follows_you: bool,
+    /// The commit they pinned.
+    #[serde(default, rename = "pinned_commit")]
+    pub pinned: Option<Commit>,
+    /// Their commit streaks, in days.
+    #[serde(default)]
+    pub streaks: Option<Streaks>,
+}
+
+/// Commit streaks, in days.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Streaks {
+    /// The streak going on now.
+    #[serde(default, deserialize_with = "or_default")]
+    pub current: u64,
+    /// The longest one.
+    #[serde(default, deserialize_with = "or_default")]
+    pub longest: u64,
+}
+
+/// An organization.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Organization {
+    /// Handle, without the `@`.
+    pub handle: String,
+    /// Display name.
+    #[serde(default, deserialize_with = "or_default")]
+    pub name: String,
+    /// Description.
+    #[serde(default, deserialize_with = "or_default")]
+    pub bio: String,
+    /// Location.
+    #[serde(default, deserialize_with = "or_default")]
+    pub location: String,
+    /// Website.
+    #[serde(default, deserialize_with = "or_default")]
+    pub website: String,
+    /// The organization on the web.
+    #[serde(default, deserialize_with = "or_default")]
+    pub html_url: String,
+    /// Followers.
+    #[serde(default)]
+    pub followers_count: Option<u64>,
+    /// Its admins.
+    #[serde(default, deserialize_with = "or_default")]
+    pub admins: Vec<Account>,
+}
+
+/// An organization's page, from `GET /api/v1/organizations/{handle}`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct OrganizationPage {
+    /// The organization.
+    #[serde(rename = "data")]
+    pub organization: Organization,
+    /// Whether the connected account follows it.
+    #[serde(default, deserialize_with = "or_default")]
+    pub is_following: bool,
+}
