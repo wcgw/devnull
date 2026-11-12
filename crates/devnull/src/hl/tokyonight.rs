@@ -72,6 +72,15 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::TabLine,
+        Spec {
+            fg: Some(Color::Rgb(0x3b, 0x42, 0x61)),
+            bg: Some(Color::Rgb(0x16, 0x16, 0x1e)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::WinSeparator,
         Spec {
             fg: Some(Color::Rgb(0x15, 0x16, 0x1e)),
@@ -332,6 +341,15 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Spec {
             fg: None,
             bg: Some(Color::Rgb(0x1d, 0x20, 0x2f)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::TabLine,
+        Spec {
+            fg: Some(Color::Rgb(0x3b, 0x42, 0x61)),
+            bg: Some(Color::Rgb(0x1f, 0x23, 0x35)),
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -602,6 +620,15 @@ pub(super) const MOON: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::TabLine,
+        Spec {
+            fg: Some(Color::Rgb(0x3b, 0x42, 0x61)),
+            bg: Some(Color::Rgb(0x1e, 0x20, 0x30)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::WinSeparator,
         Spec {
             fg: Some(Color::Rgb(0x1b, 0x1d, 0x2b)),
@@ -862,6 +889,15 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Spec {
             fg: None,
             bg: Some(Color::Rgb(0xb4, 0xb5, 0xb9)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::TabLine,
+        Spec {
+            fg: Some(Color::Rgb(0xa8, 0xae, 0xcb)),
+            bg: Some(Color::Rgb(0xd0, 0xd5, 0xe3)),
             sp: None,
             attrs: Attrs::NONE,
         },

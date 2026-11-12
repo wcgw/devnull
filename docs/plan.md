@@ -387,7 +387,10 @@ from M1 even though graphics land in M6.
   focused, 30 s unfocused, with "N new commits" when reading further down. Poll wake-ups have their own generation
   so typing does not stop them. `:e log/{following,latest,trending}` opens a log.
   - Differs from the original on purpose: a refresh keeps the cursor where it is instead of jumping to the top.
-- [ ] **M2.7** Buffers: `:e log/latest`, `<leader>1/2/3`, a bufferline listing them.
+- [x] **M2.7** Buffers: `<leader>1/2/3` and `:e log/…` open the logs; the bufferline lists the listed buffers
+  (`connect` is an unlisted status page); `:ls`/`:buffers`, `:b {N|name}` (unique partial names, E93/E94), `:bn`,
+  `:bp`; a window returns to where it left each buffer (cursor, scroll, jumps). `:ls` numbers listed buffers in
+  order rather than Vim's stable buffer numbers.
 
 ### M3 Navigation
 

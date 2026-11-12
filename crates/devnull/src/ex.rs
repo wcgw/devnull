@@ -71,6 +71,15 @@ pub enum Command {
     Agree,
     /// `:edit {name}` opens a buffer by name; `:edit` alone (or `:e!`) reloads the current one.
     Edit(Option<String>),
+    /// `:ls`, `:buffers`: lists the buffers.
+    Buffers,
+    /// `:buffer {N|name}`: shows a buffer, by number or (part of) its name.
+    Buffer(String),
+    /// `:bnext` (`forward`) and `:bprevious`.
+    NextBuffer {
+        /// Whether to go to the next buffer rather than the previous one.
+        forward: bool,
+    },
 }
 
 /// One `:set` argument.
@@ -141,6 +150,9 @@ enum Name {
     Connect,
     Agree,
     Edit,
+    Buffer,
+    Buffers,
+    NextBuffer(bool),
 }
 
 const NORMAL: &[Mode] = &[Mode::Normal];
@@ -150,6 +162,11 @@ const NORMAL_VISUAL: &[Mode] = &[Mode::Normal, Mode::Visual];
 /// Full name, shortest abbreviation length, and command, in the order Vim resolves ambiguous abbreviations.
 const COMMANDS: &[(&str, usize, Name)] = &[
     ("edit", 1, Name::Edit),
+    ("buffer", 1, Name::Buffer),
+    ("buffers", 7, Name::Buffers),
+    ("bnext", 2, Name::NextBuffer(true)),
+    ("bprevious", 2, Name::NextBuffer(false)),
+    ("ls", 2, Name::Buffers),
     ("quit", 1, Name::Quit),
     ("qall", 2, Name::QuitAll),
     ("quitall", 5, Name::QuitAll),
@@ -236,6 +253,9 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Connect => Command::Connect((!args.is_empty()).then(|| args.to_owned())),
         Name::Agree => Command::Agree,
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
+        Name::Buffer => Command::Buffer(required(args)?.to_owned()),
+        Name::Buffers => Command::Buffers,
+        Name::NextBuffer(forward) => Command::NextBuffer { forward },
         Name::Wincmd => {
             let mut chars = required(args)?.chars();
             match (chars.next(), chars.next()) {
@@ -501,6 +521,20 @@ mod tests {
         assert_eq!(
             parsed("e log/latest"),
             Command::Edit(Some("log/latest".into()))
+        );
+    }
+
+    #[test]
+    fn buffer_commands() {
+        assert_eq!(parsed("ls"), Command::Buffers);
+        assert_eq!(parsed("buffers"), Command::Buffers);
+        assert_eq!(parsed("b 2"), Command::Buffer("2".into()));
+        assert_eq!(parsed("buffer lat"), Command::Buffer("lat".into()));
+        assert_eq!(parsed("bn"), Command::NextBuffer { forward: true });
+        assert_eq!(parsed("bprevious"), Command::NextBuffer { forward: false });
+        assert_eq!(
+            parse("b").unwrap_err().to_string(),
+            "E471: Argument required"
         );
     }
 }

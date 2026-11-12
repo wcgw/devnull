@@ -56,6 +56,8 @@ groups! {
     StatusLineModeCommand => "StatusLineModeCommand",
     /// The current buffer in the bufferline.
     TabLineSel => "TabLineSel",
+    /// The other buffers in the bufferline.
+    TabLine => "TabLine",
     /// The rest of the bufferline.
     TabLineFill => "TabLineFill",
     /// The column between side-by-side windows.
@@ -238,6 +240,7 @@ const DEFAULT: &[(Group, Spec)] = &[
     (Group::StatusLineModeCommand, attrs(Attrs::BOLD)),
     (Group::TabLineSel, attrs(Attrs::BOLD)),
     (Group::TabLineFill, fg(Color::DarkGray)),
+    (Group::TabLine, fg(Color::DarkGray)),
     (Group::WinSeparator, fg(Color::DarkGray)),
     (Group::ErrorMsg, fg(Color::Red)),
     (Group::WarningMsg, fg(Color::Yellow)),

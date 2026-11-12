@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::window::{Viewport, Window};
-use super::{App, AppMode, MessageKind, text_area};
+use super::{App, AppMode, Message, MessageKind, text_area};
 use crate::doc::{Layout, SelectionKind};
 use crate::hl::Group;
 
@@ -22,12 +22,28 @@ impl App {
         frame
             .buffer_mut()
             .set_style(screen, self.theme.style(Group::Normal));
-        let current = self.windows.current();
-        let bufferline = Line::from(Span::styled(
-            format!(" {} ", self.buffers[current.buffer].name),
-            self.theme.style(Group::TabLineSel),
-        ))
-        .style(self.theme.style(Group::TabLineFill));
+        let current = self.windows.current().buffer;
+        // The listed buffers, or the current one alone while it is a status page such as `connect`.
+        let shown = if self.buffers[current].listed {
+            self.listed()
+        } else {
+            vec![current]
+        };
+        let tabs: Vec<Span<'_>> = shown
+            .into_iter()
+            .map(|index| {
+                let group = if index == current {
+                    Group::TabLineSel
+                } else {
+                    Group::TabLine
+                };
+                Span::styled(
+                    format!(" {} ", self.buffers[index].name),
+                    self.theme.style(group),
+                )
+            })
+            .collect();
+        let bufferline = Line::from(tabs).style(self.theme.style(Group::TabLineFill));
         frame.render_widget(Paragraph::new(bufferline), Rect::new(0, 0, width, 1));
 
         let arrangement = self.windows.arrange(self.windows_area());
@@ -64,8 +80,8 @@ impl App {
                 ));
                 return;
             }
-            AppMode::MorePrompt { from } => {
-                self.render_messages(frame, *from);
+            AppMode::MorePrompt { lines } => {
+                self.render_messages(frame, lines);
                 return;
             }
             AppMode::Normal | AppMode::Visual(_) => {}
@@ -275,10 +291,10 @@ impl App {
 
     /// Messages from index `from` of the history over the bottom of the screen, as many as fit, then Vim's prompt
     /// to continue.
-    fn render_messages(&self, frame: &mut Frame<'_>, from: usize) {
+    fn render_messages(&self, frame: &mut Frame<'_>, lines: &[Message]) {
         let (width, height) = self.size;
         // Long messages wrap onto further rows, as in Vim; the newest that fit are shown.
-        let mut rows: Vec<Line<'_>> = self.messages[from.min(self.messages.len())..]
+        let mut rows: Vec<Line<'_>> = lines
             .iter()
             .flat_map(|message| {
                 let group = if message.kind == MessageKind::Error {

@@ -164,6 +164,8 @@ struct Buffer {
     doc: Document,
     /// For a log's buffer, what it loaded so far.
     log: Option<LogState>,
+    /// Whether `:ls`, `:b` and the bufferline show it; status pages such as `connect` are not listed.
+    listed: bool,
 }
 
 /// What keys are for right now.
@@ -174,9 +176,9 @@ enum AppMode {
     Visual(Selection),
     /// Typing after `:`, `/` or `?`.
     Cmdline(Cmdline),
-    /// Messages shown over the screen (from index `from` of the history) until a key continues.
+    /// Lines shown over the screen (messages, or a listing such as `:ls`) until a key continues.
     MorePrompt {
-        from: usize,
+        lines: Vec<Message>,
     },
 }
 
@@ -212,7 +214,10 @@ impl App {
     #[must_use]
     pub fn new() -> Self {
         let doc = Connection::Checking.document().unwrap_or_default();
-        Self::with_buffer("connect", doc)
+        let mut app = Self::with_buffer("connect", doc);
+        // A status page, not one of the buffers `:ls` lists.
+        app.buffers[0].listed = false;
+        app
     }
 
     /// A fresh session showing `doc` as a buffer called `name`.
@@ -228,6 +233,7 @@ impl App {
                 name: name.into(),
                 doc,
                 log: None,
+                listed: true,
             }],
             windows: Windows::new(Window::new(0)),
             mode: AppMode::Normal,
@@ -398,11 +404,84 @@ impl App {
         }
     }
 
-    /// Shows buffer `index` in the current window, which starts at its top when it showed another buffer.
-    fn show_buffer(&mut self, index: usize) {
-        if self.windows.current().buffer != index {
-            *self.windows.current_mut() = Window::new(index);
+    /// Shows buffer `index` in the current window, where the window last left it, and loads it if it is a log
+    /// never loaded.
+    fn show_buffer(&mut self, index: usize) -> Vec<Effect> {
+        self.windows.current_mut().switch_to(index);
+        self.load_log(index)
+    }
+
+    /// The listed buffers' indices, in order: what `:ls`, `:b` and the bufferline count.
+    fn listed(&self) -> Vec<usize> {
+        (0..self.buffers.len())
+            .filter(|&index| self.buffers[index].listed)
+            .collect()
+    }
+
+    /// `:ls`: the listed buffers, the current one marked `%a`.
+    fn list_buffers(&mut self) {
+        let current = self.windows.current().buffer;
+        let lines = self
+            .listed()
+            .into_iter()
+            .enumerate()
+            .map(|(number, index)| Message {
+                text: format!(
+                    "{:>3} {:2} \"{}\"",
+                    number + 1,
+                    if index == current { "%a" } else { "" },
+                    self.buffers[index].name
+                ),
+                kind: MessageKind::Info,
+            })
+            .collect();
+        self.mode = AppMode::MorePrompt { lines };
+    }
+
+    /// `:b {arg}`: the listed buffer numbered `arg`, else named exactly `arg`, else the only one whose name contains
+    /// it.
+    fn buffer_named(&self, arg: &str) -> Result<usize, String> {
+        let listed = self.listed();
+        if let Ok(number) = arg.parse::<usize>() {
+            return listed
+                .get(number.wrapping_sub(1))
+                .copied()
+                .ok_or_else(|| format!("E86: Buffer {number} does not exist"));
         }
+        if let Some(&index) = listed
+            .iter()
+            .find(|&&index| self.buffers[index].name == arg)
+        {
+            return Ok(index);
+        }
+        let matching: Vec<usize> = listed
+            .into_iter()
+            .filter(|&index| self.buffers[index].name.contains(arg))
+            .collect();
+        match matching.as_slice() {
+            [index] => Ok(*index),
+            [] => Err(format!("E94: No matching buffer for {arg}")),
+            _ => Err(format!("E93: More than one match for {arg}")),
+        }
+    }
+
+    /// `:bn` and `:bp`: the next or previous listed buffer, wrapping around.
+    fn cycle_buffer(&mut self, forward: bool) -> Vec<Effect> {
+        let listed = self.listed();
+        if listed.is_empty() {
+            return Vec::new();
+        }
+        let current = self.windows.current().buffer;
+        let at = listed
+            .iter()
+            .position(|&index| index == current)
+            .unwrap_or(0);
+        let next = if forward {
+            (at + 1) % listed.len()
+        } else {
+            (at + listed.len() - 1) % listed.len()
+        };
+        self.show_buffer(listed[next])
     }
 
     /// The keymap table for the current mode.
@@ -638,7 +717,11 @@ impl App {
             }
             // Like Vim, nothing to show means no prompt either.
             Command::Messages if self.messages.is_empty() => {}
-            Command::Messages => self.mode = AppMode::MorePrompt { from: 0 },
+            Command::Messages => {
+                self.mode = AppMode::MorePrompt {
+                    lines: self.messages.clone(),
+                };
+            }
             Command::Highlight { group, attrs } => {
                 if let Some(shown) = self.theme.highlight(&group, &attrs)? {
                     self.info(shown);
@@ -654,6 +737,12 @@ impl App {
                     .refresh(self.windows.current().buffer)
                     .ok_or_else(|| "Nothing to reload here".to_owned());
             }
+            Command::Buffers => self.list_buffers(),
+            Command::Buffer(arg) => {
+                let index = self.buffer_named(&arg)?;
+                return Ok(self.show_buffer(index));
+            }
+            Command::NextBuffer { forward } => return Ok(self.cycle_buffer(forward)),
             Command::Edit(Some(name)) => match logs::named(&name) {
                 Some(log) => return Ok(self.open_log(log)),
                 None => return Err(format!("E94: No matching buffer for {name}")),
@@ -691,7 +780,9 @@ impl App {
                 self.info(format!("line {number}:"));
                 self.error(error);
             }
-            self.mode = AppMode::MorePrompt { from };
+            self.mode = AppMode::MorePrompt {
+                lines: self.messages[from..].to_vec(),
+            };
         }
         effects
     }
@@ -839,7 +930,7 @@ impl App {
     /// Shows the `connect` buffer while not connected, and the following log once connected, asking for it if it
     /// was never loaded.
     fn show_connection(&mut self) -> Vec<Effect> {
-        let (index, effects) = match self.connection.document() {
+        let (index, mut effects) = match self.connection.document() {
             Some(doc) => {
                 let index = match self
                     .buffers
@@ -852,6 +943,7 @@ impl App {
                             name: "connect".to_owned(),
                             doc: Document::new(),
                             log: None,
+                            listed: false,
                         });
                         self.buffers.len() - 1
                     }
@@ -859,14 +951,12 @@ impl App {
                 self.buffers[index].doc = doc;
                 (index, Vec::new())
             }
-            None => {
-                let index = self.log_buffer(devnull_api::Log::Following);
-                let mut effects = self.load_log(index);
-                effects.extend(self.start_polling());
-                (index, effects)
-            }
+            None => (
+                self.log_buffer(devnull_api::Log::Following),
+                self.start_polling(),
+            ),
         };
-        self.show_buffer(index);
+        effects.extend(self.show_buffer(index));
         effects
     }
 

@@ -1378,3 +1378,82 @@ fn new_commits_arriving_while_reading_further_down_are_announced() {
 
     assert_eq!(cmdline(&app), "2 new commits");
 }
+
+/// The bufferline: the first row.
+fn bufferline(app: &App) -> String {
+    screen(app).rows[0].clone()
+}
+
+#[test]
+fn leader_keys_open_the_other_logs_and_the_bufferline_lists_them() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    assert_eq!(bufferline(&app), " log/following");
+
+    let effects = press(&mut app, "<Space>2");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Latest,
+            after: None
+        }]
+    );
+    assert_eq!(bufferline(&app), " log/following  log/latest");
+    assert!(statusline(&app).contains("log/latest"));
+    assert_eq!(
+        fetches(&press(&mut app, "<Space>3")),
+        [Request::Log {
+            log: Log::Trending,
+            after: None
+        }]
+    );
+}
+
+#[test]
+fn going_back_to_a_buffer_returns_to_where_the_cursor_was() {
+    let mut app = with_log(Log::Following, page_of(1, 5, None));
+    let _ = press(&mut app, "2]]");
+    let there = screen(&app).cursor;
+
+    let _ = press(&mut app, "<Space>2<Space>1");
+
+    assert_eq!(screen(&app).cursor, there);
+    assert_eq!(fetches(&press(&mut app, "<Space>2")), []);
+}
+
+#[test]
+fn ls_lists_the_buffers_and_marks_the_current_one() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "<Space>2");
+
+    let _ = press(&mut app, ":ls<CR>");
+
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[rows.len() - 3..],
+        [
+            "  1    \"log/following\"",
+            "  2 %a \"log/latest\"",
+            "Press ENTER or type command to continue"
+        ]
+    );
+}
+
+#[test]
+fn b_bn_and_bp_switch_buffers_by_number_name_or_order() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "<Space>2<Space>3");
+
+    let _ = press(&mut app, ":b 1<CR>");
+    assert!(statusline(&app).contains("log/following"));
+    let _ = press(&mut app, ":bn<CR>");
+    assert!(statusline(&app).contains("log/latest"));
+    let _ = press(&mut app, ":bp<CR>:bp<CR>");
+    assert!(statusline(&app).contains("log/trending"));
+    let _ = press(&mut app, ":b lat<CR>");
+    assert!(statusline(&app).contains("log/latest"));
+    let _ = press(&mut app, ":b log<CR>");
+    assert_eq!(cmdline(&app), "E93: More than one match for log");
+    let _ = press(&mut app, ":b nope<CR>");
+    assert_eq!(cmdline(&app), "E94: No matching buffer for nope");
+}

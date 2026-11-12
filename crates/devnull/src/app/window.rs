@@ -1,5 +1,7 @@
 //! A window: a view of a buffer with its own cursor and scroll position.
 
+use std::collections::HashMap;
+
 use crate::doc::{Cursor, Layout, Motion};
 use crate::keymap::{Place, Scroll};
 
@@ -14,6 +16,17 @@ pub(super) struct Window {
     /// Where jumps started from, oldest first (Vim's jumplist).
     jumps: Vec<Cursor>,
     /// The entry `<C-o>` and `<C-i>` last went to; `jumps.len()` when they haven't since the last jump.
+    jump: usize,
+    /// Where this window left the buffers it showed before, to return there.
+    left: HashMap<usize, View>,
+}
+
+/// Where a window was in a buffer it left: cursor, scroll position and jumps.
+#[derive(Debug, Clone)]
+struct View {
+    cursor: Cursor,
+    top: Cursor,
+    jumps: Vec<Cursor>,
     jump: usize,
 }
 
@@ -46,7 +59,29 @@ impl Window {
             top: Cursor::new(),
             jumps: Vec::new(),
             jump: 0,
+            left: HashMap::new(),
         }
+    }
+
+    /// Shows buffer `buffer` instead, where this window last left it, or at its top.
+    pub(super) fn switch_to(&mut self, buffer: usize) {
+        if buffer == self.buffer {
+            return;
+        }
+        let view = self.left.remove(&buffer).unwrap_or(View {
+            cursor: Cursor::new(),
+            top: Cursor::new(),
+            jumps: Vec::new(),
+            jump: 0,
+        });
+        let leaving = View {
+            cursor: std::mem::replace(&mut self.cursor, view.cursor),
+            top: std::mem::replace(&mut self.top, view.top),
+            jumps: std::mem::replace(&mut self.jumps, view.jumps),
+            jump: std::mem::replace(&mut self.jump, view.jump),
+        };
+        self.left.insert(self.buffer, leaving);
+        self.buffer = buffer;
     }
 
     /// Remembers `from`, where a jump started, as the newest jumplist entry; an older entry on the same row goes.

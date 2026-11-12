@@ -111,6 +111,7 @@ impl App {
             name,
             doc: Document::new(),
             log: Some(LogState::new(log)),
+            listed: true,
         });
         self.buffers.len() - 1
     }
@@ -301,8 +302,7 @@ impl App {
     /// `:e {name}`: shows the log of that name in the current window, loading it if needed.
     pub(super) fn open_log(&mut self, log: Log) -> Vec<Effect> {
         let index = self.log_buffer(log);
-        self.show_buffer(index);
-        self.load_log(index)
+        self.show_buffer(index)
     }
 
     /// The first row shown by the current window when it shows buffer `index`.
