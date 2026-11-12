@@ -143,8 +143,72 @@ enum Target {
 #[derive(Debug, Clone)]
 struct Binding {
     target: Target,
-    /// What which-key shows for it.
+    /// What which-key and `:help` show for it.
     description: Cow<'static, str>,
+    /// Its keys as written, `<leader>` and all.
+    written: Cow<'static, str>,
+    /// What a built-in is about; `None` for a user map.
+    topic: Option<Topic>,
+    /// Where it was bound among its table's bindings, which [`Table::bind`] says.
+    order: usize,
+}
+
+/// What a built-in binding is about, as `:help` groups them, in its order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Topic {
+    /// Moving the cursor.
+    Moving,
+    /// Scrolling the window.
+    Scrolling,
+    /// Searching, and the command line.
+    Searching,
+    /// Selecting and yanking.
+    Yanking,
+    /// Folds.
+    Folding,
+    /// The jumplist.
+    Jumping,
+    /// Opening what is under the cursor, and coming back.
+    Opening,
+    /// Writing commits and acting on them.
+    Committing,
+    /// Buffers.
+    Buffers,
+    /// Windows.
+    Windows,
+}
+
+impl Topic {
+    /// Its heading.
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Moving => "Moving",
+            Self::Scrolling => "Scrolling",
+            Self::Searching => "Searching and commands",
+            Self::Yanking => "Selecting and yanking",
+            Self::Folding => "Folds",
+            Self::Jumping => "Jumps",
+            Self::Opening => "Opening",
+            Self::Committing => "Commits",
+            Self::Buffers => "Buffers",
+            Self::Windows => "Windows",
+        }
+    }
+}
+
+/// A binding as `:help` lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Listed {
+    /// Its keys as written, `<leader>` and all.
+    pub keys: String,
+    /// What it does; for a user map, the keys it stands for.
+    pub description: String,
+    /// What a built-in is about; `None` for a user map.
+    pub topic: Option<Topic>,
+    /// The ex command it runs, without the `:`, if it runs one.
+    pub command: Option<String>,
 }
 
 /// One mode's bindings, with every proper prefix of their key sequences, so a prefix is known to be worth waiting
@@ -153,20 +217,42 @@ struct Binding {
 struct Table {
     bindings: HashMap<Vec<Key>, Binding>,
     prefixes: HashSet<Vec<Key>>,
+    /// How many bindings were bound.
+    bound: usize,
 }
 
 impl Table {
-    fn bind(&mut self, keys: Vec<Key>, target: Target, description: impl Into<Cow<'static, str>>) {
+    /// Binds `keys` as `binding` says, numbering it after those bound before.
+    fn bind(&mut self, keys: Vec<Key>, binding: Binding) {
         for end in 1..keys.len() {
             self.prefixes.insert(keys[..end].to_vec());
         }
         self.bindings.insert(
             keys,
             Binding {
-                target,
-                description: description.into(),
+                order: self.bound,
+                ..binding
             },
         );
+        self.bound += 1;
+    }
+
+    /// Its bindings as `:help` lists them, in the order they were bound.
+    fn listed(&self) -> Vec<Listed> {
+        let mut bindings: Vec<&Binding> = self.bindings.values().collect();
+        bindings.sort_by_key(|binding| binding.order);
+        bindings
+            .into_iter()
+            .map(|binding| Listed {
+                keys: binding.written.clone().into_owned(),
+                description: binding.description.clone().into_owned(),
+                topic: binding.topic,
+                command: match &binding.target {
+                    Target::Action(Action::Ex(command)) => Some(command.clone()),
+                    _ => None,
+                },
+            })
+            .collect()
     }
 }
 
@@ -290,11 +376,32 @@ impl Keymap {
             rhs: parse_keys(rhs, self.leader),
             remap,
         };
-        let lhs = parse_keys(lhs, self.leader);
+        let binding = Binding {
+            target,
+            description: rhs.to_owned().into(),
+            written: lhs.to_owned().into(),
+            topic: None,
+            order: 0,
+        };
         self.user
             .entry(mode)
             .or_default()
-            .bind(lhs, target, rhs.to_owned());
+            .bind(parse_keys(lhs, self.leader), binding);
+    }
+
+    /// The bindings of `mode`, as `:help` lists them: the built-ins by topic, each in the order they were bound,
+    /// then the user maps in the order they were made.
+    #[must_use]
+    pub fn listing(&self, mode: Mode) -> Vec<Listed> {
+        let mut builtins = self
+            .builtin
+            .get(&mode)
+            .map(Table::listed)
+            .unwrap_or_default();
+        // Stable: within a topic, they stay as bound.
+        builtins.sort_by_key(|listed| listed.topic);
+        let users = self.user.get(&mode).map(Table::listed).unwrap_or_default();
+        builtins.into_iter().chain(users).collect()
     }
 
     /// Removes the user map of exactly `lhs` (Vim notation) from `mode`, returning whether there was one.
@@ -544,7 +651,17 @@ fn reversed(motion: Motion) -> Motion {
 
 /// The default bindings of each mode (D5), with `leader` for `<leader>`.
 fn builtins(leader: Key) -> HashMap<Mode, Table> {
-    let keys = |notation: &str| parse_keys(notation, leader);
+    let bind =
+        |table: &mut Table, notation: &'static str, target, description: &'static str, topic| {
+            let binding = Binding {
+                target,
+                description: description.into(),
+                written: notation.into(),
+                topic: Some(topic),
+                order: 0,
+            };
+            table.bind(parse_keys(notation, leader), binding);
+        };
     let mut normal = Table::default();
     let mut visual = Table::default();
     let motions: [(&str, Motion, &str); 22] = [
@@ -579,39 +696,43 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
     ];
     for table in [&mut normal, &mut visual] {
         for (notation, motion, description) in motions {
-            table.bind(
-                keys(notation),
-                Target::Action(Action::Motion(motion)),
+            let target = Target::Action(Action::Motion(motion));
+            bind(table, notation, target, description, Topic::Moving);
+        }
+        let end = Target::Action(Action::Motion(Motion::RowEnd));
+        bind(table, "<End>", end, "end of row", Topic::Moving);
+        for (notation, make, description) in char_motions {
+            bind(
+                table,
+                notation,
+                Target::Char(make),
                 description,
+                Topic::Moving,
             );
         }
-        table.bind(
-            keys("<End>"),
-            Target::Action(Action::Motion(Motion::RowEnd)),
-            "end of row",
-        );
-        for (notation, make, description) in char_motions {
-            table.bind(keys(notation), Target::Char(make), description);
-        }
-        table.bind(
-            keys(";"),
-            Target::RepeatFind { reverse: false },
-            "repeat find",
-        );
-        table.bind(
-            keys(","),
-            Target::RepeatFind { reverse: true },
+        let repeat = |reverse| Target::RepeatFind { reverse };
+        bind(table, ";", repeat(false), "repeat find", Topic::Moving);
+        bind(
+            table,
+            ",",
+            repeat(true),
             "repeat find backward",
+            Topic::Moving,
         );
-        table.bind(
-            keys("gg"),
-            Target::Row { last: false },
+        let row = |last| Target::Row { last };
+        bind(
+            table,
+            "gg",
+            row(false),
             "first row, or row [count]",
+            Topic::Moving,
         );
-        table.bind(
-            keys("G"),
-            Target::Row { last: true },
+        bind(
+            table,
+            "G",
+            row(true),
             "last row, or row [count]",
+            Topic::Moving,
         );
         let view: [(&str, Action, &str); 12] = [
             ("<C-e>", Action::Scroll(Scroll::LineDown), "scroll down"),
@@ -628,132 +749,210 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
             ("L", Action::ViewRow(Place::Bottom), "bottom of window"),
         ];
         for (notation, action, description) in view {
-            table.bind(keys(notation), Target::Action(action), description);
+            bind(
+                table,
+                notation,
+                Target::Action(action),
+                description,
+                Topic::Scrolling,
+            );
         }
-        table.bind(
-            keys("v"),
-            Target::Action(Action::Visual(SelectionKind::Charwise)),
+        let visual = |kind| Target::Action(Action::Visual(kind));
+        bind(
+            table,
+            "v",
+            visual(SelectionKind::Charwise),
             "visual",
+            Topic::Yanking,
         );
-        table.bind(
-            keys("V"),
-            Target::Action(Action::Visual(SelectionKind::Rowwise)),
+        bind(
+            table,
+            "V",
+            visual(SelectionKind::Rowwise),
             "visual rows",
+            Topic::Yanking,
         );
     }
-    visual.bind(keys("y"), Target::Action(Action::Yank), "yank");
-    visual.bind(
-        keys("<Esc>"),
-        Target::Action(Action::Escape),
-        "leave visual",
+    bind(
+        &mut visual,
+        "y",
+        Target::Action(Action::Yank),
+        "yank",
+        Topic::Yanking,
     );
+    let escape = Target::Action(Action::Escape);
+    bind(&mut visual, "<Esc>", escape, "leave visual", Topic::Yanking);
 
-    let actions: [(&str, Action, &str); 17] = [
-        (":", Action::Cmdline(CmdlineKind::Ex), "command line"),
+    let search = |direction| Action::Cmdline(CmdlineKind::Search(direction));
+    let actions: [(&str, Action, &str, Topic); 17] = [
+        (
+            ":",
+            Action::Cmdline(CmdlineKind::Ex),
+            "command line",
+            Topic::Searching,
+        ),
         (
             "/",
-            Action::Cmdline(CmdlineKind::Search(Direction::Forward)),
+            search(Direction::Forward),
             "search forward",
+            Topic::Searching,
         ),
         (
             "?",
-            Action::Cmdline(CmdlineKind::Search(Direction::Backward)),
+            search(Direction::Backward),
             "search backward",
+            Topic::Searching,
         ),
-        ("n", Action::SearchNext { reverse: false }, "next match"),
-        ("N", Action::SearchNext { reverse: true }, "previous match"),
+        (
+            "n",
+            Action::SearchNext { reverse: false },
+            "next match",
+            Topic::Searching,
+        ),
+        (
+            "N",
+            Action::SearchNext { reverse: true },
+            "previous match",
+            Topic::Searching,
+        ),
         (
             "*",
             Action::SearchWord(Direction::Forward),
             "search word forward",
+            Topic::Searching,
         ),
         (
             "#",
             Action::SearchWord(Direction::Backward),
             "search word backward",
+            Topic::Searching,
         ),
-        ("yy", Action::Yank, "yank row"),
-        ("zo", Action::Fold(FoldOp::Open), "open fold"),
+        ("yy", Action::Yank, "yank row", Topic::Yanking),
+        (
+            "zo",
+            Action::Fold(FoldOp::Open),
+            "open fold",
+            Topic::Folding,
+        ),
         (
             "zO",
             Action::Fold(FoldOp::OpenRecursively),
             "open folds recursively",
+            Topic::Folding,
         ),
-        ("zc", Action::Fold(FoldOp::Close), "close fold"),
+        (
+            "zc",
+            Action::Fold(FoldOp::Close),
+            "close fold",
+            Topic::Folding,
+        ),
         (
             "zC",
             Action::Fold(FoldOp::CloseRecursively),
             "close folds recursively",
+            Topic::Folding,
         ),
-        ("za", Action::Fold(FoldOp::Toggle), "toggle fold"),
+        (
+            "za",
+            Action::Fold(FoldOp::Toggle),
+            "toggle fold",
+            Topic::Folding,
+        ),
         (
             "zA",
             Action::Fold(FoldOp::ToggleRecursively),
             "toggle folds recursively",
+            Topic::Folding,
         ),
-        ("zR", Action::FoldAll { open: true }, "open all folds"),
-        ("zM", Action::FoldAll { open: false }, "close all folds"),
-        ("<C-o>", Action::JumpOlder, "jump back"),
+        (
+            "zR",
+            Action::FoldAll { open: true },
+            "open all folds",
+            Topic::Folding,
+        ),
+        (
+            "zM",
+            Action::FoldAll { open: false },
+            "close all folds",
+            Topic::Folding,
+        ),
+        ("<C-o>", Action::JumpOlder, "jump back", Topic::Jumping),
     ];
-    for (notation, action, description) in actions {
-        normal.bind(keys(notation), Target::Action(action), description);
+    for (notation, action, description, topic) in actions {
+        bind(
+            &mut normal,
+            notation,
+            Target::Action(action),
+            description,
+            topic,
+        );
     }
     // Without the kitty keyboard protocol, terminals send <C-i> as <Tab>; as in Vim, both go forward.
     for notation in ["<C-i>", "<Tab>"] {
-        normal.bind(
-            keys(notation),
-            Target::Action(Action::JumpNewer),
-            "jump forward",
-        );
+        let newer = Target::Action(Action::JumpNewer);
+        bind(&mut normal, notation, newer, "jump forward", Topic::Jumping);
     }
-    let commands: [(&str, &str, &str); 33] = [
-        ("q", "quit", "close window"),
-        ("<CR>", "open", "open under cursor"),
-        ("<C-]>", "open", "open under cursor"),
+    let commands: [(&str, &str, &str, Topic); 34] = [
+        ("<CR>", "open", "open under cursor", Topic::Opening),
+        ("<C-]>", "open", "open under cursor", Topic::Opening),
+        ("<C-t>", "pop", "back from what was opened", Topic::Opening),
+        ("gd", "profile", "author's profile", Topic::Opening),
+        ("K", "hover", "hover card", Topic::Opening),
+        ("gx", "browse link", "open link in browser", Topic::Opening),
+        ("gX", "browse", "open commit on the web", Topic::Opening),
+        ("<leader>/", "pick users", "find user", Topic::Opening),
+        ("gy", "yanklink", "yank commit link", Topic::Yanking),
+        ("c", "commit", "new commit", Topic::Committing),
+        ("r", "reply", "reply", Topic::Committing),
+        ("R", "quote", "quote", Topic::Committing),
+        ("s", "star", "toggle star", Topic::Committing),
+        ("dd", "delete", "delete own commit", Topic::Committing),
         // Terminals send <C-^> as <C-6> unless the kitty keyboard protocol tells them apart.
-        ("<C-^>", "buffer #", "alternate buffer"),
-        ("<C-6>", "buffer #", "alternate buffer"),
-        ("<C-t>", "pop", "back from what was opened"),
-        ("gd", "profile", "author's profile"),
-        ("K", "hover", "hover card"),
-        ("gx", "browse link", "open link in browser"),
-        ("gX", "browse", "open commit on the web"),
-        ("gy", "yanklink", "yank commit link"),
-        ("<C-l>", "edit!", "refresh"),
-        ("c", "commit", "new commit"),
-        ("r", "reply", "reply"),
-        ("R", "quote", "quote"),
-        ("s", "star", "toggle star"),
-        ("dd", "delete", "delete own commit"),
-        ("<C-w>h", "wincmd h", "window left"),
-        ("<C-w>j", "wincmd j", "window below"),
-        ("<C-w>k", "wincmd k", "window above"),
-        ("<C-w>l", "wincmd l", "window right"),
-        ("<C-w>w", "wincmd w", "next window"),
-        ("<C-w>s", "split", "split"),
-        ("<C-w>v", "vsplit", "split vertically"),
-        ("<C-w>c", "close", "close window"),
-        ("<C-w>o", "only", "only this window"),
-        ("<leader>1", "edit log/following", "following log"),
-        ("<leader>2", "edit log/latest", "latest log"),
-        ("<leader>3", "edit log/trending", "trending log"),
-        ("<leader>n", "edit notifications", "notifications"),
-        ("<leader>s", "edit starred", "starred"),
-        ("<leader>p", "edit profile", "your profile"),
-        ("<leader><leader>", "pick buffers", "find buffer"),
+        ("<C-^>", "buffer #", "alternate buffer", Topic::Buffers),
+        ("<C-6>", "buffer #", "alternate buffer", Topic::Buffers),
+        ("<C-l>", "edit!", "refresh", Topic::Buffers),
+        (
+            "<leader>1",
+            "edit log/following",
+            "following log",
+            Topic::Buffers,
+        ),
+        ("<leader>2", "edit log/latest", "latest log", Topic::Buffers),
+        (
+            "<leader>3",
+            "edit log/trending",
+            "trending log",
+            Topic::Buffers,
+        ),
+        (
+            "<leader>n",
+            "edit notifications",
+            "notifications",
+            Topic::Buffers,
+        ),
+        ("<leader>s", "edit starred", "starred", Topic::Buffers),
+        ("<leader>p", "edit profile", "your profile", Topic::Buffers),
+        (
+            "<leader><leader>",
+            "pick buffers",
+            "find buffer",
+            Topic::Buffers,
+        ),
+        ("q", "quit", "close window", Topic::Windows),
+        ("<C-w>h", "wincmd h", "window left", Topic::Windows),
+        ("<C-w>j", "wincmd j", "window below", Topic::Windows),
+        ("<C-w>k", "wincmd k", "window above", Topic::Windows),
+        ("<C-w>l", "wincmd l", "window right", Topic::Windows),
+        ("<C-w>w", "wincmd w", "next window", Topic::Windows),
+        ("<C-w>s", "split", "split", Topic::Windows),
+        ("<C-w>v", "vsplit", "split vertically", Topic::Windows),
+        ("<C-w>c", "close", "close window", Topic::Windows),
+        ("<C-w>o", "only", "only this window", Topic::Windows),
     ];
-    for (notation, command, description) in commands {
-        normal.bind(
-            keys(notation),
-            Target::Action(Action::Ex(command.to_owned())),
-            description,
-        );
+    for (notation, command, description, topic) in commands {
+        let target = Target::Action(Action::Ex(command.to_owned()));
+        bind(&mut normal, notation, target, description, topic);
     }
-    normal.bind(
-        keys("<leader>/"),
-        Target::Action(Action::Ex("pick users".to_owned())),
-        "find user",
-    );
     HashMap::from([(Mode::Normal, normal), (Mode::Visual, visual)])
 }
 
@@ -955,6 +1154,40 @@ mod tests {
             [run(Action::Motion(Motion::Down), Some(2))]
         );
         assert_eq!(keymap.timeout(Mode::Normal), []);
+    }
+
+    #[test]
+    fn help_lists_built_ins_by_topic_as_bound_then_user_maps() {
+        let mut keymap = Keymap::new();
+        keymap.map(Mode::Normal, "<leader>c", ":commit @acme<CR>", false);
+
+        let listing = keymap.listing(Mode::Normal);
+
+        let at = |keys: &str| {
+            listing
+                .iter()
+                .position(|listed| listed.keys == keys)
+                .expect(keys)
+        };
+        assert_eq!(listing[0].keys, "h", "the first motion first");
+        assert!(at("zo") < at("zO") && at("zO") < at("zc"), "as bound");
+        let topics: Vec<Topic> = listing.iter().filter_map(|listed| listed.topic).collect();
+        assert!(topics.windows(2).all(|pair| pair[0] <= pair[1]), "by topic");
+        let star = &listing[at("s")];
+        assert_eq!(
+            (
+                star.description.as_str(),
+                star.topic,
+                star.command.as_deref()
+            ),
+            ("toggle star", Some(Topic::Committing), Some("star"))
+        );
+        assert_eq!(listing[at("<leader>1")].topic, Some(Topic::Buffers));
+        let mine = listing.last().expect("a binding");
+        assert_eq!(
+            (mine.keys.as_str(), mine.description.as_str(), mine.topic),
+            ("<leader>c", ":commit @acme<CR>", None)
+        );
     }
 
     #[test]

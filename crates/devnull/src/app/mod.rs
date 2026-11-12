@@ -6,6 +6,7 @@ mod composer;
 mod connection;
 mod feed;
 mod fetch;
+mod help;
 mod hover;
 mod logs;
 mod options;
@@ -241,6 +242,8 @@ enum Kind {
     Status,
     /// A document given whole, as to [`App::with_buffer`].
     Fixed,
+    /// `:help`'s; unlisted too, as Vim's help buffers are.
+    Help,
     /// What dev-null.sh sends, such as a log or a thread.
     Feed(Feed),
 }
@@ -248,7 +251,7 @@ enum Kind {
 impl Buffer {
     /// Whether `:ls`, `:b` and the bufferline show it.
     fn is_listed(&self) -> bool {
-        !matches!(self.kind, Kind::Status)
+        !matches!(self.kind, Kind::Status | Kind::Help)
     }
 }
 
@@ -985,6 +988,7 @@ impl App {
                 }
             }
             // Like Vim, nothing to show means no prompt either.
+            Command::Help(keys) => self.help(keys.as_deref())?,
             Command::Messages if self.messages.is_empty() => {}
             Command::Messages => {
                 self.mode = AppMode::MorePrompt {

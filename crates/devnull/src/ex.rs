@@ -60,6 +60,8 @@ pub enum Command {
     Source(String),
     /// `:messages`.
     Messages,
+    /// `:help [keys]`: the key bindings, at those of `keys` when given.
+    Help(Option<String>),
     /// `:split` and `:vsplit` (`vertical`).
     Split {
         /// Side by side rather than stacked.
@@ -216,6 +218,7 @@ enum Name {
     Colorscheme,
     Source,
     Messages,
+    Help,
     Split(bool),
     Close,
     Only,
@@ -271,6 +274,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("vunmap", 2, Name::Unmap(VISUAL)),
     ("xunmap", 2, Name::Unmap(VISUAL)),
     ("set", 2, Name::Set),
+    ("help", 1, Name::Help),
     ("highlight", 2, Name::Highlight),
     ("colorscheme", 4, Name::Colorscheme),
     ("source", 2, Name::Source),
@@ -351,6 +355,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Colorscheme => Command::Colorscheme((!args.is_empty()).then(|| args.to_owned())),
         Name::Source => Command::Source(required(args)?.to_owned()),
         Name::Messages => Command::Messages,
+        Name::Help => Command::Help((!args.is_empty()).then(|| args.to_owned())),
         Name::Split(vertical) => Command::Split { vertical },
         Name::Close => Command::Close,
         Name::Only => Command::Only,
@@ -495,6 +500,13 @@ mod tests {
 
     fn parsed(line: &str) -> Command {
         parse(line).expect("valid command").expect("not blank")
+    }
+
+    #[test]
+    fn help_is_h_and_takes_keys() {
+        assert_eq!(parsed("h"), Command::Help(None));
+        assert_eq!(parsed("help zo"), Command::Help(Some("zo".into())));
+        assert_eq!(parsed("hi clear"), Command::HighlightClear);
     }
 
     #[test]

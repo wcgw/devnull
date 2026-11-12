@@ -107,6 +107,18 @@ impl Windows {
         self.current = id;
     }
 
+    /// Makes current the first window, in tree order, that shows buffer `buffer`; whether there is one.
+    pub(super) fn go_to_buffer(&mut self, buffer: usize) -> bool {
+        let showing = self
+            .order()
+            .into_iter()
+            .find(|id| self.open[id].buffer == buffer);
+        if let Some(id) = showing {
+            self.current = id;
+        }
+        showing.is_some()
+    }
+
     /// `:close`: closes the current window, giving the cursor to the one before it (or after it, for the first).
     /// Returns `false`, closing nothing, when it is the last window.
     pub(super) fn close(&mut self) -> bool {

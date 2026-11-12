@@ -94,6 +94,7 @@ Defaults:
 | `<leader>n` `s` `p` | Notifications, Starred, own profile | `:e notifications` … |
 | `<leader><leader>` | Buffer picker | `:pick buffers` |
 | `<leader>/` | User picker | `:pick users` |
+| — | Every key binding, user maps too, by topic, in a window above (as Vim's help); `:h zo` goes to one | `:help [keys]` |
 
 Older pages load automatically as the cursor nears the end of a buffer; there is no paging key.
 

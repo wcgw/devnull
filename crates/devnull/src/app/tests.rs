@@ -786,6 +786,73 @@ fn side_by_side_statuslines_meet_under_the_separator_as_in_vim() {
     );
 }
 
+/// The text of the row the cursor is on.
+fn cursor_line(app: &App) -> String {
+    let screen = screen(app);
+    screen.rows[usize::from(screen.cursor.1)].clone()
+}
+
+#[test]
+fn help_lists_the_key_bindings_in_a_window_above() {
+    let mut app = app_with(&["one"], 80, 30);
+
+    let _ = press(&mut app, ":help<CR>");
+
+    assert_eq!(statuslines(&app), 2);
+    let rows = screen(&app).rows;
+    assert!(rows[1].contains("Key bindings"), "{rows:#?}");
+    assert!(rows[2].contains("<leader> is <Space>"), "{rows:#?}");
+    assert!(
+        !rows[0].contains("help"),
+        "unlisted, as Vim's help: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("NORMAL") && row.contains("help")),
+        "the current window: {rows:#?}"
+    );
+    let _ = press(&mut app, ":help<CR>");
+    assert_eq!(statuslines(&app), 2, "the help window again");
+    let _ = press(&mut app, "q");
+    assert_eq!(statuslines(&app), 1);
+}
+
+#[test]
+fn help_with_keys_goes_to_their_binding_with_its_command() {
+    let mut app = app_with(&["one"], 80, 30);
+
+    let _ = press(&mut app, ":help zo<CR>");
+    let line = cursor_line(&app);
+    assert!(
+        line.contains("zo") && line.contains("open fold"),
+        "{line:?}"
+    );
+    let _ = press(&mut app, ":help s<CR>");
+    let line = cursor_line(&app);
+    assert!(
+        line.contains("toggle star") && line.contains(":star"),
+        "{line:?}"
+    );
+
+    let _ = press(&mut app, ":help nothing<CR>");
+    assert_eq!(cmdline(&app), "E149: Sorry, no help for nothing");
+}
+
+#[test]
+fn help_lists_the_user_maps_too() {
+    let mut app = app_with(&["one"], 80, 30);
+    let _ = press(&mut app, ":nmap <lt>leader>c :commit @acme<lt>CR><CR>");
+
+    let _ = press(&mut app, ":help <lt>leader>c<CR>");
+
+    let line = cursor_line(&app);
+    assert!(
+        line.contains("<leader>c") && line.contains(":commit @acme<CR>"),
+        "{line:?}"
+    );
+}
+
 #[test]
 fn ctrl_w_w_cycles_through_the_windows() {
     let mut app = app_with(&["one"], 30, 16);

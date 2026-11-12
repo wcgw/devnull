@@ -8,7 +8,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::window::{Viewport, Window};
 use super::windows::Separator;
-use super::{App, AppMode, Message, MessageKind, text_area};
+use super::{App, AppMode, Kind, Message, MessageKind, text_area};
 use crate::doc::{Layout, SelectionKind};
 use crate::hl::Group;
 
@@ -25,10 +25,10 @@ impl App {
             .set_style(screen, self.theme.style(Group::Normal));
         let current = self.windows.current().buffer;
         // The listed buffers, or the current one alone while it is a status page such as `connect`.
-        let shown = if self.buffers[current].is_listed() {
-            self.listed()
-        } else {
+        let shown = if matches!(self.buffers[current].kind, Kind::Status) {
             vec![current]
+        } else {
+            self.listed()
         };
         let tabs: Vec<Span<'_>> = shown
             .into_iter()

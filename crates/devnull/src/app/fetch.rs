@@ -318,7 +318,7 @@ impl App {
     pub(super) fn load(&mut self, index: usize) -> Vec<Effect> {
         let requests = match &mut self.buffers[index].kind {
             Kind::Feed(feed) => feed.start(),
-            Kind::Status | Kind::Fixed => Vec::new(),
+            Kind::Status | Kind::Fixed | Kind::Help => Vec::new(),
         };
         self.ask(index, requests)
     }
@@ -328,7 +328,7 @@ impl App {
     pub(super) fn refresh(&mut self, index: usize) -> Option<Vec<Effect>> {
         let requests = match &mut self.buffers[index].kind {
             Kind::Feed(feed) => feed.refresh(),
-            Kind::Status | Kind::Fixed => return None,
+            Kind::Status | Kind::Fixed | Kind::Help => return None,
         };
         Some(self.ask(index, requests))
     }
