@@ -7,7 +7,7 @@ use ratatui::style::Color;
 use super::*;
 use devnull_api::model::AccountKind;
 use devnull_api::model::{Commit, Cursor, Page};
-use devnull_api::{Log, OrganizationTab, People};
+use devnull_api::{Category, Log, OrganizationTab, People};
 
 use crate::doc::{Content, Document, Fold, Line};
 use crate::hl::Group;
@@ -2775,5 +2775,173 @@ fn the_statusline_counts_unread_notifications_and_polling_keeps_it_current() {
     assert!(
         !statusline(&app).contains("󰂚"),
         "nothing unread, nothing shown"
+    );
+}
+
+/// An inbox page: Lin starred c1 (unread), Kim replied with r1 (read before this visit), Bo followed (unread).
+fn inbox() -> devnull_api::model::Inbox {
+    let commit = |id: &str, text: &str| commit_with(id, text, None);
+    let notifications: Vec<devnull_api::model::Notification> = serde_json::from_value(serde_json::json!([
+        { "id": "n1", "group_id": "g1", "type": "starred", "created_at": "2026-11-12T15:13:40Z", "read_at": null,
+          "actor": { "id": "u2", "handle": "lin", "name": "Lin" }, "actors_count": 1, "commit": commit("c1", "my words") },
+        { "id": "n2", "group_id": "g2", "type": "replied", "created_at": "2026-11-12T15:13:40Z",
+          "read_at": "2026-11-11T10:00:00Z", "actor": { "id": "u3", "handle": "kim", "name": "Kim" }, "actors_count": 1,
+          "commit": commit("r1", "nice one") },
+        { "id": "n3", "group_id": "g3", "type": "followed", "created_at": "2026-11-12T15:13:40Z",
+          "read_at": "2026-11-12T15:13:40Z", "actor": { "id": "u4", "handle": "bo", "name": "Bo" }, "actors_count": 1 }
+    ]))
+    .expect("notifications");
+    devnull_api::model::Inbox::new(Page::new(notifications, None), "2026-11-12T15:13:40Z")
+}
+
+fn with_notifications() -> App {
+    let (mut app, _) = starting();
+    let mut ada = me("ada", true);
+    ada.unread_notifications = 2;
+    let _ = net(&mut app, NetEvent::Connected(ada));
+    let _ = press(&mut app, "<Space>n");
+    let _ = arrive(
+        &mut app,
+        Fetched::Notifications {
+            only: Vec::new(),
+            after: None,
+            result: Ok(inbox()),
+        },
+    );
+    app
+}
+
+#[test]
+fn leader_n_opens_the_notifications_marking_those_new_since_the_last_visit() {
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+
+    let effects = press(&mut app, "<Space>n");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Notifications {
+            only: Vec::new(),
+            after: None
+        }]
+    );
+    assert!(statusline(&app).contains("notifications"));
+
+    let app = with_notifications();
+    assert!(shows(&app, "● ★ Lin @lin starred your commit"));
+    assert!(
+        shows(&app, "  ↩ Kim @kim replied to your commit"),
+        "read before: no mark"
+    );
+    assert!(
+        shows(&app, "● + Bo @bo followed you"),
+        "read by this visit: new"
+    );
+}
+
+#[test]
+fn reading_the_notifications_clears_the_unread_count() {
+    let app = with_notifications();
+
+    assert!(!statusline(&app).contains("󰂚"), "{}", statusline(&app));
+}
+
+#[test]
+fn enter_on_a_notification_opens_its_commit_s_thread_or_who_followed() {
+    let mut app = with_notifications();
+
+    let effects = press(&mut app, "/nice<CR><CR>");
+    assert_eq!(fetches(&effects)[0], Request::Thread { id: "r1".into() });
+    let _ = press(&mut app, "<C-o>");
+    let effects = press(&mut app, "/followed<CR><CR>");
+    assert_eq!(
+        fetches(&effects)[0],
+        Request::Profile {
+            handle: "bo".into(),
+            kind: Some(AccountKind::User)
+        }
+    );
+}
+
+#[test]
+fn notifications_are_filtered_by_their_buffer_s_name() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, ":e notifications/mentions,replies<CR>");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Notifications {
+            only: vec![Category::Replies, Category::Mentions],
+            after: None
+        }]
+    );
+    assert!(statusline(&app).contains("notifications/replies,mentions"));
+    let _ = press(&mut app, ":e notifications/gossip<CR>");
+    assert_eq!(
+        cmdline(&app),
+        "E94: No matching buffer for notifications/gossip"
+    );
+}
+
+#[test]
+fn notifications_are_not_polled_as_reading_them_marks_them_read() {
+    let (mut app, _) = starting();
+    let effects = net(&mut app, NetEvent::Connected(me("ada", true)));
+    let (_, token) = poll(&effects).expect("polling");
+    let _ = press(&mut app, "<Space>n");
+    let _ = arrive(
+        &mut app,
+        Fetched::Notifications {
+            only: Vec::new(),
+            after: None,
+            result: Ok(inbox()),
+        },
+    );
+
+    let effects = app.update(Msg::Wake(token));
+
+    assert!(
+        !fetches(&effects)
+            .iter()
+            .any(|request| matches!(request, Request::Notifications { .. })),
+        "{effects:?}"
+    );
+}
+
+#[test]
+fn a_refreshed_inbox_shows_groups_that_moved_up_and_what_came_after_them() {
+    let mut app = with_notifications();
+    let _ = press(&mut app, ":e!<CR>");
+    let mut refreshed = inbox();
+    // Kim's reply group grew, so it is first now; Zed's follow came after it.
+    let zed: devnull_api::model::Notification = serde_json::from_value(serde_json::json!({
+        "id": "n4", "group_id": "g4", "type": "followed", "created_at": "2026-11-12T15:13:40Z",
+        "actor": { "id": "u5", "handle": "zed", "name": "Zed" }, "actors_count": 1
+    }))
+    .expect("notification");
+    let items = &mut refreshed.page.items;
+    items.swap(0, 1);
+    items.insert(1, zed);
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Notifications {
+            only: Vec::new(),
+            after: None,
+            result: Ok(refreshed),
+        },
+    );
+
+    let _ = press(&mut app, "gg");
+    assert!(
+        shows(&app, "Zed @zed followed you"),
+        "{:#?}",
+        screen(&app).rows
+    );
+    let rows = screen(&app).rows;
+    let at = |text: &str| rows.iter().position(|row| row.contains(text)).expect(text);
+    assert!(
+        at("Kim @kim") < at("Zed @zed") && at("Zed @zed") < at("Lin @lin"),
+        "in the server's order"
     );
 }

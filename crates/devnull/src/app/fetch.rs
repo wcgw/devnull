@@ -1,15 +1,15 @@
 //! What feeds ask dev-null.sh for, and how the answers reach their buffers.
 
 use devnull_api::model::{
-    Account, AccountKind, AccountPage, Commit, Cursor, Page, ProfileSearch, Thread,
+    Account, AccountKind, AccountPage, Commit, Cursor, Inbox, Page, ProfileSearch, Thread,
 };
-use devnull_api::{Log, OrganizationTab, People};
+use devnull_api::{Category, Log, OrganizationTab, People};
 
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
 use super::{App, Buffer, Effect, Kind, NetEvent, threads};
 use crate::doc::{Content, Cursor as DocCursor, Document, Layout};
 use crate::hl::Group;
-use crate::render::{account_block, commit_block};
+use crate::render::{account_block, commit_block, notification_block, parse_time};
 
 /// Something to ask dev-null.sh for, on the app's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +78,13 @@ pub enum Request {
     },
     /// How many notifications are unread, without marking any read.
     UnreadCount,
+    /// A page of the inbox, which marks every notification read.
+    Notifications {
+        /// The categories; all when empty.
+        only: Vec<Category>,
+        /// Where the page starts; `None` for the first.
+        after: Option<Cursor>,
+    },
 }
 
 /// The answer to a [`Request`].
@@ -166,6 +173,15 @@ pub enum Fetched {
         /// The count, or why there is none.
         result: Result<u64, FetchError>,
     },
+    /// The answer to [`Request::Notifications`].
+    Notifications {
+        /// The categories asked for.
+        only: Vec<Category>,
+        /// Where the page was asked to start.
+        after: Option<Cursor>,
+        /// The page, or why there is none.
+        result: Result<Inbox, FetchError>,
+    },
 }
 
 /// Why a request failed, by what the app does about it.
@@ -176,6 +192,29 @@ pub enum FetchError {
     NotApproved,
     /// Anything else, with the message to show.
     Failed(String),
+}
+
+/// A page of the inbox as blocks, each marked new when it was unread, or read by the visit that read this page.
+fn inbox_page(inbox: &Inbox, now: u64) -> Page<(String, Content)> {
+    let boundary = parse_time(&inbox.read_at);
+    let items = inbox
+        .page
+        .items
+        .iter()
+        .map(|notification| {
+            let read = notification.read_at.as_deref().map(parse_time);
+            let new = match (read, boundary) {
+                (None, _) => true,
+                (Some(Some(read)), Some(boundary)) => read >= boundary,
+                (Some(_), _) => false,
+            };
+            (
+                notification.id.clone(),
+                notification_block(notification, new, now),
+            )
+        })
+        .collect();
+    Page::new(items, inbox.page.next.clone())
 }
 
 impl App {
@@ -318,6 +357,22 @@ impl App {
                 self.page_arrived(&source, after.is_some(), result.map(accounts))
             }
             Fetched::SearchProfiles { term, result } => self.found(&term, result),
+            Fetched::Notifications {
+                only,
+                after,
+                result,
+            } => {
+                if result.is_ok() {
+                    // Reading the inbox marked it all read.
+                    self.unread = 0;
+                }
+                let source = Source::Notifications(only);
+                self.page_arrived(
+                    &source,
+                    after.is_some(),
+                    result.map(|inbox| inbox_page(&inbox, now)),
+                )
+            }
             Fetched::Starred { after, result } => {
                 self.page_arrived(&Source::Starred, after.is_some(), result.map(commits))
             }

@@ -1,12 +1,15 @@
-//! What dev-null.sh sends, as document blocks: commits, and the people and organizations who write them.
+//! What dev-null.sh sends, as document blocks: commits, the people and organizations who write them, and
+//! notifications.
 
 mod accounts;
+mod notifications;
 #[cfg(test)]
 mod tests;
 
 use devnull_api::model::{AccountKind, Author, Commit, Segment};
 
 pub use accounts::{account_block, organization_header, pinned_block, profile_header};
+pub use notifications::notification_block;
 
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
 use crate::hl::Group;

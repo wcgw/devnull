@@ -269,6 +269,12 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
   `/organizations/{handle}/{commits,mentions}`. `GET /users/{organization}` is a 404 (checked live in M3.3), so a
   handle of unknown kind is tried as a person, then as an organization.
 - **People lists** (followers, following) carry no account `type`.
+- **Inbox** `GET /notifications?type=all|replies,quotes,stars,mentions,follows,moderation`: `{data, read_at, meta}`,
+  newest first, one entry per group (`group_id`, `event_count`, `actors_count`, `actors`). **Reading it marks every
+  notification read**, whatever the filter (the Go client's docs); entries read at or after the page's `read_at` are
+  new to this visit. Types: `followed`, `starred`, `replied`, `quoted`, `mentioned`, `approved`, `rejected`; `commit`
+  is the reply/quote/mention, or the account's own for stars and moderation. The unread count is
+  `unread_notifications_count` in `/me`'s envelope, and reading it marks nothing. From the Go client; not checked live.
 - **Profile search** `GET /search/profiles?q=`: `{users, organizations}`, not paged, best match first; terms up to 100
   characters (the Go client's limit). Prefixes match (`jolic` finds `jolicode`); an empty term finds nothing.
 - **Errors** are `{message, code?, errors?}`:
@@ -434,7 +440,14 @@ from M1 even though graphics land in M6.
 
 ### M4 Inbox
 
-- Notifications (filters, groups as folds), Starred, unread counts in the statusline.
+- [x] **M4.1** `devnull-api`: the inbox (categories, cursor, when it was read) and starred commits.
+- [x] **M4.2** `starred` (`<leader>s`); the statusline counts unread notifications (`󰂚 3`), from `/me` on connecting
+  and at each poll, which marks nothing read.
+- [x] **M4.3** `notifications` (`<leader>n`), and filtered as `notifications/replies,mentions`: what happened, by
+  whom, and the commit it is about; `●` marks what is new since the last visit; a group's accounts fold under it;
+  `<CR>` opens the commit's thread or the follower's profile. Opening it clears the count. It is never polled and a
+  refresh replaces the list (groups move up as they grow). Checked live: `starred` (empty on the account) and the
+  count; not the inbox itself, as reading it marks it read.
 
 ### M5 Writing & actions
 

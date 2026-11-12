@@ -492,6 +492,17 @@ pub struct Inbox {
     pub read_at: String,
 }
 
+impl Inbox {
+    /// A page of the inbox read at `read_at`, such as one kept from an earlier visit.
+    #[must_use]
+    pub fn new(page: Page<Notification>, read_at: impl Into<String>) -> Self {
+        Self {
+            page,
+            read_at: read_at.into(),
+        }
+    }
+}
+
 /// What a search for people and organizations finds, from `GET /api/v1/search/profiles`: one list each, best match
 /// first, not paged.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]

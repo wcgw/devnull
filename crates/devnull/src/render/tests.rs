@@ -478,3 +478,123 @@ fn a_link_card_carries_what_the_server_says_about_the_link() {
         })]
     );
 }
+
+fn notification(json: serde_json::Value) -> devnull_api::model::Notification {
+    let mut base = serde_json::json!({
+        "id": "n1", "group_id": "g1", "type": "starred", "created_at": "2026-11-12T15:00:40Z",
+        "actor": { "id": "u2", "handle": "lin", "name": "Lin" }, "event_count": 1, "actors_count": 1,
+        "commit": { "id": "c1", "short_hash": "6cd1130", "body_segments": [text("my words")],
+                    "author": { "id": "u1", "handle": "ada", "name": "Ada" }, "created_at": "2026-11-12T14:00:00Z" }
+    });
+    if let (Some(base), Some(extra)) = (base.as_object_mut(), json.as_object()) {
+        base.extend(extra.clone());
+    }
+    serde_json::from_value(base).expect("notification")
+}
+
+#[test]
+fn a_star_says_who_starred_which_commit_of_yours() {
+    let block = notification_block(&notification(serde_json::json!({})), false, NOW);
+
+    assert_eq!(
+        rows(block.clone()),
+        [
+            "  ★ Lin @lin starred your commit · 13m",
+            "    ┃ my words",
+            ""
+        ]
+    );
+    assert_eq!(targets(block, 0), [account("lin", AccountKind::User)]);
+}
+
+#[test]
+fn a_new_notification_is_marked_in_its_gutter() {
+    let block = notification_block(&notification(serde_json::json!({})), true, NOW);
+
+    assert_eq!(rows(block)[0], "● ★ Lin @lin starred your commit · 13m");
+}
+
+#[test]
+fn a_reply_shows_what_was_replied_and_leads_to_it() {
+    let reply = notification(serde_json::json!({
+        "type": "replied",
+        "commit": { "id": "r1", "short_hash": "aaaaaaa", "body_segments": [text("one\ntwo\nthree\nfour")],
+                    "author": { "id": "u2", "handle": "lin", "name": "Lin" }, "created_at": "2026-11-12T15:00:40Z" }
+    }));
+
+    let block = notification_block(&reply, false, NOW);
+
+    assert_eq!(
+        rows(block.clone()),
+        [
+            "  ↩ Lin @lin replied to your commit · 13m",
+            "    one",
+            "    two",
+            "    three",
+            "    …",
+            ""
+        ]
+    );
+    assert!(matches!(block.target, Some(Target::Commit { ref id, .. }) if id == "r1"));
+}
+
+#[test]
+fn a_follow_leads_to_the_follower() {
+    let follow = notification(serde_json::json!({ "type": "followed", "commit": null }));
+
+    let block = notification_block(&follow, false, NOW);
+
+    assert_eq!(rows(block.clone()), ["  + Lin @lin followed you · 13m", ""]);
+    assert_eq!(
+        block.target,
+        Some(Target::Account(AccountRef::new(
+            "lin",
+            Some(AccountKind::User)
+        )))
+    );
+}
+
+#[test]
+fn a_group_names_the_latest_and_folds_the_others() {
+    let group = notification(serde_json::json!({
+        "event_count": 3, "actors_count": 3,
+        "actors": [{ "id": "u2", "handle": "lin", "name": "Lin" }, { "id": "u3", "handle": "kim", "name": "Kim" },
+                   { "id": "u4", "handle": "bo", "name": "Bo" }]
+    }));
+
+    let block = notification_block(&group, false, NOW);
+
+    assert_eq!(
+        rows(block.clone()),
+        [
+            "  ★ Lin @lin and 2 others starred your commit · 13m",
+            "    ┃ my words",
+            "    ▸ 3 stars",
+            ""
+        ]
+    );
+    let mut doc = Document::new();
+    doc.push_back("n", block);
+    doc.fold_all(true);
+    let layout = Layout::new(&doc, 200);
+    let open: Vec<String> = (0..layout.row_count())
+        .map(|row| layout.segments(row).map(|(text, _)| text).collect())
+        .collect();
+    assert_eq!(open[2..5], ["    Lin @lin", "    Kim @kim", "    Bo @bo"]);
+}
+
+#[test]
+fn a_moderation_decision_says_what_and_why() {
+    let rejected =
+        notification(serde_json::json!({ "type": "rejected", "actor": null, "reason": "spam" }));
+
+    assert_eq!(
+        rows(notification_block(&rejected, false, NOW)),
+        [
+            "  × Your commit was rejected · 13m",
+            "    ┃ my words",
+            "    reason: spam",
+            ""
+        ]
+    );
+}

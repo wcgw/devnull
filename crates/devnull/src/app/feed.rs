@@ -4,7 +4,7 @@
 //! The head's blocks come first in the document, then the list's, then "Loading more…" while the next page loads.
 
 use devnull_api::model::{AccountKind, Cursor, Page};
-use devnull_api::{Log, OrganizationTab, People};
+use devnull_api::{Category, Log, OrganizationTab, People};
 
 use super::fetch::Request;
 use super::{logs, threads};
@@ -39,6 +39,9 @@ pub(super) enum Source {
     Mentions(String),
     /// The commits the account starred; a list alone.
     Starred,
+    /// The inbox, of the categories listed (in [`Category::ALL`]'s order, each once), or of all when none are; a
+    /// list alone, and never polled, as reading it marks it read.
+    Notifications(Vec<Category>),
 }
 
 impl PartialEq for Source {
@@ -51,6 +54,7 @@ impl PartialEq for Source {
                 a == b && which == other_which
             }
             (Self::Starred, Self::Starred) => true,
+            (Self::Notifications(a), Self::Notifications(b)) => a == b,
             _ => false,
         }
     }
@@ -76,6 +80,18 @@ impl Source {
         }
         if name == "starred" {
             return Some(Self::Starred);
+        }
+        if name == "notifications" {
+            return Some(Self::Notifications(Vec::new()));
+        }
+        if let Some(names) = name.strip_prefix("notifications/") {
+            let mut only = names
+                .split(',')
+                .map(Category::named)
+                .collect::<Option<Vec<_>>>()?;
+            only.sort_unstable();
+            only.dedup();
+            return Some(Self::Notifications(only));
         }
         let rest = name.strip_prefix('@')?;
         let (handle, list) = match rest.split_once('/') {
@@ -103,13 +119,22 @@ impl Source {
             Self::People(handle, which) => format!("@{handle}/{}", which.name()),
             Self::Mentions(handle) => format!("@{handle}/mentions"),
             Self::Starred => "starred".to_owned(),
+            Self::Notifications(only) if only.is_empty() => "notifications".to_owned(),
+            Self::Notifications(only) => {
+                let names: Vec<&str> = only.iter().map(|category| category.name()).collect();
+                format!("notifications/{}", names.join(","))
+            }
         }
     }
 
     /// The request for the head, if the feed has one.
     fn head(&self) -> Option<Request> {
         match self {
-            Self::Log(_) | Self::People(..) | Self::Mentions(_) | Self::Starred => None,
+            Self::Log(_)
+            | Self::People(..)
+            | Self::Mentions(_)
+            | Self::Starred
+            | Self::Notifications(_) => None,
             Self::Thread(id) => Some(Request::Thread { id: id.clone() }),
             Self::Profile { handle, kind } => Some(Request::Profile {
                 handle: handle.clone(),
@@ -154,12 +179,17 @@ impl Source {
                 after,
             },
             Self::Starred => Request::Starred { after },
+            Self::Notifications(only) => Request::Notifications {
+                only: only.clone(),
+                after,
+            },
         })
     }
 
     fn order(&self) -> Order {
         match self {
-            Self::Log(Log::Trending) => Order::Ranked,
+            // A group moves up as it grows, which merging cannot follow; the inbox is only refreshed by hand.
+            Self::Log(Log::Trending) | Self::Notifications(_) => Order::Ranked,
             Self::Thread(_) => Order::Oldest,
             Self::Log(_)
             | Self::Profile { .. }

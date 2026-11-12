@@ -205,6 +205,17 @@ impl Net {
                         result,
                     }
                 }
+                Request::Notifications { only, after } => {
+                    let result = client
+                        .notifications(&only, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Notifications {
+                        only,
+                        after,
+                        result,
+                    }
+                }
                 Request::Starred { after } => {
                     let result = client
                         .starred(after.as_ref())
