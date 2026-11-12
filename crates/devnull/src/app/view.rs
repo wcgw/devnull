@@ -66,6 +66,9 @@ impl App {
         if self.which_key {
             self.render_which_key(frame);
         }
+        if let Some(cursor) = cursor {
+            self.render_hover(frame, cursor);
+        }
 
         let last = height.saturating_sub(1);
         let cmdline_area = Rect::new(0, last, width, 1);

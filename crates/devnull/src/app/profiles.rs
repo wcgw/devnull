@@ -72,8 +72,9 @@ impl App {
             Ok(AccountPage::Organization(_)) => Some(AccountKind::Organization),
             _ => None,
         };
+        let mut effects = self.hover_arrived(&handle, &result);
         let source = Source::Profile { handle, kind: None };
-        let mut effects = self.head_arrived(&source, result.map(|page| head(&page, now)));
+        effects.extend(self.head_arrived(&source, result.map(|page| head(&page, now))));
         // Only once it arrived: after a failure, loading would ask for the profile again straight away.
         if let Some(kind) = kind
             && let Some(index) = self.feed_buffer(&source)

@@ -3,7 +3,7 @@
 use devnull_api::model::{Account, Commit, OrganizationPage, Profile};
 
 use super::*;
-use crate::doc::{AccountRef, Content, Cursor, Document, Layout, Motion, Target};
+use crate::doc::{AccountRef, Content, Cursor, Document, Layout, LinkCard, Motion, Target};
 
 /// 2026-11-12T15:13:40Z, a little after the fixtures' commits.
 const NOW: u64 = 1_794_496_420;
@@ -13,6 +13,7 @@ fn commit(json: serde_json::Value) -> Commit {
         "id": "c1", "short_hash": "6cd1130", "body": "", "body_segments": [],
         "author": { "id": "u1", "handle": "grace", "name": "Grace", "type": "user" },
         "created_at": "2026-11-12T15:10:40.000000Z", "status": "approved",
+        "html_url": "https://dev-null.sh/@grace/commits/c1",
         "stars_count": 2, "replies_count": 1, "images": []
     });
     if let (Some(base), Some(extra)) = (base.as_object_mut(), json.as_object()) {
@@ -152,6 +153,7 @@ fn a_quote_is_indented_under_a_bar_and_points_at_the_quoted_commit() {
     let quoted = Target::Commit {
         id: "q1".into(),
         author: Some(AccountRef::new("acme", Some(AccountKind::Organization))),
+        url: None,
     };
     assert_eq!(targets(block.clone(), 1)[0], quoted);
     assert_eq!(targets(block, 2), [quoted], "the quote's text too");
@@ -172,14 +174,16 @@ fn the_rest_of_a_commit_points_at_it() {
         block.target,
         Some(Target::Commit {
             id: "c1".into(),
-            author: Some(AccountRef::new("grace", Some(AccountKind::User)))
+            author: Some(AccountRef::new("grace", Some(AccountKind::User))),
+            url: Some("https://dev-null.sh/@grace/commits/c1".into())
         })
     );
     assert_eq!(
         commit_block(&deleted, NOW).target,
         Some(Target::Commit {
             id: "d1".into(),
-            author: None
+            author: None,
+            url: None
         })
     );
 }
@@ -450,5 +454,27 @@ fn an_account_in_a_list_is_its_name_relationship_and_bio() {
     assert_eq!(
         block.target,
         Some(Target::Account(AccountRef::new("lin", None)))
+    );
+}
+
+#[test]
+fn a_link_card_carries_what_the_server_says_about_the_link() {
+    let block = commit_block(
+        &commit(serde_json::json!({
+            "body_segments": [text("look")],
+            "link_preview": { "url": "https://example.org", "title": "Example", "site_name": "example.org",
+                              "description": "An example", "is_pending": false }
+        })),
+        NOW,
+    );
+
+    assert_eq!(
+        targets(block, 2),
+        [Target::LinkCard(LinkCard {
+            url: "https://example.org".into(),
+            title: "Example".into(),
+            site: "example.org".into(),
+            description: "An example".into(),
+        })]
     );
 }

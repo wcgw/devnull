@@ -148,6 +148,16 @@ impl Cursor {
         doc.target_at(self.pos(doc))
     }
 
+    /// What the block under the cursor refers to as a whole, such as the commit holding a link the cursor is on.
+    #[must_use]
+    pub fn block_target<'d>(&self, layout: &Layout<'d>) -> Option<&'d Target> {
+        if layout.row_count() == 0 {
+            return None;
+        }
+        let doc = layout.doc();
+        doc.block_target_at(self.pos(doc))
+    }
+
     /// Moves `count` times by `motion` (a count of 0 counts as 1, as in Vim). A motion that cannot move, such as
     /// `f` for a character that isn't there, leaves the cursor where it is.
     pub fn apply(&mut self, layout: &Layout<'_>, motion: Motion, count: usize) {

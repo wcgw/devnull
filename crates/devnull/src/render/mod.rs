@@ -8,7 +8,7 @@ use devnull_api::model::{AccountKind, Author, Commit, Segment};
 
 pub use accounts::{account_block, organization_header, pinned_block, profile_header};
 
-use crate::doc::{AccountRef, Content, Fold, Line, Span, Target};
+use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
 use crate::hl::Group;
 
 /// Lines of text shown before the rest of a long commit folds away.
@@ -74,8 +74,14 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
                 _ => format!("🔗 {title}"),
             }
         };
+        let target = Target::LinkCard(LinkCard {
+            url: card.url.clone(),
+            title: card.title.clone(),
+            site: card.site_name.clone().unwrap_or_default(),
+            description: card.description.clone(),
+        });
         lines.push(Line::Text(vec![
-            Span::new(text, Group::Link).with_target(Target::Url(card.url.clone())),
+            Span::new(text, Group::Link).with_target(target),
         ]));
     }
     for image in &commit.images {
@@ -147,6 +153,7 @@ fn commit_target(commit: &Commit) -> Target {
             .author
             .as_ref()
             .map(|author| AccountRef::new(author.handle.clone(), Some(author.kind))),
+        url: Some(commit.html_url.clone()).filter(|url| !url.is_empty()),
     }
 }
 

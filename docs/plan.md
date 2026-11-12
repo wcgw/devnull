@@ -412,7 +412,12 @@ from M1 even though graphics land in M6.
   the cursor, else the commit's author. Logs, threads and profiles are one kind of buffer, a feed: a head, then a list
   a page at a time, merged by the list's order (newest first, oldest first, ranked). Checked live: own profile, its
   followers, a follower's profile, an organization and its (empty) mentions.
-- [ ] **M3.4** `gx` (link under the cursor), `gX` (commit on the web), `gy` (yank its link); `K` hover card.
+- [x] **M3.4** `gx` (link under the cursor), `gX` (commit on the web), `gy` (yank its link); `K` hover card.
+  `:browse link` (`gx`) opens only a link; `:browse` (`gX`) and `:yanklink` (`gy`) take the commit under the cursor (a
+  quote's, else the one holding it), else the account (`https://dev-null.sh/@handle`, as every captured `html_url`).
+  `:hover` (`K`) floats a card next to the cursor until the next key: a link card whole, an account's profile head
+  (fetched), or elsewhere in a commit, its author's. Polls get theirs when polls are drawn. Checked live: `K` on a
+  commit and `gy` (OSC 52); `gx`/`gX` only in tests, as they open the browser.
 - [ ] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed.
 - [ ] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`).
 

@@ -156,9 +156,26 @@ pub enum Target {
         id: String,
         /// Who wrote it; `None` for a deleted commit.
         author: Option<AccountRef>,
+        /// Its page on the web; `None` for a deleted commit.
+        url: Option<String>,
     },
+    /// The card the server made for a link, opened in the browser like the link.
+    LinkCard(LinkCard),
     /// A buffer, by name, such as a profile's list of followers.
     Buffer(String),
+}
+
+/// What the server says about a link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkCard {
+    /// The link.
+    pub url: String,
+    /// The page's title; may be empty.
+    pub title: String,
+    /// The site's name; may be empty.
+    pub site: String,
+    /// What the page says it is about; may be empty.
+    pub description: String,
 }
 
 /// A person or an organization, as text refers to it.
@@ -640,6 +657,11 @@ impl Document {
     fn target_at(&self, pos: Pos) -> Option<&Target> {
         self.line(pos.line)
             .target_at(pos.col)
-            .or(self.blocks[self.block_of(pos.line)].target.as_ref())
+            .or_else(|| self.block_target_at(pos))
+    }
+
+    /// What the block holding `pos` refers to as a whole.
+    fn block_target_at(&self, pos: Pos) -> Option<&Target> {
+        self.blocks[self.block_of(pos.line)].target.as_ref()
     }
 }

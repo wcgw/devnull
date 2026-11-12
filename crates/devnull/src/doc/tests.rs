@@ -476,6 +476,14 @@ fn text_without_a_target_of_its_own_refers_to_its_block_s() {
         Some(Target::Buffer("c1".into())),
         "an empty line too"
     );
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::Right, 3);
+    assert_eq!(cursor.target(&layout), Some(&Target::Buffer("@ada".into())));
+    assert_eq!(
+        cursor.block_target(&layout),
+        Some(&Target::Buffer("c1".into())),
+        "the block's own"
+    );
 }
 
 #[test]

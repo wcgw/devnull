@@ -71,6 +71,16 @@ pub enum Command {
     Agree,
     /// `:open`: opens what the text under the cursor refers to: a link in the browser, a commit's thread.
     Open,
+    /// `:browse` opens the web page of the commit under the cursor (or of the account, where there is no commit);
+    /// `:browse link`, the link under the cursor.
+    Browse {
+        /// Whether to open the link under the cursor rather than a web page.
+        link: bool,
+    },
+    /// `:yanklink`: yanks the web link `:browse` opens.
+    YankLink,
+    /// `:hover`: a card about what is under the cursor: an account, a link, a commit's author.
+    Hover,
     /// `:profile {handle}` opens a profile; `:profile` alone, the profile of the account under the cursor, or of the
     /// author of the commit under it.
     Profile(Option<String>),
@@ -156,6 +166,9 @@ enum Name {
     Agree,
     Open,
     Profile,
+    Browse,
+    YankLink,
+    Hover,
     Edit,
     Buffer,
     Buffers,
@@ -199,6 +212,9 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("close", 3, Name::Close),
     ("open", 1, Name::Open),
     ("profile", 4, Name::Profile),
+    ("browse", 3, Name::Browse),
+    ("yanklink", 5, Name::YankLink),
+    ("hover", 3, Name::Hover),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -263,6 +279,13 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Agree => Command::Agree,
         Name::Open => Command::Open,
         Name::Profile => Command::Profile((!args.is_empty()).then(|| args.to_owned())),
+        Name::Browse => match args {
+            "" => Command::Browse { link: false },
+            "link" => Command::Browse { link: true },
+            _ => return Err(ExError::InvalidArgument(args.to_owned())),
+        },
+        Name::YankLink => Command::YankLink,
+        Name::Hover => Command::Hover,
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Buffer => Command::Buffer(required(args)?.to_owned()),
         Name::Buffers => Command::Buffers,
@@ -556,6 +579,18 @@ mod tests {
             parsed("profile @ada"),
             Command::Profile(Some("@ada".into()))
         );
+    }
+
+    #[test]
+    fn browse_takes_link_or_nothing() {
+        assert_eq!(parsed("bro"), Command::Browse { link: false });
+        assert_eq!(parsed("browse link"), Command::Browse { link: true });
+        assert_eq!(
+            parse("browse that").unwrap_err().to_string(),
+            "E475: Invalid argument: that"
+        );
+        assert_eq!(parsed("yankl"), Command::YankLink);
+        assert_eq!(parsed("hov"), Command::Hover);
     }
 
     #[test]

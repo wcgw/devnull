@@ -4,6 +4,7 @@ mod cmdline;
 mod connection;
 mod feed;
 mod fetch;
+mod hover;
 mod logs;
 mod options;
 mod profiles;
@@ -20,8 +21,8 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Cursor, Direction, Document, FoldOp, Layout, Motion, Pattern, SearchOutcome, Selection,
-    SelectionKind, Target,
+    Cursor, Direction, Document, FoldOp, Layout, LinkCard, Motion, Pattern, SearchOutcome,
+    Selection, SelectionKind, Target,
 };
 use crate::ex::{self, Command};
 use crate::hl::Theme;
@@ -33,6 +34,7 @@ use connection::Connection;
 pub use connection::NetEvent;
 use feed::{Feed, Source};
 pub use fetch::{FetchError, Fetched, Request};
+use hover::Hover;
 use options::Options;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
@@ -63,6 +65,8 @@ pub struct App {
     generation: u64,
     /// Whether the which-key popup is showing.
     which_key: bool,
+    /// The card `K` shows, until the next key.
+    hover: Option<Hover>,
     /// Whether the logs are being polled.
     polling: bool,
     /// The generation of poll wake-ups, apart from keys so that typing does not stop polling.
@@ -264,6 +268,7 @@ impl App {
             connection: Connection::Checking,
             generation: 0,
             which_key: false,
+            hover: None,
             polling: false,
             poll_generation: 0,
         }
@@ -333,6 +338,8 @@ impl App {
         match &mut self.mode {
             AppMode::Normal | AppMode::Visual(_) => {
                 self.message = None;
+                // As Neovim's hover window, the card goes with the next key, which also does its usual job.
+                self.hover = None;
                 let ran = self.keymap.feed(self.keymap_mode(), key);
                 self.run_all(ran)
             }
@@ -770,6 +777,9 @@ impl App {
             Command::Edit(Some(name)) => return self.edit(&name),
             Command::Open => return self.open(),
             Command::Profile(handle) => return self.profile(handle),
+            Command::Browse { link } => return self.browse(link),
+            Command::YankLink => return self.yank_link(),
+            Command::Hover => return self.hover(),
             Command::Agree => match &self.connection {
                 Connection::Terms(me) => {
                     return Ok(vec![Effect::AcceptTerms(
@@ -793,12 +803,60 @@ impl App {
     /// or another buffer in the window.
     fn open(&mut self) -> Result<Vec<Effect>, String> {
         match self.target_under_cursor() {
-            Some(Target::Url(url)) => Ok(vec![Effect::OpenUrl(url)]),
+            Some(Target::Url(url) | Target::LinkCard(LinkCard { url, .. })) => {
+                Ok(vec![Effect::OpenUrl(url)])
+            }
             Some(Target::Commit { id, .. }) => Ok(self.open_thread(&id)),
             Some(Target::Account(account)) => Ok(self.open_profile(account)),
             Some(Target::Buffer(name)) => self.edit(&name),
             None => Ok(Vec::new()),
         }
+    }
+
+    /// The web page of what the cursor is on: of the commit (a quote's, else the one holding the cursor), else of
+    /// the account.
+    fn web_page(&self) -> Option<String> {
+        let window = self.windows.current();
+        let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
+        let targets = [
+            window.cursor.target(&layout),
+            window.cursor.block_target(&layout),
+        ];
+        let commit = targets.iter().flatten().find_map(|target| match target {
+            Target::Commit { url: Some(url), .. } => Some(url.clone()),
+            _ => None,
+        });
+        commit.or_else(|| {
+            targets.iter().flatten().find_map(|target| match target {
+                Target::Account(account) => {
+                    Some(format!("{}/@{}", devnull_api::ORIGIN, account.handle))
+                }
+                _ => None,
+            })
+        })
+    }
+
+    /// `:browse`: the commit or account under the cursor on the web; `:browse link`, the link under it.
+    fn browse(&mut self, link: bool) -> Result<Vec<Effect>, String> {
+        let url = if link {
+            match self.target_under_cursor() {
+                Some(Target::Url(url) | Target::LinkCard(LinkCard { url, .. })) => url,
+                _ => return Err("No link under the cursor".to_owned()),
+            }
+        } else {
+            self.web_page()
+                .ok_or_else(|| "No commit or account under the cursor".to_owned())?
+        };
+        Ok(vec![Effect::OpenUrl(url)])
+    }
+
+    /// `:yanklink`: the link `:browse` opens, to the clipboard.
+    fn yank_link(&mut self) -> Result<Vec<Effect>, String> {
+        let url = self
+            .web_page()
+            .ok_or_else(|| "No commit or account under the cursor".to_owned())?;
+        self.info(format!("Yanked {url}"));
+        Ok(vec![Effect::Copy(url)])
     }
 
     /// `:e {name}`: shows the buffer of that name, or else the feed the name names (see [`Source::named`]), or

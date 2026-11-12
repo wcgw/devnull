@@ -1465,7 +1465,8 @@ fn commit_with(id: &str, text: &str, quoted: Option<serde_json::Value>) -> serde
     serde_json::json!({
         "id": id, "short_hash": format!("{:0>7}", id.trim_start_matches('c')), "body": text, "created_at": "2026-11-12T15:13:40Z",
         "body_segments": [{ "type": "text", "text": text }], "author": { "id": "u", "handle": "ada", "name": "Ada" },
-        "replies_count": 2, "images": [], "quoted_commit": quoted
+        "replies_count": 2, "images": [], "quoted_commit": quoted,
+        "html_url": format!("https://dev-null.sh/@ada/commits/{id}")
     })
 }
 
@@ -2173,4 +2174,272 @@ fn new_people_in_a_list_are_not_announced_as_commits() {
     assert_eq!(cmdline(&app), "");
     let _ = press(&mut app, "gg");
     assert!(shows(&app, "P @p0"), "new followers go above");
+}
+
+/// The effects but the wake-ups that prefix keys such as `g` ask for (which-key).
+fn without_wakes(effects: Vec<Effect>) -> Vec<Effect> {
+    effects
+        .into_iter()
+        .filter(|effect| !matches!(effect, Effect::Wake { .. }))
+        .collect()
+}
+
+/// A log page of one commit, `c1`, with `text` and `extra` fields.
+fn one_commit(text: &str, extra: serde_json::Value) -> Page<Commit> {
+    let mut commit = commit_with("c1", text, None);
+    if let (Some(commit), Some(extra)) = (commit.as_object_mut(), extra.as_object()) {
+        commit.extend(extra.clone());
+    }
+    Page::new(
+        serde_json::from_value(serde_json::json!([commit])).expect("page"),
+        None,
+    )
+}
+
+#[test]
+fn gx_opens_the_link_under_the_cursor_and_nothing_else() {
+    let mut app = with_log(
+        Log::Following,
+        one_commit("see https://example.org/x", serde_json::json!({})),
+    );
+
+    assert_eq!(
+        without_wakes(press(&mut app, "j$gx")),
+        [Effect::OpenUrl("https://example.org/x".into())]
+    );
+    assert_eq!(without_wakes(press(&mut app, "0gx")), []);
+    assert_eq!(cmdline(&app), "No link under the cursor");
+}
+
+#[test]
+fn big_gx_opens_the_commit_under_the_cursor_on_the_web_even_from_a_link_in_it() {
+    let quote = commit_with("c9", "quoted", None);
+    let mut app = with_log(
+        Log::Following,
+        one_commit(
+            "see https://example.org/x",
+            serde_json::json!({ "quoted_commit": quote }),
+        ),
+    );
+
+    assert_eq!(
+        without_wakes(press(&mut app, "j$gX")),
+        [Effect::OpenUrl(
+            "https://dev-null.sh/@ada/commits/c1".into()
+        )]
+    );
+    assert_eq!(
+        without_wakes(press(&mut app, "jgX")),
+        [Effect::OpenUrl(
+            "https://dev-null.sh/@ada/commits/c9".into()
+        )],
+        "a quote's own"
+    );
+}
+
+#[test]
+fn gy_yanks_the_commit_s_link() {
+    let mut app = with_log(Log::Following, one_commit("hello", serde_json::json!({})));
+
+    let effects = without_wakes(press(&mut app, "jgy"));
+
+    assert_eq!(
+        effects,
+        [Effect::Copy("https://dev-null.sh/@ada/commits/c1".into())]
+    );
+    assert_eq!(cmdline(&app), "Yanked https://dev-null.sh/@ada/commits/c1");
+}
+
+#[test]
+fn big_gx_in_a_profile_opens_the_account_on_the_web() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, ":e @lin<CR>");
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    assert_eq!(
+        without_wakes(press(&mut app, "ggjgX")),
+        [Effect::OpenUrl("https://dev-null.sh/@lin".into())]
+    );
+}
+
+#[test]
+fn k_on_a_mention_shows_the_account_s_card_until_the_next_key() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+
+    let effects = press(&mut app, "j$K");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Profile {
+            handle: "lin".into(),
+            kind: Some(AccountKind::User)
+        }]
+    );
+    assert!(shows(&app, "Loading @lin…"));
+    assert!(
+        statusline(&app).contains("log/following"),
+        "the window stays where it is"
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+    let rows = screen(&app).rows;
+    let counts = rows
+        .iter()
+        .position(|row| row.contains("│3 commits · 2 followers · 1 following"))
+        .expect("counts");
+    assert!(rows[counts - 1].contains("│Lin @lin"), "{rows:#?}");
+    assert!(
+        rows[counts + 1].contains('└'),
+        "no blank row closing it: {rows:#?}"
+    );
+    let _ = press(&mut app, "k");
+    assert!(!shows(&app, "Lin @lin"));
+}
+
+#[test]
+fn k_elsewhere_in_a_commit_shows_its_author_s_card() {
+    let mut app = with_log(Log::Following, one_commit("hello", serde_json::json!({})));
+
+    let effects = press(&mut app, "jK");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Profile {
+            handle: "ada".into(),
+            kind: Some(AccountKind::User)
+        }]
+    );
+}
+
+#[test]
+fn k_on_a_link_card_shows_it_whole() {
+    let card = serde_json::json!({ "url": "https://example.org/post", "title": "A post", "site_name": "Example",
+                                   "description": "What the post says", "is_pending": false });
+    let mut app = with_log(
+        Log::Following,
+        one_commit("look", serde_json::json!({ "link_preview": card })),
+    );
+    let _ = press(&mut app, "2j");
+
+    let effects = press(&mut app, "K");
+
+    assert_eq!(fetches(&effects), []);
+    for text in [
+        "A post",
+        "Example",
+        "What the post says",
+        "https://example.org/post",
+    ] {
+        assert!(shows(&app, text), "{text}: {:#?}", screen(&app).rows);
+    }
+    assert_eq!(
+        without_wakes(press(&mut app, "gx")),
+        [Effect::OpenUrl("https://example.org/post".into())],
+        "a link card is a link"
+    );
+    assert_eq!(
+        press(&mut app, "<CR>"),
+        [Effect::OpenUrl("https://example.org/post".into())],
+        "the card still opens"
+    );
+}
+
+#[test]
+fn k_with_nothing_to_tell_says_so() {
+    let mut app = with_log(Log::Following, page_of(1, 0, None));
+
+    let _ = press(&mut app, "K");
+
+    assert_eq!(cmdline(&app), "E349: No identifier under cursor");
+}
+
+#[test]
+fn a_card_with_no_room_below_the_cursor_goes_above_it() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "G");
+    let cursor_y = screen(&app).cursor.1 as usize;
+
+    let _ = press(&mut app, "K");
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "ada".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    let rows = screen(&app).rows;
+    let card = rows
+        .iter()
+        .position(|row| row.contains("│Lin @lin"))
+        .expect("card");
+    assert!(card < cursor_y, "{rows:#?}");
+}
+
+#[test]
+fn a_card_whose_profile_cannot_load_goes_and_says_why() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    let _ = press(&mut app, "j$K");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Err(FetchError::Failed("not found".into())),
+        },
+    );
+
+    assert!(!shows(&app, "Loading @lin…"));
+    assert_eq!(cmdline(&app), "Cannot load @lin: not found");
+}
+
+#[test]
+fn a_card_waits_for_its_own_account() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    let _ = press(&mut app, "j$K");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "kim".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    assert!(shows(&app, "Loading @lin…"));
+}
+
+#[test]
+fn a_profile_that_cannot_load_is_reported_once_with_a_card_waiting_for_it() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    // Back on the log, the cursor is where it was: on @lin.
+    let _ = press(&mut app, "j$<CR>:b log/following<CR>K");
+    assert!(shows(&app, "Loading @lin…"));
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Err(FetchError::Failed("not found".into())),
+        },
+    );
+    let _ = press(&mut app, ":messages<CR>");
+
+    let reported = screen(&app)
+        .rows
+        .iter()
+        .filter(|row| row.contains("Cannot load @lin"))
+        .count();
+    assert_eq!(reported, 1, "{:#?}", screen(&app).rows);
 }
