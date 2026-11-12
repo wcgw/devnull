@@ -69,6 +69,8 @@ pub enum Command {
     Connect(Option<String>),
     /// `:agree`: accept dev-null.sh's current terms.
     Agree,
+    /// `:edit {name}` opens a buffer by name; `:edit` alone (or `:e!`) reloads the current one.
+    Edit(Option<String>),
 }
 
 /// One `:set` argument.
@@ -138,6 +140,7 @@ enum Name {
     Wincmd,
     Connect,
     Agree,
+    Edit,
 }
 
 const NORMAL: &[Mode] = &[Mode::Normal];
@@ -146,6 +149,7 @@ const NORMAL_VISUAL: &[Mode] = &[Mode::Normal, Mode::Visual];
 
 /// Full name, shortest abbreviation length, and command, in the order Vim resolves ambiguous abbreviations.
 const COMMANDS: &[(&str, usize, Name)] = &[
+    ("edit", 1, Name::Edit),
     ("quit", 1, Name::Quit),
     ("qall", 2, Name::QuitAll),
     ("quitall", 5, Name::QuitAll),
@@ -200,7 +204,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Some(args) => (true, args.trim()),
         None => (false, rest.trim()),
     };
-    if bang && !matches!(name, Name::Quit | Name::QuitAll) {
+    if bang && !matches!(name, Name::Quit | Name::QuitAll | Name::Edit) {
         return Err(ExError::NoBang);
     }
     let command = match name {
@@ -231,6 +235,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Only => Command::Only,
         Name::Connect => Command::Connect((!args.is_empty()).then(|| args.to_owned())),
         Name::Agree => Command::Agree,
+        Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Wincmd => {
             let mut chars = required(args)?.chars();
             match (chars.next(), chars.next()) {
@@ -487,5 +492,15 @@ mod tests {
             "E471: Argument required"
         );
         assert_eq!(parsed("mes"), Command::Messages);
+    }
+
+    #[test]
+    fn edit_reloads_or_opens_a_buffer() {
+        assert_eq!(parsed("e!"), Command::Edit(None));
+        assert_eq!(parsed("edit"), Command::Edit(None));
+        assert_eq!(
+            parsed("e log/latest"),
+            Command::Edit(Some("log/latest".into()))
+        );
     }
 }

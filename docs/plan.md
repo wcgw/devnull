@@ -381,7 +381,12 @@ from M1 even though graphics land in M6.
   `fake.rs` retired: the invented log is now an API-shaped fixture. Verified in a pty against the real log.
   ⏸ try against dev-null.sh.
   - Not yet: `preview_segments` (the server's excerpt) is not used; the fold shows the first six lines instead.
-- [ ] **M2.6** Paging near the end, `:e!`, polling with new commits arriving above.
+- [x] **M2.6** Paging when the cursor is within a window's height of the end (one request at a time, a "Loading
+  more…" line); `:e!`/`<C-l>` refresh merges the first page (new commits above, known ones updated in place, the
+  cursor stays on its commit; no overlap or Trending replaces the log); following and latest polled every 15 s
+  focused, 30 s unfocused, with "N new commits" when reading further down. Poll wake-ups have their own generation
+  so typing does not stop them. `:e log/{following,latest,trending}` opens a log.
+  - Differs from the original on purpose: a refresh keeps the cursor where it is instead of jumping to the top.
 - [ ] **M2.7** Buffers: `:e log/latest`, `<leader>1/2/3`, a bufferline listing them.
 
 ### M3 Navigation

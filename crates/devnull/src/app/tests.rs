@@ -6,7 +6,7 @@ use ratatui::style::Color;
 
 use super::*;
 use devnull_api::Log;
-use devnull_api::model::{Commit, Page};
+use devnull_api::model::{Commit, Cursor, Page};
 
 use crate::doc::{Content, Document, Fold, Line};
 use crate::hl::Group;
@@ -1065,11 +1065,11 @@ fn once_connected_the_following_log_is_fetched_and_shows_while_loading() {
     let effects = net(&mut app, NetEvent::Connected(me("ada", true)));
 
     assert_eq!(
-        effects,
-        [Effect::Fetch(Request::Log {
+        fetches(&effects),
+        [Request::Log {
             log: Log::Following,
             after: None
-        })]
+        }]
     );
     assert!(shows(&app, "Loading log/following…"));
 }
@@ -1123,4 +1123,258 @@ fn a_device_refused_while_fetching_goes_back_to_connecting() {
     });
 
     assert!(shows(&app, "not approved"));
+}
+
+/// A page of `count` commits named `c{first}` … with `next` after it.
+fn page_of(first: usize, count: usize, next: Option<&str>) -> Page<Commit> {
+    let commits = (first..first + count)
+        .map(|n| {
+            serde_json::json!({
+                "id": format!("c{n}"), "short_hash": format!("{n:07}"), "body": "", "created_at": "2026-11-12T15:13:40Z",
+                "body_segments": [{ "type": "text", "text": format!("commit {n}") }],
+                "author": { "id": "u", "handle": "ada", "name": "Ada" }, "stars_count": 0, "images": []
+            })
+        })
+        .collect::<Vec<_>>();
+    Page::new(
+        serde_json::from_value(serde_json::Value::Array(commits)).expect("commits"),
+        next.map(Cursor::new),
+    )
+}
+
+/// A connected app whose `log` buffer (shown in the window) got `page` as its first page.
+fn with_log(log: Log, page: Page<Commit>) -> App {
+    let mut app = App::new();
+    let _ = app.update(Msg::Resize {
+        width: 60,
+        height: 12,
+    });
+    let _ = app.start();
+    let _ = app.update(Msg::Net(NetEvent::Connected(me("ada", true))));
+    if log != Log::Following {
+        let _ = press(&mut app, &format!(":e log/{}<CR>", log.name()));
+    }
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log,
+            after: None,
+            result: Ok(page),
+        },
+        now: FIXTURE_NOW,
+    });
+    app
+}
+
+fn fetches(effects: &[Effect]) -> Vec<Request> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Fetch(request) => Some(request.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn nearing_the_end_of_a_log_loads_the_next_page_once() {
+    let mut app = with_log(Log::Following, page_of(1, 20, Some("p2")));
+
+    assert_eq!(fetches(&press(&mut app, "j")), []);
+    let effects = press(&mut app, "G");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Following,
+            after: Some(Cursor::new("p2"))
+        }]
+    );
+    // The notice goes after the last commit, one row past it.
+    assert_eq!(fetches(&press(&mut app, "j")), []);
+    assert!(shows(&app, "Loading more…"));
+
+    let next = Fetched::Log {
+        log: Log::Following,
+        after: Some(Cursor::new("p2")),
+        result: Ok(page_of(21, 5, None)),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: next,
+        now: FIXTURE_NOW,
+    });
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 25"));
+    assert!(!shows(&app, "Loading more…"));
+    assert_eq!(fetches(&press(&mut app, "k")), []);
+}
+
+#[test]
+fn a_failed_next_page_is_reported_and_tried_again_on_the_next_move() {
+    let mut app = with_log(Log::Following, page_of(1, 20, Some("p2")));
+    let _ = press(&mut app, "G");
+
+    let failed = Fetched::Log {
+        log: Log::Following,
+        after: Some(Cursor::new("p2")),
+        result: Err(FetchError::Failed("timeout".into())),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: failed,
+        now: FIXTURE_NOW,
+    });
+
+    assert_eq!(cmdline(&app), "Cannot load log/following: timeout");
+    assert_eq!(fetches(&press(&mut app, "k")).len(), 1);
+}
+
+#[test]
+fn refreshing_puts_new_commits_above_updates_the_rest_and_keeps_the_cursor_on_its_commit() {
+    let mut app = with_log(Log::Following, page_of(5, 5, None));
+    let _ = press(&mut app, "]]");
+    assert!(screen(&app).rows[screen(&app).cursor.1 as usize].contains("0000006"));
+
+    let effects = press(&mut app, ":e!<CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Following,
+            after: None
+        }]
+    );
+    let mut fresh = page_of(3, 4, None);
+    fresh.items[3].stars_count = 9;
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result: Ok(fresh),
+        },
+        now: FIXTURE_NOW,
+    });
+
+    assert!(screen(&app).rows[screen(&app).cursor.1 as usize].contains("0000006"));
+    let _ = press(&mut app, "gg");
+    assert!(
+        screen(&app).rows[1].contains("0000003"),
+        "{:#?}",
+        screen(&app).rows
+    );
+    // Further down, out of this small window: the updated count of commit 6, and the older commits still there.
+    let _ = press(&mut app, "3]]zt");
+    assert!(shows(&app, "☆ 9"));
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 9"), "{:#?}", screen(&app).rows);
+}
+
+#[test]
+fn ctrl_l_refreshes_too() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+
+    assert_eq!(
+        fetches(&press(&mut app, "<C-l>")),
+        [Request::Log {
+            log: Log::Following,
+            after: None
+        }]
+    );
+}
+
+#[test]
+fn a_refresh_with_nothing_in_common_replaces_the_log() {
+    let mut app = with_log(Log::Following, page_of(1, 3, Some("old")));
+    let _ = press(&mut app, ":e!<CR>");
+
+    let fresh = Fetched::Log {
+        log: Log::Following,
+        after: None,
+        result: Ok(page_of(100, 2, Some("new"))),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: fresh,
+        now: FIXTURE_NOW,
+    });
+
+    assert!(shows(&app, "commit 100") && !shows(&app, "0000001"));
+    let effects = press(&mut app, "G");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Following,
+            after: Some(Cursor::new("new"))
+        }]
+    );
+}
+
+#[test]
+fn trending_is_ranked_so_a_refresh_replaces_it_in_order() {
+    let mut app = with_log(Log::Trending, page_of(1, 3, None));
+    let _ = press(&mut app, ":e!<CR>");
+
+    let mut ranked = page_of(1, 3, None);
+    ranked.items.reverse();
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Trending,
+            after: None,
+            result: Ok(ranked),
+        },
+        now: FIXTURE_NOW,
+    });
+
+    let _ = press(&mut app, "gg");
+    assert!(screen(&app).rows[1].contains("0000003"));
+}
+
+/// The poll wake-up among `effects`, if any.
+fn poll(effects: &[Effect]) -> Option<(std::time::Duration, Wake)> {
+    wakes(effects)
+        .into_iter()
+        .find(|(after, _)| after.as_secs() >= 15)
+}
+
+#[test]
+fn following_is_polled_every_15_seconds_and_every_30_without_focus() {
+    let (mut app, _) = starting();
+    let effects = net(&mut app, NetEvent::Connected(me("ada", true)));
+    let (after, token) = poll(&effects).expect("polling starts once connected");
+    assert_eq!(after.as_secs(), 15);
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result: Ok(page_of(1, 3, None)),
+        },
+        now: 0,
+    });
+
+    let _ = press(&mut app, "jk");
+    let _ = app.update(Msg::FocusLost);
+    let effects = app.update(Msg::Wake(token));
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Following,
+            after: None
+        }]
+    );
+    assert_eq!(poll(&effects).map(|(after, _)| after.as_secs()), Some(30));
+}
+
+#[test]
+fn new_commits_arriving_while_reading_further_down_are_announced() {
+    let mut app = with_log(Log::Following, page_of(1, 10, None));
+    let _ = press(&mut app, "5]]<C-e><C-e>");
+
+    let mut newer = page_of(90, 2, None);
+    newer.items.extend(page_of(1, 10, None).items);
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result: Ok(newer),
+        },
+        now: FIXTURE_NOW,
+    });
+
+    assert_eq!(cmdline(&app), "2 new commits");
 }

@@ -58,6 +58,10 @@ pub struct App {
     generation: u64,
     /// Whether the which-key popup is showing.
     which_key: bool,
+    /// Whether the logs are being polled.
+    polling: bool,
+    /// The generation of poll wake-ups, apart from keys so that typing does not stop polling.
+    poll_generation: u64,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -78,6 +82,8 @@ enum WakePurpose {
     KeyTimeout,
     /// Time to show the which-key popup.
     WhichKey,
+    /// Time to check the logs for new commits.
+    Poll,
 }
 
 /// Something that happened, for [`App::update`] to react to.
@@ -233,6 +239,8 @@ impl App {
             connection: Connection::Checking,
             generation: 0,
             which_key: false,
+            polling: false,
+            poll_generation: 0,
         }
     }
 
@@ -256,9 +264,10 @@ impl App {
                 self.which_key = false;
                 let mut effects = self.key(key);
                 effects.extend(self.wake_ups());
+                effects.extend(self.load_more());
                 effects
             }
-            Msg::Wake(token) if token.generation != self.generation => Vec::new(),
+            Msg::Wake(token) if token.generation != self.generation_of(token.purpose) => Vec::new(),
             Msg::Wake(Wake { purpose, .. }) => match purpose {
                 WakePurpose::KeyTimeout => {
                     self.which_key = false;
@@ -269,6 +278,7 @@ impl App {
                     self.which_key = !self.keymap.pending_keys().is_empty();
                     Vec::new()
                 }
+                WakePurpose::Poll => self.poll(),
             },
             Msg::Paste(text) => {
                 if let AppMode::Cmdline(cmdline) = &mut self.mode {
@@ -378,6 +388,21 @@ impl App {
             });
         }
         wakes
+    }
+
+    /// The current generation of wake-ups for `purpose`: tokens of an older one are stale.
+    fn generation_of(&self, purpose: WakePurpose) -> u64 {
+        match purpose {
+            WakePurpose::KeyTimeout | WakePurpose::WhichKey => self.generation,
+            WakePurpose::Poll => self.poll_generation,
+        }
+    }
+
+    /// Shows buffer `index` in the current window, which starts at its top when it showed another buffer.
+    fn show_buffer(&mut self, index: usize) {
+        if self.windows.current().buffer != index {
+            *self.windows.current_mut() = Window::new(index);
+        }
     }
 
     /// The keymap table for the current mode.
@@ -624,6 +649,15 @@ impl App {
             Command::Colorscheme(Some(name)) => self.theme = Theme::named(&name)?,
             Command::Source(path) => return Ok(vec![Effect::Source(path)]),
             Command::Connect(link) => return self.connect(link),
+            Command::Edit(None) => {
+                return self
+                    .refresh(self.windows.current().buffer)
+                    .ok_or_else(|| "Nothing to reload here".to_owned());
+            }
+            Command::Edit(Some(name)) => match logs::named(&name) {
+                Some(log) => return Ok(self.open_log(log)),
+                None => return Err(format!("E94: No matching buffer for {name}")),
+            },
             Command::Agree => match &self.connection {
                 Connection::Terms(me) => {
                     return Ok(vec![Effect::AcceptTerms(
@@ -827,12 +861,12 @@ impl App {
             }
             None => {
                 let index = self.log_buffer(devnull_api::Log::Following);
-                (index, self.load_log(index))
+                let mut effects = self.load_log(index);
+                effects.extend(self.start_polling());
+                (index, effects)
             }
         };
-        if self.windows.current().buffer != index {
-            *self.windows.current_mut() = Window::new(index);
-        }
+        self.show_buffer(index);
         effects
     }
 
