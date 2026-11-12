@@ -8,6 +8,8 @@ mod window;
 #[cfg(test)]
 mod tests;
 
+use std::time::Duration;
+
 use ratatui::layout::Rect;
 
 use crate::doc::{
@@ -41,6 +43,30 @@ pub struct App {
     /// Patterns searched for, oldest first.
     search_history: Vec<String>,
     last_search: Option<LastSearch>,
+    /// Counts key presses, so a [`Wake`] asked for before the latest key is recognised as stale.
+    generation: u64,
+    /// Whether the which-key popup is showing.
+    which_key: bool,
+}
+
+/// How long pending keys wait before the which-key popup shows what can follow them.
+const WHICH_KEY_DELAY: Duration = Duration::from_millis(200);
+
+/// A token the runtime hands back as [`Msg::Wake`] once the delay of an [`Effect::Wake`] has passed. It is only
+/// meaningful to the app that asked for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Wake {
+    purpose: WakePurpose,
+    /// The key press it belongs to; any later key makes it stale.
+    generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WakePurpose {
+    /// `'timeoutlen'` passed on an ambiguous key sequence.
+    KeyTimeout,
+    /// Time to show the which-key popup.
+    WhichKey,
 }
 
 /// Something that happened, for [`App::update`] to react to.
@@ -54,6 +80,8 @@ pub enum Msg {
     FocusGained,
     /// The terminal lost focus.
     FocusLost,
+    /// The delay of an [`Effect::Wake`] has passed.
+    Wake(Wake),
     /// The terminal has this size, in cells; sent at startup and on every resize.
     Resize {
         /// Columns.
@@ -70,6 +98,13 @@ pub enum Effect {
     Quit,
     /// Put this text on the system clipboard (OSC 52).
     Copy(String),
+    /// Send [`Msg::Wake`] with `token` once `after` has passed.
+    Wake {
+        /// How long to wait.
+        after: Duration,
+        /// What to send back.
+        token: Wake,
+    },
 }
 
 /// A named document, such as a log or a thread.
@@ -144,6 +179,8 @@ impl App {
             ex_history: Vec::new(),
             search_history: Vec::new(),
             last_search: None,
+            generation: 0,
+            which_key: false,
         }
     }
 
@@ -162,7 +199,25 @@ impl App {
     /// Reacts to `msg`, returning what the runtime must do.
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
-            Msg::Key(key) => self.key(key),
+            Msg::Key(key) => {
+                self.generation += 1;
+                self.which_key = false;
+                let mut effects = self.key(key);
+                effects.extend(self.wake_ups());
+                effects
+            }
+            Msg::Wake(token) if token.generation != self.generation => Vec::new(),
+            Msg::Wake(Wake { purpose, .. }) => match purpose {
+                WakePurpose::KeyTimeout => {
+                    self.which_key = false;
+                    let ran = self.keymap.timeout(self.keymap_mode());
+                    self.run_all(ran)
+                }
+                WakePurpose::WhichKey => {
+                    self.which_key = !self.keymap.pending_keys().is_empty();
+                    Vec::new()
+                }
+            },
             Msg::Paste(text) => {
                 if let AppMode::Cmdline(cmdline) = &mut self.mode {
                     cmdline.paste(&text);
@@ -243,6 +298,29 @@ impl App {
         ran.into_iter()
             .flat_map(|invocation| self.run(invocation))
             .collect()
+    }
+
+    /// The wake-ups pending keys need: the which-key popup, and the timeout of an ambiguous sequence.
+    fn wake_ups(&self) -> Vec<Effect> {
+        let in_keymap_mode = matches!(self.mode, AppMode::Normal | AppMode::Visual(_));
+        if !in_keymap_mode || self.keymap.pending_keys().is_empty() {
+            return Vec::new();
+        }
+        let wake = |purpose| Wake {
+            purpose,
+            generation: self.generation,
+        };
+        let mut wakes = vec![Effect::Wake {
+            after: WHICH_KEY_DELAY,
+            token: wake(WakePurpose::WhichKey),
+        }];
+        if self.keymap.is_ambiguous() {
+            wakes.push(Effect::Wake {
+                after: Duration::from_millis(self.options.timeoutlen),
+                token: wake(WakePurpose::KeyTimeout),
+            });
+        }
+        wakes
     }
 
     /// The keymap table for the current mode.

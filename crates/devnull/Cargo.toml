@@ -17,7 +17,7 @@ crossterm = { version = "0.29", default-features = false, features = ["events", 
 futures-util = { version = "0.3", default-features = false }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color", "layout-cache"] }
 regex = "1"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
 unicode-segmentation = "1"
 unicode-width = { version = "0.2", default-features = false }
 

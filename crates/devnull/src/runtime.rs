@@ -15,6 +15,7 @@ use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
 use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
+use tokio::sync::mpsc;
 
 use crate::app::{App, Effect, Msg};
 use crate::key::Key;
@@ -33,18 +34,35 @@ pub async fn run() -> io::Result<()> {
         height: size.height,
     });
     let mut events = EventStream::new();
+    // Messages that effects send back later, such as wake-ups.
+    let (later, mut arrived) = mpsc::unbounded_channel();
     loop {
         terminal.draw(|frame| app.render(frame))?;
-        let Some(event) = events.next().await else {
-            return Ok(());
-        };
-        let Some(msg) = to_msg(event?) else {
-            continue;
+        // Both branches are cancel-safe: an event or message not taken now stays queued.
+        let msg = tokio::select! {
+            event = events.next() => {
+                let Some(event) = event else {
+                    return Ok(());
+                };
+                match to_msg(event?) {
+                    Some(msg) => msg,
+                    None => continue,
+                }
+            }
+            Some(msg) = arrived.recv() => msg,
         };
         for effect in app.update(msg) {
             match effect {
                 Effect::Quit => return Ok(()),
                 Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
+                Effect::Wake { after, token } => {
+                    let later = later.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(after).await;
+                        // Sending only fails once the loop above has ended, when nobody needs the wake-up.
+                        let _ = later.send(Msg::Wake(token));
+                    });
+                }
             }
         }
     }

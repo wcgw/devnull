@@ -3,7 +3,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, AppMode, MessageKind};
@@ -68,6 +68,10 @@ impl App {
             Paragraph::new(status),
             Rect::new(0, area.bottom(), width, 1),
         );
+
+        if self.which_key {
+            self.render_which_key(frame);
+        }
 
         let last = height.saturating_sub(1);
         let cmdline_area = Rect::new(0, last, width, 1);
@@ -142,6 +146,65 @@ impl App {
             Paragraph::new(shown),
             Rect::new(x, area.y, SHOWCMD_WIDTH, 1),
         );
+    }
+
+    /// The which-key popup: what may follow the pending keys, in columns, just above the command line.
+    fn render_which_key(&self, frame: &mut Frame<'_>) {
+        let (width, height) = self.size;
+        let entries: Vec<(String, String)> = self
+            .keymap
+            .continuations(self.keymap_mode())
+            .into_iter()
+            .map(|c| (c.keys, c.description))
+            .collect();
+        if entries.is_empty() || width < 8 || height < 5 {
+            return;
+        }
+        let entry_width = entries
+            .iter()
+            .map(|(k, d)| k.width() + d.width() + 3)
+            .max()
+            .unwrap_or(1)
+            + 3;
+        let inner_width = usize::from(width - 2);
+        let columns = (inner_width / entry_width).max(1);
+        let rows = entries.len().div_ceil(columns).min(usize::from(height) / 2);
+        let popup_height = to_u16(rows) + 2;
+        let area = Rect::new(0, height - 1 - popup_height, width, popup_height);
+        let title: String = self
+            .keymap
+            .pending_keys()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let block = Block::bordered()
+            .title(format!(" {title} "))
+            .border_style(Group::FloatBorder.style())
+            .style(Group::NormalFloat.style());
+        let inner = block.inner(area);
+        frame.render_widget(Clear, area);
+        frame.render_widget(block, area);
+        for (i, (key, description)) in entries.iter().take(rows * columns).enumerate() {
+            let (row, column) = (i / columns, i % columns);
+            let group = if description == "+prefix" {
+                Group::WhichKeyGroup
+            } else {
+                Group::WhichKeyDesc
+            };
+            let line = Line::from(vec![
+                Span::styled(key.as_str(), Group::WhichKey.style()),
+                Span::styled(" → ", Group::WhichKeySeparator.style()),
+                Span::styled(description.as_str(), group.style()),
+            ]);
+            let x = inner.x + to_u16(column * entry_width);
+            let cell = Rect::new(
+                x,
+                inner.y + to_u16(row),
+                to_u16(entry_width).min(inner.right() - x),
+                1,
+            );
+            frame.render_widget(Paragraph::new(line), cell);
+        }
     }
 
     /// `:messages`: the history over the bottom of the screen, then Vim's prompt to continue.

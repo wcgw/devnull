@@ -459,7 +459,12 @@ fn big_v_yanks_rows_and_reports_more_than_two_lines() {
 fn yy_yanks_the_cursor_row() {
     let mut app = app_with(&["one two", "three"], 30, 7);
 
-    assert_eq!(press(&mut app, "jyy"), [Effect::Copy("three\n".into())]);
+    let copied: Vec<Effect> = press(&mut app, "jyy")
+        .into_iter()
+        .filter(|e| matches!(e, Effect::Copy(_)))
+        .collect();
+
+    assert_eq!(copied, [Effect::Copy("three\n".into())]);
 }
 
 #[test]
@@ -519,4 +524,101 @@ fn a_search_landing_in_a_closed_fold_opens_it() {
 
     assert_eq!(screen(&app).rows[1..5], ["head", "one", "fish", "three"]);
     assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+/// The wake-up an effect list asks for, if any, with its delay.
+fn wakes(effects: &[Effect]) -> Vec<(std::time::Duration, Wake)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Wake { after, token } => Some((*after, *token)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_ambiguous_map_runs_when_timeoutlen_passes_without_another_key() {
+    let mut app = app_with(&["one", "two", "three"], 30, 7);
+    let _ = press(&mut app, ":nnoremap d j<CR>:set tm=300<CR>");
+
+    let effects = press(&mut app, "d");
+    let timeout = wakes(&effects)
+        .into_iter()
+        .find(|(after, _)| after.as_millis() == 300)
+        .expect("a timeout");
+    assert_eq!(screen(&app).cursor, (0, 1));
+
+    let _ = app.update(Msg::Wake(timeout.1));
+    assert_eq!(screen(&app).cursor, (0, 2));
+}
+
+#[test]
+fn a_wake_up_from_before_the_last_key_is_ignored() {
+    let mut app = app_with(&["one", "two", "three"], 30, 7);
+    let _ = press(&mut app, ":nnoremap d j<CR>");
+    let stale = wakes(&press(&mut app, "d"))
+        .into_iter()
+        .map(|(_, token)| token)
+        .collect::<Vec<_>>();
+
+    let _ = press(&mut app, "<Esc>");
+    for token in stale {
+        let _ = app.update(Msg::Wake(token));
+    }
+
+    assert_eq!(screen(&app).cursor, (0, 1));
+}
+
+#[test]
+fn which_key_shows_what_can_follow_a_prefix_after_a_moment() {
+    let mut app = app_with(&["one"], 60, 14);
+
+    let effects = press(&mut app, "z");
+    let (after, token) = wakes(&effects)[0];
+    assert_eq!(after.as_millis(), 200);
+    assert!(
+        !screen(&app)
+            .rows
+            .iter()
+            .any(|row| row.contains("open fold"))
+    );
+
+    let _ = app.update(Msg::Wake(token));
+    let rows = screen(&app).rows;
+    assert!(
+        rows.iter().any(|row| row.contains("o → open fold")),
+        "{rows:#?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("t → row to top")),
+        "{rows:#?}"
+    );
+
+    let _ = press(&mut app, "o");
+    assert!(
+        !screen(&app)
+            .rows
+            .iter()
+            .any(|row| row.contains("open fold"))
+    );
+}
+
+#[test]
+fn which_key_marks_groups_of_further_keys() {
+    let mut app = app_with(&["one"], 60, 14);
+    let _ = press(&mut app, ":nnoremap <lt>leader>ab j<CR>");
+
+    let effects = press(&mut app, "<Space>");
+    let _ = app.update(Msg::Wake(wakes(&effects)[0].1));
+
+    let rows = screen(&app).rows;
+    assert!(
+        rows.iter().any(|row| row.contains("1 → following log")),
+        "{rows:#?}"
+    );
+    assert!(
+        rows.iter().any(|row| row.contains("a → +prefix")),
+        "{rows:#?}"
+    );
 }

@@ -27,6 +27,18 @@ pub enum Group {
     MoreMsg,
     /// The Visual mode selection.
     Visual,
+    /// The background of popups.
+    NormalFloat,
+    /// The border of popups.
+    FloatBorder,
+    /// A key in the which-key popup.
+    WhichKey,
+    /// The arrow between a key and what it does.
+    WhichKeySeparator,
+    /// What a key does, in the which-key popup.
+    WhichKeyDesc,
+    /// A key that leads to more keys, in the which-key popup.
+    WhichKeyGroup,
 }
 
 impl Group {
@@ -45,6 +57,10 @@ impl Group {
             Self::WarningMsg => Style::new().fg(Color::Yellow),
             Self::MoreMsg => Style::new().fg(Color::Green),
             Self::Visual => Style::new().add_modifier(Modifier::REVERSED),
+            Self::NormalFloat | Self::WhichKeyDesc => Style::new(),
+            Self::FloatBorder | Self::WhichKeySeparator => Style::new().fg(Color::DarkGray),
+            Self::WhichKey => Style::new().fg(Color::Cyan),
+            Self::WhichKeyGroup => Style::new().fg(Color::Magenta),
         }
     }
 }
