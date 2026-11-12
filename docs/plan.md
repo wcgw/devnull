@@ -367,7 +367,8 @@ from M1 even though graphics land in M6.
   caller does (`NotApproved`, `BadSignature`, `NotFound`, `RateLimited`, `Network`, `Refused`, `Invalid`); tested
   against a mock server that verifies every signature. Checked live against dev-null.sh (`/me`, three logs, a second
   page) and against all 89 commits captured in M0.4.
-- [ ] **M2.3** `devnull-api` enrollment: the M0.3 loopback flow as a library.
+- [x] **M2.3** `devnull-api` enrollment: the M0.3 loopback flow as a library (`start`, `wait`, `code_from_url` for
+  SSH, `redeem` with the identity check), tested with a mock server and the browser played by plain requests.
 - [ ] **M2.4** `dn` connection: load the key, verify with `/me`, a `connect` buffer when there is none, terms consent.
 - [ ] **M2.5** `dn` log buffers rendered from real commits (segments, mentions, quotes, link cards, counts), through
   request/response messages. ⏸ try against dev-null.sh.

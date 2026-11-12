@@ -4,6 +4,7 @@
 //! SSHSIG request signing. The design notes live in `docs/plan.md` (D8, D9 and "API notes").
 
 mod client;
+pub mod enroll;
 pub mod model;
 pub mod signing;
 

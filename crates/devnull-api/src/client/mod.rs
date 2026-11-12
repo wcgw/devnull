@@ -58,7 +58,7 @@ impl Log {
 /// An origin that is not `https://host` (or `http://` on loopback, for tests).
 #[derive(Debug, thiserror::Error)]
 #[error("the server must be an https origin with no path, or http on loopback: {0}")]
-pub struct InvalidOrigin(String);
+pub struct InvalidOrigin(pub(crate) String);
 
 /// Why a request did not succeed, by what a caller can do about it.
 #[derive(Debug, thiserror::Error)]
@@ -206,6 +206,19 @@ impl Client {
                 .filter(|cursor| !cursor.is_empty())
                 .map(Cursor),
         })
+    }
+
+    /// `POST /api/v1/devices`: exchanges an approval `code` and its PKCE `verifier` for this device's approval.
+    pub(crate) async fn enroll(&self, code: &str, verifier: &str) -> Result<Me, ApiError> {
+        let url = self
+            .origin
+            .join("/api/v1/devices")
+            .map_err(|error| ApiError::Invalid(error.to_string()))?;
+        let body = serde_json::json!({ "code": code, "code_verifier": verifier }).to_string();
+        let bytes = self.send(Method::POST, url, body.into_bytes()).await?;
+        let envelope: Envelope<Me> =
+            serde_json::from_slice(&bytes).map_err(|error| ApiError::Invalid(error.to_string()))?;
+        Ok(envelope.data)
     }
 
     async fn get<T: DeserializeOwned>(
