@@ -436,10 +436,42 @@ impl App {
         self.show_buffer_at(index, Cursor::new())
     }
 
-    /// As [`App::show_buffer`], starting at `start` when the window never showed the buffer.
+    /// As [`App::show_buffer`], starting at `start` when the window never showed the buffer. Showing another buffer
+    /// is a jump, as starting to edit another file is in Vim, unless it is from a status page such as `connect`.
     fn show_buffer_at(&mut self, index: usize, start: Cursor) -> Vec<Effect> {
-        self.windows.current_mut().switch_to(index, start);
+        let area = self.window_area();
+        let window = self.windows.current_mut();
+        let shown = &self.buffers[window.buffer];
+        if index != window.buffer && shown.is_listed() {
+            let layout = Layout::new(&shown.doc, area.width);
+            window.record_jump(&layout, window.cursor.clone());
+        }
+        window.switch_to(index, start);
         self.load(index)
+    }
+
+    /// After the current window jumped from buffer `before`: keeps its cursor in view, and loads the buffer it
+    /// jumped to, if it is another, unless it has what it shows or is getting it.
+    fn jumped(&mut self, before: usize) -> Vec<Effect> {
+        self.follow_cursor();
+        let now = self.windows.current().buffer;
+        if now == before {
+            Vec::new()
+        } else {
+            self.load(now)
+        }
+    }
+
+    /// `:pop` (`<C-t>`): back to where the window was when `:open` or `:profile` last left for another buffer.
+    fn pop_tag(&mut self) -> Result<Vec<Effect>, String> {
+        let area = self.window_area();
+        let window = self.windows.current_mut();
+        let before = window.buffer;
+        let layout = Layout::new(&self.buffers[before].doc, area.width);
+        if !window.pop_tag(&layout) {
+            return Err("E73: Tag stack empty".to_owned());
+        }
+        Ok(self.jumped(before))
     }
 
     /// The listed buffers' indices, in order: what `:ls`, `:b` and the bufferline count.
@@ -618,12 +650,14 @@ impl App {
                 window.follow_cursor(&layout, viewport);
             }
             Action::JumpOlder => {
+                let before = window.buffer;
                 window.jump_older(&layout, count);
-                window.follow_cursor(&layout, viewport);
+                return self.jumped(before);
             }
             Action::JumpNewer => {
+                let before = window.buffer;
                 window.jump_newer(count);
-                window.follow_cursor(&layout, viewport);
+                return self.jumped(before);
             }
             Action::Scroll(scroll) => window.scroll(&layout, viewport, scroll, count),
             Action::Place(place) => window.place(&layout, viewport, place),
@@ -775,8 +809,9 @@ impl App {
             }
             Command::NextBuffer { forward } => return Ok(self.cycle_buffer(forward)),
             Command::Edit(Some(name)) => return self.edit(&name),
-            Command::Open => return self.open(),
-            Command::Profile(handle) => return self.profile(handle),
+            Command::Open => return self.following(Self::open),
+            Command::Profile(handle) => return self.following(|app| app.profile(handle)),
+            Command::Pop => return self.pop_tag(),
             Command::Browse { link } => return self.browse(link),
             Command::YankLink => return self.yank_link(),
             Command::Hover => return self.hover(),
@@ -797,6 +832,18 @@ impl App {
         let window = self.windows.current();
         let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
         window.cursor.target(&layout).cloned()
+    }
+
+    /// Runs `follow` (`:open`, `:profile`), noting where the window was on the tag stack if it shows another buffer
+    /// after.
+    fn following(
+        &mut self,
+        follow: impl FnOnce(&mut Self) -> Result<Vec<Effect>, String>,
+    ) -> Result<Vec<Effect>, String> {
+        let from = self.windows.current().here();
+        let outcome = follow(self);
+        self.windows.current_mut().push_tag(from);
+        outcome
     }
 
     /// `:open`: what the text under the cursor refers to: a link opens in the browser, a commit's thread, a profile

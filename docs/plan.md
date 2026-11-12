@@ -74,7 +74,8 @@ Defaults:
 | Key | Action | Ex |
 | --- | --- | --- |
 | `<CR>`, `<C-]>` | Open under cursor: mention → profile, hash/quote → thread, link → browser, else the commit's thread | `:open` |
-| `<C-o>`, `<C-i>`, `<C-t>` | Jumplist back/forward | |
+| `<C-o>`, `<C-i>` (`<Tab>`) | Jumplist back/forward, across buffers | |
+| `<C-t>` | Back to where `<CR>`/`gd` left for another buffer (tag stack) | `:pop` |
 | `gd` | Profile of the commit's author | `:profile` |
 | `K` | Hover card (author, link card, poll) | `:hover` |
 | `gx` / `gX` | Open URL under cursor / the commit on the web | `:browse` |
@@ -418,7 +419,11 @@ from M1 even though graphics land in M6.
   `:hover` (`K`) floats a card next to the cursor until the next key: a link card whole, an account's profile head
   (fetched), or elsewhere in a commit, its author's. Polls get theirs when polls are drawn. Checked live: `K` on a
   commit and `gy` (OSC 52); `gx`/`gX` only in tests, as they open the browser.
-- [ ] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed.
+- [x] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed. Entries carry
+  their buffer, and showing another buffer is a jump (as starting to edit another file is in Vim), except from a
+  status page. `<C-t>` (`:pop`) is Vim's tag stack: `:open` and `:profile` push where they left from when they show
+  another buffer. `<Tab>` also jumps forward: terminals without the kitty keyboard protocol send `<C-i>` as `<Tab>`
+  (a gap since M1). Checked live without the kitty protocol: `<CR>`, `<C-o>`, `<Tab>`, `<C-t>`.
 - [ ] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`).
 
 ### M4 Inbox

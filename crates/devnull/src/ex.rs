@@ -81,6 +81,8 @@ pub enum Command {
     YankLink,
     /// `:hover`: a card about what is under the cursor: an account, a link, a commit's author.
     Hover,
+    /// `:pop`: back to where `:open` or `:profile` last left for another buffer from (Vim's tag stack).
+    Pop,
     /// `:profile {handle}` opens a profile; `:profile` alone, the profile of the account under the cursor, or of the
     /// author of the commit under it.
     Profile(Option<String>),
@@ -169,6 +171,7 @@ enum Name {
     Browse,
     YankLink,
     Hover,
+    Pop,
     Edit,
     Buffer,
     Buffers,
@@ -215,6 +218,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("browse", 3, Name::Browse),
     ("yanklink", 5, Name::YankLink),
     ("hover", 3, Name::Hover),
+    ("pop", 2, Name::Pop),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -286,6 +290,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         },
         Name::YankLink => Command::YankLink,
         Name::Hover => Command::Hover,
+        Name::Pop => Command::Pop,
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Buffer => Command::Buffer(required(args)?.to_owned()),
         Name::Buffers => Command::Buffers,

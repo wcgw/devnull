@@ -2443,3 +2443,149 @@ fn a_profile_that_cannot_load_is_reported_once_with_a_card_waiting_for_it() {
         .count();
     assert_eq!(reported, 1, "{:#?}", screen(&app).rows);
 }
+
+fn cursor_row(app: &App) -> String {
+    let screen = screen(app);
+    screen.rows[screen.cursor.1 as usize].clone()
+}
+
+#[test]
+fn ctrl_o_from_a_thread_returns_to_where_enter_was_pressed_and_ctrl_i_goes_back() {
+    let mut app = with_log(Log::Following, page_of(1, 5, None));
+    let _ = press(&mut app, "2]]j<CR>");
+    assert!(statusline(&app).contains("thread/c3"));
+
+    let effects = press(&mut app, "<C-o>");
+
+    assert_eq!(fetches(&effects), []);
+    assert!(statusline(&app).contains("log/following"));
+    assert_eq!(cursor_row(&app), "commit 3");
+    let _ = press(&mut app, "<C-i>");
+    assert!(statusline(&app).contains("thread/c3"));
+}
+
+#[test]
+fn the_jumplist_crosses_buffers_and_jumps_within_them() {
+    let mut app = with_log(Log::Following, page_of(1, 5, None));
+    let _ = press(&mut app, "G<Space>2");
+    let latest = Fetched::Log {
+        log: Log::Latest,
+        after: None,
+        result: Ok(page_of(10, 5, None)),
+    };
+    let _ = arrive(&mut app, latest);
+    let _ = press(&mut app, "G");
+
+    let _ = press(&mut app, "<C-o>");
+    assert!(
+        statusline(&app).contains("log/latest") && cursor_row(&app).starts_with("Ada @ada"),
+        "back to the top of latest"
+    );
+    let _ = press(&mut app, "<C-o>");
+    assert!(
+        statusline(&app).contains("log/following") && shows(&app, "commit 5"),
+        "back to the end of following, where <Space>2 left it"
+    );
+    let _ = press(&mut app, "<C-o>");
+    assert!(
+        statusline(&app).contains("log/following") && cursor_row(&app).contains("0000001"),
+        "the top of following"
+    );
+    let _ = press(&mut app, "3<C-i>");
+    assert!(statusline(&app).contains("log/latest"));
+}
+
+#[test]
+fn jumps_never_lead_back_to_the_connect_page() {
+    let mut app = started();
+
+    let _ = press(&mut app, "<C-o>");
+
+    assert!(statusline(&app).contains("log/following"));
+}
+
+#[test]
+fn ctrl_t_returns_from_what_enter_opened_however_far_one_went_there() {
+    let mut app = with_log(Log::Following, page_of(1, 5, None));
+    let _ = press(&mut app, "2]]j<CR>");
+    let replies = Fetched::Replies {
+        id: "c3".into(),
+        after: None,
+        result: Ok(page_of(10, 5, None)),
+    };
+    let _ = arrive(&mut app, replies);
+    let thread = Fetched::Thread {
+        id: "c3".into(),
+        result: Ok(thread_of(&[], commit_with("c3", "the commit", None))),
+    };
+    let _ = arrive(&mut app, thread);
+    // <CR> on the thread's own commit stays in the thread: nothing to come back from.
+    let _ = press(&mut app, "<CR>Ggg");
+
+    let _ = press(&mut app, "<C-t>");
+
+    assert!(statusline(&app).contains("log/following"));
+    assert_eq!(cursor_row(&app), "commit 3");
+    let _ = press(&mut app, "<C-o>");
+    assert!(
+        statusline(&app).contains("thread/c3") && cursor_row(&app).contains("0000003"),
+        "<C-t> is a jump too: back to the top of the thread, where it was pressed"
+    );
+    let _ = press(&mut app, "<C-t>");
+    assert_eq!(cmdline(&app), "E73: Tag stack empty");
+}
+
+#[test]
+fn a_jump_back_to_a_buffer_that_could_not_load_asks_for_it_again() {
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+    let failed = Fetched::Log {
+        log: Log::Following,
+        after: None,
+        result: Err(FetchError::Failed("cannot reach the server".into())),
+    };
+    let _ = arrive(&mut app, failed);
+    let _ = press(&mut app, "<Space>2");
+
+    let effects = press(&mut app, "<C-o>");
+
+    assert!(statusline(&app).contains("log/following"));
+    assert_eq!(
+        fetches(&effects),
+        [Request::Log {
+            log: Log::Following,
+            after: None
+        }]
+    );
+}
+
+#[test]
+fn ctrl_t_returns_from_a_profile_gd_opened() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    let _ = press(&mut app, "j$gd");
+    assert!(statusline(&app).contains("@lin"));
+
+    let _ = press(&mut app, ":pop<CR>");
+
+    assert!(statusline(&app).contains("log/following"));
+    assert_eq!(screen(&app).cursor.1, 2);
+}
+
+#[test]
+fn after_a_jump_the_view_stays_put_until_the_cursor_leaves_it() {
+    let mut app = with_log(Log::Following, page_of(1, 5, None));
+
+    let _ = press(&mut app, "G<C-o>j");
+
+    // Row 0 is the bufferline: the cursor is on the window's second row, the view still at the top.
+    assert_eq!(screen(&app).cursor.1, 2);
+}
+
+#[test]
+fn tab_goes_forward_like_ctrl_i_as_terminals_without_the_kitty_protocol_send_it() {
+    let mut app = app_with(&["one", "two", "three", "four", "five"], 30, 10);
+
+    let _ = press(&mut app, "G<C-o><Tab>");
+
+    assert_eq!(screen(&app).cursor, (0, 5));
+}

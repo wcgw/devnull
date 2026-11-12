@@ -683,15 +683,19 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
     for (notation, action, description) in actions {
         normal.bind(keys(notation), Target::Action(action), description);
     }
-    normal.bind(
-        keys("<C-i>"),
-        Target::Action(Action::JumpNewer),
-        "jump forward",
-    );
-    let commands: [(&str, &str, &str); 30] = [
+    // Without the kitty keyboard protocol, terminals send <C-i> as <Tab>; as in Vim, both go forward.
+    for notation in ["<C-i>", "<Tab>"] {
+        normal.bind(
+            keys(notation),
+            Target::Action(Action::JumpNewer),
+            "jump forward",
+        );
+    }
+    let commands: [(&str, &str, &str); 31] = [
         ("q", "quit", "close window"),
         ("<CR>", "open", "open under cursor"),
         ("<C-]>", "open", "open under cursor"),
+        ("<C-t>", "pop", "back from what was opened"),
         ("gd", "profile", "author's profile"),
         ("K", "hover", "hover card"),
         ("gx", "browse link", "open link in browser"),

@@ -13,25 +13,35 @@ pub(super) struct Window {
     pub(super) cursor: Cursor,
     /// The text at the first row shown.
     top: Cursor,
-    /// Where jumps started from, oldest first (Vim's jumplist).
-    jumps: Vec<Cursor>,
+    /// Where jumps started from, oldest first, in whichever buffer (Vim's jumplist).
+    jumps: Vec<Jump>,
     /// The entry `<C-o>` and `<C-i>` last went to; `jumps.len()` when they haven't since the last jump.
     jump: usize,
+    /// Where `:open` and `:profile` left for another buffer from, newest last (Vim's tag stack).
+    tags: Vec<Jump>,
     /// Where this window left the buffers it showed before, to return there.
     left: HashMap<usize, View>,
 }
 
-/// Where a window was in a buffer it left: cursor, scroll position and jumps.
+/// A place in a buffer to go back to.
+#[derive(Debug, Clone)]
+pub(super) struct Jump {
+    buffer: usize,
+    cursor: Cursor,
+}
+
+/// Where a window was in a buffer it left: cursor and scroll position.
 #[derive(Debug, Clone)]
 struct View {
     cursor: Cursor,
     top: Cursor,
-    jumps: Vec<Cursor>,
-    jump: usize,
 }
 
 /// How many positions a jumplist keeps, as in Vim.
 const MAX_JUMPS: usize = 100;
+
+/// How many entries the tag stack keeps, as in Vim.
+const MAX_TAGS: usize = 20;
 
 /// How a window is shown: its height in rows, and the context (`'scrolloff'`) kept around the cursor.
 #[derive(Debug, Clone, Copy)]
@@ -59,12 +69,13 @@ impl Window {
             top: Cursor::new(),
             jumps: Vec::new(),
             jump: 0,
+            tags: Vec::new(),
             left: HashMap::new(),
         }
     }
 
     /// Shows buffer `buffer` instead, where this window last left it, or with the cursor at `start` when it never
-    /// showed it.
+    /// showed it. Not a jump by itself: see [`Window::record_jump`].
     pub(super) fn switch_to(&mut self, buffer: usize, start: Cursor) {
         if buffer == self.buffer {
             return;
@@ -72,31 +83,42 @@ impl Window {
         let view = self.left.remove(&buffer).unwrap_or(View {
             cursor: start,
             top: Cursor::new(),
-            jumps: Vec::new(),
-            jump: 0,
         });
         let leaving = View {
             cursor: std::mem::replace(&mut self.cursor, view.cursor),
             top: std::mem::replace(&mut self.top, view.top),
-            jumps: std::mem::replace(&mut self.jumps, view.jumps),
-            jump: std::mem::replace(&mut self.jump, view.jump),
         };
         self.left.insert(self.buffer, leaving);
         self.buffer = buffer;
     }
 
-    /// Remembers `from`, where a jump started, as the newest jumplist entry; an older entry on the same row goes.
+    /// Where the cursor is, to come back to.
+    pub(super) fn here(&self) -> Jump {
+        Jump {
+            buffer: self.buffer,
+            cursor: self.cursor.clone(),
+        }
+    }
+
+    /// Remembers `from`, where a jump started in the buffer shown (laid out as `layout`), as the newest jumplist
+    /// entry; an older entry on the same row of that buffer goes.
     pub(super) fn record_jump(&mut self, layout: &Layout<'_>, from: Cursor) {
         let row = from.screen(layout).row;
-        self.jumps.retain(|jump| jump.screen(layout).row != row);
-        self.jumps.push(from);
+        let buffer = self.buffer;
+        self.jumps
+            .retain(|jump| jump.buffer != buffer || jump.cursor.screen(layout).row != row);
+        self.jumps.push(Jump {
+            buffer,
+            cursor: from,
+        });
         if self.jumps.len() > MAX_JUMPS {
             self.jumps.remove(0);
         }
         self.jump = self.jumps.len();
     }
 
-    /// `<C-o>`: back `count` entries. Going back from the newest position first remembers it, so `<C-i>` can return.
+    /// `<C-o>`: back `count` entries, in whichever buffer. Going back from the newest position first remembers it,
+    /// so `<C-i>` can return.
     pub(super) fn jump_older(&mut self, layout: &Layout<'_>, count: usize) {
         if self.jump == self.jumps.len() {
             self.record_jump(layout, self.cursor.clone());
@@ -105,7 +127,7 @@ impl Window {
         let target = self.jump.saturating_sub(count);
         if target != self.jump {
             self.jump = target;
-            self.cursor = self.jumps[target].clone();
+            self.go(self.jumps[target].clone());
         }
     }
 
@@ -114,8 +136,36 @@ impl Window {
         let target = self.jump + count;
         if target < self.jumps.len() {
             self.jump = target;
-            self.cursor = self.jumps[target].clone();
+            self.go(self.jumps[target].clone());
         }
+    }
+
+    /// Notes `from` as where the window left for another buffer to follow something, unless it is still there.
+    pub(super) fn push_tag(&mut self, from: Jump) {
+        if from.buffer == self.buffer {
+            return;
+        }
+        self.tags.push(from);
+        if self.tags.len() > MAX_TAGS {
+            self.tags.remove(0);
+        }
+    }
+
+    /// `<C-t>`: back to where the newest entry of the tag stack left from, as a jump (the buffer shown laid out as
+    /// `layout`). `false` when the stack is empty.
+    pub(super) fn pop_tag(&mut self, layout: &Layout<'_>) -> bool {
+        let Some(tag) = self.tags.pop() else {
+            return false;
+        };
+        self.record_jump(layout, self.cursor.clone());
+        self.go(tag);
+        true
+    }
+
+    /// Puts the cursor at `jump`, showing its buffer.
+    fn go(&mut self, jump: Jump) {
+        self.switch_to(jump.buffer, jump.cursor.clone());
+        self.cursor = jump.cursor;
     }
 
     /// The first row to show: where the view was, moved as little as possible to keep the cursor in view with
