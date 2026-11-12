@@ -26,7 +26,7 @@ use devnull_api::Answering;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Cursor, Direction, Document, FoldOp, LinkCard, Motion, Pattern, SearchOutcome, Selection,
+    Cursor, Direction, Document, LinkCard, Motion, Pattern, SearchOutcome, Selection,
     SelectionKind, Target,
 };
 use crate::ex::{self, Command};
@@ -814,11 +814,11 @@ impl App {
         self.windows.current_mut().follow_cursor(&layout, viewport);
     }
 
-    /// Opens the fold hiding the cursor, as Vim's `'foldopen'` does after a search.
+    /// Opens the folds hiding the cursor, as Vim's `'foldopen'` does after a search.
     fn open_fold_at_cursor(&mut self) {
         let window = self.windows.current_mut();
         let doc = &self.buffers[window.buffer].doc;
-        window.folds.fold(doc, &window.cursor, FoldOp::Open);
+        window.folds.reveal(doc, &window.cursor);
         self.follow_cursor();
     }
 

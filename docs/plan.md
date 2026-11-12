@@ -80,7 +80,7 @@ Defaults:
 | `K` | Hover card (author, link card, poll) | `:hover` |
 | `gx` / `gX` | Open URL under cursor / the commit on the web | `:browse` |
 | `]]`, `[[` | Next/previous commit | |
-| `zo zc za zR zM` | Folds: long commits, reply groups, notification groups | |
+| `zo zO zc zC za zA zR zM` | Folds: long commits, reply groups, notification groups; nested as in Vim | |
 | `c` | New commit | `:commit [@org]` |
 | `r` / `R` | Reply / quote | `:reply [@org]`, `:quote [@org]` |
 | `s` | Toggle star | `:star` |
@@ -328,9 +328,13 @@ from M1 even though graphics land in M6.
   - `V` selects screen rows; its yank joins the rows of a wrapped line without a break and ends with `\n`.
   - Folds are declared by buffers per block (`Content { lines, folds }`), keep their state across block replacement,
     and count as one stop for text motions.
-  - Known gap: folds don't nest. Since the v1 leftovers, fold state is per window, as in Vim: `zo zc za zR zM`
-    change the current window's, a split starts with its parent's, and a window keeps them across buffers (by
-    block, so a block dropped and added again starts as given); `*` falls back to the non-blank word, as Vim does.
+  - Since the v1 leftovers, fold state is per window, as in Vim: fold commands change the current window's, a split
+    starts with its parent's, and a window keeps them across buffers (by block, so a block dropped and added again
+    starts as given); `*` falls back to the non-blank word, as Vim does.
+  - Folds nest, as in Vim (a block's folds are apart or one holds the other; one overlapping otherwise is dropped):
+    `zo` opens the outermost closed fold under the cursor, `zc` closes the innermost open one outside it, `za` does
+    either, and `zO zC zA` go all the way (`zO` opens what is inside too); a search opens every fold hiding its
+    match. No buffer nests folds yet.
 - [x] **M1.4** Runtime: tokio (current-thread) loop, Elm core (`App::update(Msg) -> Vec<Effect>`), terminal
   setup/teardown with panic hook, focus events, bracketed paste (pastes never run commands), kitty keyboard protocol
   where supported (`<C-i>` ≠ `<Tab>`), `Key` type in Vim terms. Intro screen as a placeholder; `q` quits. Verified

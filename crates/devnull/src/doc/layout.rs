@@ -66,7 +66,7 @@ impl<'d> Layout<'d> {
         let mut first_row = Vec::with_capacity(doc.line_count());
         let mut line = 0;
         while line < doc.line_count() {
-            if let Some(fold) = doc.fold_at(line).filter(|fold| folds.is_closed(fold)) {
+            if let Some(fold) = outermost_closed(doc, &folds, line) {
                 first_row.extend(fold.lines.clone().map(|_| rows.len()));
                 rows.push(Row {
                     line,
@@ -101,11 +101,9 @@ impl<'d> Layout<'d> {
         self.doc
     }
 
-    /// The closed fold covering `line`, if any.
+    /// The closed fold hiding `line`, if any: the outermost.
     fn closed_fold_at(&self, line: usize) -> Option<FoldAt<'d>> {
-        self.doc
-            .fold_at(line)
-            .filter(|fold| self.folds.is_closed(fold))
+        outermost_closed(self.doc, &self.folds, line)
     }
 
     /// `pos`, or the start of the closed fold hiding it: where a motion that lands in a closed fold stops.
@@ -386,4 +384,12 @@ fn wrap(line: &Shaped, width: usize, mut emit: impl FnMut(usize, usize)) {
         }
     }
     emit(start, line.len());
+}
+
+/// The outermost of the folds of `doc` holding `line` that `folds` says are closed, if any: the largest, or of two as
+/// large, the first.
+fn outermost_closed<'d>(doc: &'d Document, folds: &Folds, line: usize) -> Option<FoldAt<'d>> {
+    doc.folds_holding(line)
+        .filter(|fold| folds.is_closed(fold))
+        .max_by_key(|fold| (fold.lines.len(), std::cmp::Reverse(fold.id.1)))
 }

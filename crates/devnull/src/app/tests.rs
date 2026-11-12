@@ -561,6 +561,55 @@ fn a_window_keeps_its_folds_in_a_buffer_it_leaves_and_comes_back_to() {
     assert!(shows(&app, "line 8"), "{:#?}", screen(&app).rows);
 }
 
+/// An app on a block of `head`, `one`, `fish`, `three`, `tail`: an outer fold over the middle three, and an inner
+/// one over `fish`, both closed.
+fn nested_folds_app() -> App {
+    let mut app = app_with(&[], 30, 9);
+    let lines = ["head", "one", "fish", "three", "tail"]
+        .map(Line::text)
+        .to_vec();
+    let fold = |lines, summary| Fold {
+        lines,
+        summary: Line::text(summary),
+        closed: true,
+    };
+    app.doc_mut().push_back(
+        "folded",
+        Content {
+            lines,
+            folds: vec![fold(1..4, "+ outer"), fold(2..3, "+ inner")],
+            ..Content::default()
+        },
+    );
+    app
+}
+
+#[test]
+fn nested_folds_open_and_close_a_level_or_all_of_them() {
+    let mut app = nested_folds_app();
+
+    let _ = press(&mut app, "jzo");
+    assert_eq!(
+        screen(&app).rows[1..6],
+        ["head", "one", "+ inner", "three", "tail"]
+    );
+    let _ = press(&mut app, "jzO");
+    assert_eq!(screen(&app).rows[3], "fish");
+    let _ = press(&mut app, "zC");
+    assert_eq!(screen(&app).rows[1..4], ["head", "+ outer", "tail"]);
+    let _ = press(&mut app, "zA");
+    assert_eq!(screen(&app).rows[3], "fish");
+}
+
+#[test]
+fn a_search_landing_in_nested_closed_folds_opens_them_all() {
+    let mut app = nested_folds_app();
+
+    let _ = press(&mut app, "/fish<CR>");
+
+    assert_eq!(screen(&app).rows[3], "fish");
+}
+
 #[test]
 fn a_search_landing_in_a_closed_fold_opens_it() {
     let mut app = folded_app();
@@ -617,7 +666,7 @@ fn a_wake_up_from_before_the_last_key_is_ignored() {
 
 #[test]
 fn which_key_shows_what_can_follow_a_prefix_after_a_moment() {
-    let mut app = app_with(&["one"], 60, 14);
+    let mut app = app_with(&["one"], 60, 20);
 
     let effects = press(&mut app, "z");
     let (after, token) = wakes(&effects)[0];

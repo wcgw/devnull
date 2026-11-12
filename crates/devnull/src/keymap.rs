@@ -39,7 +39,7 @@ pub enum Action {
     Yank,
     /// `<Esc>` in Visual mode.
     Escape,
-    /// `zo`, `zc`, `za`.
+    /// `zo`, `zO`, `zc`, `zC`, `za`, `zA`.
     Fold(FoldOp),
     /// `zR` (`open`) and `zM`.
     FoldAll {
@@ -648,7 +648,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         "leave visual",
     );
 
-    let actions: [(&str, Action, &str); 14] = [
+    let actions: [(&str, Action, &str); 17] = [
         (":", Action::Cmdline(CmdlineKind::Ex), "command line"),
         (
             "/",
@@ -674,8 +674,23 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         ),
         ("yy", Action::Yank, "yank row"),
         ("zo", Action::Fold(FoldOp::Open), "open fold"),
+        (
+            "zO",
+            Action::Fold(FoldOp::OpenRecursively),
+            "open folds recursively",
+        ),
         ("zc", Action::Fold(FoldOp::Close), "close fold"),
+        (
+            "zC",
+            Action::Fold(FoldOp::CloseRecursively),
+            "close folds recursively",
+        ),
         ("za", Action::Fold(FoldOp::Toggle), "toggle fold"),
+        (
+            "zA",
+            Action::Fold(FoldOp::ToggleRecursively),
+            "toggle folds recursively",
+        ),
         ("zR", Action::FoldAll { open: true }, "open all folds"),
         ("zM", Action::FoldAll { open: false }, "close all folds"),
         ("<C-o>", Action::JumpOlder, "jump back"),
@@ -970,7 +985,10 @@ mod tests {
         assert_eq!(
             next,
             [
+                ("A", "toggle folds recursively"),
+                ("C", "close folds recursively"),
                 ("M", "close all folds"),
+                ("O", "open folds recursively"),
                 ("R", "open all folds"),
                 ("a", "toggle fold"),
                 ("b", "row to bottom"),

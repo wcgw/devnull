@@ -12,6 +12,7 @@ mod tests;
 mod visual;
 mod word;
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
@@ -93,7 +94,8 @@ impl From<Vec<Line>> for Content {
     }
 }
 
-/// A foldable range of a block's lines.
+/// A foldable range of a block's lines. The folds of a block nest, as in Vim: two are apart or one holds the other
+/// (of two over the same lines, the first holds the second); one that overlaps another otherwise is dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fold {
     /// The folded lines, as indices into the block's lines.
@@ -104,15 +106,21 @@ pub struct Fold {
     pub closed: bool,
 }
 
-/// What `zo`, `zc` and `za` do to the fold under the cursor.
+/// What a fold command does to the folds holding the cursor's line, as in Vim, from the outermost in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FoldOp {
-    /// `zo`.
+    /// `zo`: opens the first closed fold.
     Open,
-    /// `zc`.
+    /// `zO`: opens the first closed fold and every fold inside it.
+    OpenRecursively,
+    /// `zc`: closes the last open fold before the first closed one.
     Close,
-    /// `za`.
+    /// `zC`: closes them all.
+    CloseRecursively,
+    /// `za`: `zo` when one is closed, else `zc`.
     Toggle,
+    /// `zA`: `zO` when one is closed, else `zC`.
+    ToggleRecursively,
 }
 
 /// A run of text sharing one highlight group and one target.
@@ -239,21 +247,63 @@ pub struct Folds {
 }
 
 impl Folds {
-    /// `zo`, `zc`, `za`: opens, closes or toggles the fold holding the cursor's line in `doc`, if any. The cursor
-    /// keeps its place in the text; while the fold is closed it is drawn on the fold's summary row.
+    /// Opens or closes folds holding the cursor's line in `doc` as `op` says. The cursor keeps its place in the
+    /// text; while a fold hides it, it is drawn on the fold's summary row.
     pub fn fold(&mut self, doc: &Document, cursor: &Cursor, op: FoldOp) {
-        if doc.line_count() == 0 {
-            return;
+        let holding = self.holding(doc, cursor);
+        let first_closed = holding.iter().position(|fold| self.is_closed(fold));
+        let opening = match op {
+            FoldOp::Open | FoldOp::OpenRecursively => true,
+            FoldOp::Close | FoldOp::CloseRecursively => false,
+            FoldOp::Toggle | FoldOp::ToggleRecursively => first_closed.is_some(),
+        };
+        let recursively = matches!(
+            op,
+            FoldOp::OpenRecursively | FoldOp::CloseRecursively | FoldOp::ToggleRecursively
+        );
+        if opening {
+            let Some(at) = first_closed else {
+                return;
+            };
+            let inside = recursively
+                .then(|| doc.folds_inside(&holding[at]))
+                .into_iter()
+                .flatten();
+            self.set(
+                std::iter::once(holding[at].id).chain(inside.map(|fold| fold.id)),
+                true,
+            );
+        } else {
+            let open = &holding[..first_closed.unwrap_or(holding.len())];
+            let closing = if recursively {
+                &holding[..]
+            } else {
+                open.last().map(std::slice::from_ref).unwrap_or_default()
+            };
+            self.set(closing.iter().map(|fold| fold.id), false);
         }
-        let Some(fold) = doc.fold_at(cursor.pos(doc).line) else {
-            return;
-        };
-        let closed = match op {
-            FoldOp::Open => false,
-            FoldOp::Close => true,
-            FoldOp::Toggle => !self.is_closed(&fold),
-        };
-        Rc::make_mut(&mut self.open).insert(fold.id, !closed);
+    }
+
+    /// Opens every fold hiding the cursor's line in `doc`, as a search landing there does.
+    pub fn reveal(&mut self, doc: &Document, cursor: &Cursor) {
+        let holding = self.holding(doc, cursor);
+        self.set(holding.iter().map(|fold| fold.id), true);
+    }
+
+    /// The folds holding the cursor's line in `doc`, the outermost first.
+    fn holding<'d>(&self, doc: &'d Document, cursor: &Cursor) -> Vec<FoldAt<'d>> {
+        if doc.line_count() == 0 {
+            return Vec::new();
+        }
+        let mut holding: Vec<FoldAt<'d>> = doc.folds_holding(cursor.pos(doc).line).collect();
+        holding.sort_by_key(|fold| (Reverse(fold.lines.len()), fold.id.1));
+        holding
+    }
+
+    /// Leaves the folds `ids` open, or closed.
+    fn set(&mut self, ids: impl Iterator<Item = (u64, usize)>, open: bool) {
+        let states = Rc::make_mut(&mut self.open);
+        states.extend(ids.map(|id| (id, open)));
     }
 
     /// `zR` (`open`) and `zM`: opens or closes every fold of `doc`.
@@ -300,16 +350,23 @@ impl Block {
 
     fn with_id(id: u64, key: BlockKey, content: Content) -> Self {
         let lines: Vec<Shaped> = content.lines.into_iter().map(Shaped::new).collect();
-        let folds = content
-            .folds
-            .into_iter()
-            .filter(|fold| !fold.lines.is_empty() && fold.lines.end <= lines.len())
-            .map(|fold| ShapedFold {
-                lines: fold.lines,
-                summary: Shaped::new(fold.summary),
-                closed: fold.closed,
-            })
-            .collect();
+        let mut folds: Vec<ShapedFold> = Vec::new();
+        for fold in content.folds {
+            let nests = |kept: &ShapedFold| {
+                let (a, b) = (&kept.lines, &fold.lines);
+                a.end <= b.start
+                    || b.end <= a.start
+                    || (a.start <= b.start && b.end <= a.end)
+                    || (b.start <= a.start && a.end <= b.end)
+            };
+            if !fold.lines.is_empty() && fold.lines.end <= lines.len() && folds.iter().all(nests) {
+                folds.push(ShapedFold {
+                    lines: fold.lines,
+                    summary: Shaped::new(fold.summary),
+                    closed: fold.closed,
+                });
+            }
+        }
         Self {
             id,
             key,
@@ -565,21 +622,35 @@ impl Document {
         self.reindex();
     }
 
-    /// The fold covering `line`, if any.
-    fn fold_at(&self, line: usize) -> Option<FoldAt<'_>> {
-        let block = self.block_of(line);
+    /// The folds holding `line`, in no particular order.
+    fn folds_holding(&self, line: usize) -> impl Iterator<Item = FoldAt<'_>> {
+        self.folds_of(self.block_of(line))
+            .filter(move |fold| fold.lines.contains(&line))
+    }
+
+    /// The folds inside `outer`, but for itself.
+    fn folds_inside<'d>(&'d self, outer: &FoldAt<'_>) -> impl Iterator<Item = FoldAt<'d>> {
+        let (id, lines) = (outer.id, outer.lines.clone());
+        self.folds_of(self.block_of(lines.start))
+            .filter(move |fold| {
+                fold.id != id && lines.start <= fold.lines.start && fold.lines.end <= lines.end
+            })
+    }
+
+    /// The folds of block `block`.
+    fn folds_of(&self, block: usize) -> impl Iterator<Item = FoldAt<'_>> {
         let start = self.starts[block];
-        let (index, fold) = self.blocks[block]
+        let id = self.blocks[block].id;
+        self.blocks[block]
             .folds
             .iter()
             .enumerate()
-            .find(|(_, fold)| fold.lines.contains(&(line - start)))?;
-        Some(FoldAt {
-            id: (self.blocks[block].id, index),
-            lines: start + fold.lines.start..start + fold.lines.end,
-            summary: &fold.summary,
-            closed: fold.closed,
-        })
+            .map(move |(index, fold)| FoldAt {
+                id: (id, index),
+                lines: start + fold.lines.start..start + fold.lines.end,
+                summary: &fold.summary,
+                closed: fold.closed,
+            })
     }
 
     /// The text of line `line` (from 0) of block `key`, if both are there.

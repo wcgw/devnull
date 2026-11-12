@@ -1069,6 +1069,226 @@ fn word_motions_go_through_an_open_fold_word_by_word() {
     );
 }
 
+/// A block of `head`, `a`, `b`, `c`, `d`, `tail` with `folds` as (lines, summary, closed), then a block `next`.
+fn nested(folds: &[(Range<usize>, &str, bool)]) -> Document {
+    let mut doc = Document::new();
+    let lines = ["head", "a", "b", "c", "d", "tail"]
+        .map(Line::text)
+        .to_vec();
+    let folds = folds
+        .iter()
+        .map(|(lines, summary, closed)| Fold {
+            lines: lines.clone(),
+            summary: Line::text(*summary),
+            closed: *closed,
+        })
+        .collect();
+    doc.push_back(
+        "a",
+        Content {
+            lines,
+            folds,
+            ..Content::default()
+        },
+    );
+    doc.push_back("b", vec![Line::text("next")]);
+    doc
+}
+
+/// What `doc` shows with `folds`, row by row.
+fn shown(doc: &Document, folds: &Folds) -> Vec<String> {
+    texts(&Layout::with_folds(doc, folds.clone(), 80))
+}
+
+/// A cursor on line `line` of the first block of `doc`, all folds open.
+fn on_line(doc: &Document, line: usize) -> Cursor {
+    let mut open = Folds::default();
+    open.fold_all(doc, true);
+    Cursor::at_row(&Layout::with_folds(doc, open, 80), line)
+}
+
+const OUTER: (Range<usize>, &str, bool) = (1..5, "+ outer", true);
+const INNER: (Range<usize>, &str, bool) = (2..4, "+ inner", true);
+
+#[test]
+fn a_closed_fold_inside_an_open_one_shows_its_own_summary() {
+    let doc = nested(&[(1..5, "+ outer", false), INNER]);
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+
+    let doc = nested(&[OUTER, (2..4, "+ inner", false)]);
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "+ outer", "tail", "next"]
+    );
+}
+
+#[test]
+fn zo_opens_the_outermost_closed_fold_and_zc_the_innermost_open_one_outside_it() {
+    let doc = nested(&[OUTER, INNER]);
+    let mut folds = Folds::default();
+    let b = on_line(&doc, 2);
+
+    folds.fold(&doc, &b, FoldOp::Open);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::Open);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "b", "c", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::Close);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::Close);
+    assert_eq!(shown(&doc, &folds), ["head", "+ outer", "tail", "next"]);
+    folds.fold(&doc, &b, FoldOp::Close);
+    folds.fold(&doc, &b, FoldOp::Open);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"],
+        "nothing open to close outside the closed fold"
+    );
+}
+
+#[test]
+fn zo_and_zc_in_capitals_go_all_the_way() {
+    let doc = nested(&[OUTER, INNER, (4..5, "+ d", true)]);
+    let mut folds = Folds::default();
+    let b = on_line(&doc, 2);
+
+    folds.fold(&doc, &b, FoldOp::OpenRecursively);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "b", "c", "d", "tail", "next"],
+        "and the folds inside, holding the cursor or not"
+    );
+    folds.fold(&doc, &b, FoldOp::CloseRecursively);
+    assert_eq!(shown(&doc, &folds), ["head", "+ outer", "tail", "next"]);
+    folds.fold(&doc, &b, FoldOp::Open);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"],
+        "only the folds holding the cursor were closed"
+    );
+}
+
+#[test]
+fn za_opens_a_closed_fold_and_closes_an_open_one_and_za_in_capitals_all_the_way() {
+    let doc = nested(&[OUTER, INNER]);
+    let mut folds = Folds::default();
+    let b = on_line(&doc, 2);
+
+    folds.fold(&doc, &b, FoldOp::Toggle);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::ToggleRecursively);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "b", "c", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::Toggle);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::ToggleRecursively);
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "b", "c", "d", "tail", "next"]
+    );
+    folds.fold(&doc, &b, FoldOp::ToggleRecursively);
+    assert_eq!(shown(&doc, &folds), ["head", "+ outer", "tail", "next"]);
+}
+
+#[test]
+fn revealing_a_line_opens_every_fold_hiding_it_and_no_other() {
+    let doc = nested(&[OUTER, INNER, (4..5, "+ d", true)]);
+    let mut folds = Folds::default();
+
+    folds.reveal(&doc, &on_line(&doc, 3));
+
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "b", "c", "+ d", "tail", "next"]
+    );
+}
+
+#[test]
+fn folds_nest_whatever_order_they_come_in() {
+    let doc = nested(&[INNER, OUTER]);
+    let mut folds = Folds::default();
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "+ outer", "tail", "next"]
+    );
+
+    folds.fold(&doc, &on_line(&doc, 2), FoldOp::Open);
+
+    assert_eq!(
+        shown(&doc, &folds),
+        ["head", "a", "+ inner", "d", "tail", "next"]
+    );
+    let doc = nested(&[(4..5, "+ d", true), (1..3, "+ ab", true)]);
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "+ ab", "c", "+ d", "tail", "next"]
+    );
+}
+
+#[test]
+fn zo_in_capitals_leaves_the_folds_around_alone() {
+    let doc = nested(&[OUTER, INNER, (0..1, "+ head", true), (5..6, "+ tail", true)]);
+    let mut folds = Folds::default();
+
+    folds.fold(&doc, &on_line(&doc, 2), FoldOp::OpenRecursively);
+
+    assert_eq!(
+        shown(&doc, &folds),
+        ["+ head", "a", "b", "c", "d", "+ tail", "next"]
+    );
+}
+
+#[test]
+fn a_fold_overlapping_another_without_holding_it_is_dropped() {
+    let doc = nested(&[(1..4, "+ first", true), (2..5, "+ second", true)]);
+
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "+ first", "d", "tail", "next"]
+    );
+}
+
+#[test]
+fn a_fold_over_the_same_lines_as_another_is_inside_it() {
+    let doc = nested(&[(1..3, "+ outer", false), (1..3, "+ inner", true)]);
+
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "+ inner", "c", "d", "tail", "next"]
+    );
+}
+
+#[test]
+fn word_motions_step_over_a_closed_fold_inside_an_open_one() {
+    let doc = nested(&[(1..5, "+ outer", false), INNER]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+
+    assert_eq!(
+        walk(&layout, &mut cursor, Motion::WordForward, 3),
+        [at(1, 0), at(2, 0), at(3, 0)]
+    );
+}
+
 #[test]
 fn a_block_s_lines_can_be_read_back() {
     let doc = doc(&[("a", &["header", "body"])]);
