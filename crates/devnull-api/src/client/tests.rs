@@ -460,6 +460,48 @@ async fn an_account_is_a_person_or_else_an_organization() {
 }
 
 #[tokio::test]
+async fn a_profile_search_finds_people_then_organizations() {
+    let (server, client, signed) = server_and_client().await;
+    let found = serde_json::json!({
+        "users": [{ "id": "u1", "handle": "ada", "name": "Ada", "is_followed": true, "follows_you": false }],
+        "organizations": [{ "handle": "adacorp", "name": "Ada Corp", "is_followed": false }]
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search/profiles"))
+        .and(query_param("q", "ada lo"))
+        .and(signed)
+        .respond_with(json(&found.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let found = client.search_profiles("  ada lo ").await.expect("search");
+
+    assert_eq!(
+        (found.people[0].handle.as_str(), found.people[0].is_followed),
+        ("ada", Some(true))
+    );
+    assert_eq!(found.organizations[0].handle, "adacorp");
+}
+
+#[tokio::test]
+async fn a_profile_search_longer_than_the_server_takes_is_refused_without_a_request() {
+    let (server, client, _) = server_and_client().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let long = "é".repeat(101);
+
+    assert!(matches!(
+        client.search_profiles(&long).await,
+        Err(ApiError::Invalid(_))
+    ));
+}
+
+#[tokio::test]
 async fn handles_and_ids_that_could_leave_their_path_are_refused_without_a_request() {
     let (server, client, _) = server_and_client().await;
     Mock::given(method("GET"))

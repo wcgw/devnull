@@ -13,7 +13,8 @@ use ssh_key::rand_core::{OsRng, RngCore};
 use url::Url;
 
 use crate::model::{
-    Account, AccountPage, Commit, Cursor, Me, OrganizationPage, Page, Profile, Thread,
+    Account, AccountPage, Commit, Cursor, Me, OrganizationPage, Page, Profile, ProfileSearch,
+    Thread,
 };
 use crate::signing::{Namespace, SignError, Signer, canonical_message};
 
@@ -32,6 +33,9 @@ fn segment(value: &str) -> Result<&str, ApiError> {
         Err(ApiError::Invalid(format!("not a handle or id: {value:?}")))
     }
 }
+
+/// The longest search term the server takes, in characters.
+pub const MAX_SEARCH: usize = 100;
 
 /// How long a request may take.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -365,6 +369,26 @@ impl Client {
                 .map(AccountPage::Organization),
             other => other.map(|profile| AccountPage::Person(Box::new(profile))),
         }
+    }
+
+    /// People and organizations matching `term`, as the web's search finds them. Blanks around `term` are ignored.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::Invalid`] without a request for a term longer than [`MAX_SEARCH`] characters.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn search_profiles(&self, term: &str) -> Result<ProfileSearch, ApiError> {
+        let term = term.trim();
+        if term.chars().count() > MAX_SEARCH {
+            return Err(ApiError::Invalid(format!(
+                "searches are limited to {MAX_SEARCH} characters"
+            )));
+        }
+        self.get("/api/v1/search/profiles", &[("q", term)], None)
+            .await
     }
 
     /// A page of a person's commits, or of their replies.

@@ -417,6 +417,19 @@ pub struct Organization {
     pub admins: Vec<Account>,
 }
 
+/// What a search for people and organizations finds, from `GET /api/v1/search/profiles`: one list each, best match
+/// first, not paged.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct ProfileSearch {
+    /// People.
+    #[serde(rename = "users", default, deserialize_with = "or_default")]
+    pub people: Vec<Account>,
+    /// Organizations.
+    #[serde(default, deserialize_with = "or_default")]
+    pub organizations: Vec<Organization>,
+}
+
 /// What a handle names: a person's profile or an organization's page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
