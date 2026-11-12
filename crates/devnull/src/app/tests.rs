@@ -2945,3 +2945,251 @@ fn a_refreshed_inbox_shows_groups_that_moved_up_and_what_came_after_them() {
         "in the server's order"
     );
 }
+
+/// `commit` as JSON, starred or not, with `count` stars.
+fn starred_as(id: &str, starred: bool, count: u64) -> devnull_api::model::Commit {
+    let mut commit = commit_with(id, "hello", None);
+    commit["starred"] = starred.into();
+    commit["stars_count"] = count.into();
+    serde_json::from_value(commit).expect("commit")
+}
+
+#[test]
+fn s_stars_the_commit_under_the_cursor_and_shows_the_server_s_count() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let effects = press(&mut app, "js");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Star {
+            id: "c1".into(),
+            on: true
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Star {
+            id: "c1".into(),
+            on: true,
+            result: Ok(Box::new(starred_as("c1", true, 1))),
+        },
+    );
+    assert!(shows(&app, "★ 1"), "{:#?}", screen(&app).rows);
+    let effects = press(&mut app, "s");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Star {
+            id: "c1".into(),
+            on: false
+        }],
+        "a starred commit is unstarred"
+    );
+}
+
+#[test]
+fn a_star_shows_wherever_the_commit_is() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+    let _ = press(&mut app, "<CR>");
+    let thread = Fetched::Thread {
+        id: "c1".into(),
+        result: Ok(thread_of(&[], commit_with("c1", "hello", None))),
+    };
+    let _ = arrive(&mut app, thread);
+
+    let _ = press(&mut app, "s");
+    let _ = arrive(
+        &mut app,
+        Fetched::Star {
+            id: "c1".into(),
+            on: true,
+            result: Ok(Box::new(starred_as("c1", true, 4))),
+        },
+    );
+
+    assert!(shows(&app, "★ 4"));
+    let _ = press(&mut app, ":b log/following<CR>");
+    assert!(shows(&app, "★ 4"));
+}
+
+#[test]
+fn a_star_that_fails_says_why() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, "s");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Star {
+            id: "c1".into(),
+            on: true,
+            result: Err(FetchError::Failed("too many requests".into())),
+        },
+    );
+
+    assert_eq!(cmdline(&app), "Cannot star c1: too many requests");
+}
+
+#[test]
+fn follow_and_unfollow_the_account_under_the_cursor_or_named() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+
+    let effects = press(&mut app, "j$:follow<CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Follow {
+            handle: "lin".into(),
+            kind: Some(AccountKind::User),
+            on: true
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Follow {
+            handle: "lin".into(),
+            on: true,
+            result: Ok(()),
+        },
+    );
+    assert_eq!(cmdline(&app), "Following @lin");
+
+    let effects = press(&mut app, ":unfollow @kim<CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Follow {
+            handle: "kim".into(),
+            kind: None,
+            on: false
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Follow {
+            handle: "kim".into(),
+            on: false,
+            result: Ok(()),
+        },
+    );
+    assert_eq!(cmdline(&app), "No longer following @kim");
+}
+
+#[test]
+fn following_someone_whose_profile_is_open_refreshes_it() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, ":e @lin<CR>");
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    let _ = press(&mut app, ":follow<CR>");
+    let effects = arrive(
+        &mut app,
+        Fetched::Follow {
+            handle: "lin".into(),
+            on: true,
+            result: Ok(()),
+        },
+    );
+
+    assert!(fetches(&effects).contains(&Request::Profile {
+        handle: "lin".into(),
+        kind: Some(AccountKind::User)
+    }));
+}
+
+#[test]
+fn dd_deletes_your_own_commit_once_confirmed() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let effects = press(&mut app, "dd");
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(cmdline(&app), "Delete commit c1? (y/n)");
+
+    let effects = press(&mut app, "y");
+    assert_eq!(
+        fetches(&effects),
+        [Request::DeleteCommit { id: "c1".into() }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::DeleteCommit {
+            id: "c1".into(),
+            result: Ok(()),
+        },
+    );
+    assert!(shows(&app, "Commit deleted") && !shows(&app, "commit 1"));
+}
+
+#[test]
+fn anything_but_y_keeps_the_commit() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let effects = press(&mut app, "ddn");
+
+    assert_eq!(fetches(&effects), []);
+    assert!(shows(&app, "commit 1"));
+}
+
+#[test]
+fn only_your_own_commits_can_be_deleted() {
+    let mut theirs = commit_with("c7", "theirs", None);
+    theirs["author"] = serde_json::json!({ "id": "u2", "handle": "lin", "name": "Lin" });
+    let page = Page::new(
+        serde_json::from_value(serde_json::json!([theirs])).expect("page"),
+        None,
+    );
+    let mut app = with_log(Log::Following, page);
+
+    let effects = press(&mut app, "dd");
+
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(cmdline(&app), "You can only delete your own commits");
+}
+
+#[test]
+fn a_starred_thread_commit_stays_whole() {
+    let long: String = (1..=8)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, "<CR>");
+    let thread = Fetched::Thread {
+        id: "c1".into(),
+        result: Ok(thread_of(&[], commit_with("c1", &long, None))),
+    };
+    let _ = arrive(&mut app, thread);
+    let mut starred = commit_with("c1", &long, None);
+    starred["starred"] = true.into();
+    let starred = serde_json::from_value(starred).expect("commit");
+
+    let _ = press(&mut app, "s");
+    let _ = arrive(
+        &mut app,
+        Fetched::Star {
+            id: "c1".into(),
+            on: true,
+            result: Ok(Box::new(starred)),
+        },
+    );
+
+    assert!(shows(&app, "line 8"), "{:#?}", screen(&app).rows);
+}
+
+#[test]
+fn s_on_a_mention_stars_the_commit_holding_it() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+
+    let effects = press(&mut app, "j$s");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Star {
+            id: "c1".into(),
+            on: true
+        }]
+    );
+}

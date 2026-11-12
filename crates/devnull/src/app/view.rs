@@ -92,6 +92,15 @@ impl App {
                 frame.set_cursor_position(at);
                 return;
             }
+            AppMode::Confirm(confirm) => {
+                let question = confirm.question();
+                frame.render_widget(Paragraph::new(question), cmdline_area);
+                frame.set_cursor_position(Position::new(
+                    to_u16(question.width()).min(width.saturating_sub(1)),
+                    last,
+                ));
+                return;
+            }
             AppMode::Normal | AppMode::Visual(_) => {}
         }
         if let Some(message) = &self.message {
@@ -206,7 +215,9 @@ impl App {
     /// The mode as the statusline names and colours it.
     fn mode_label(&self) -> (&'static str, Group) {
         match &self.mode {
-            AppMode::Normal | AppMode::MorePrompt { .. } => ("NORMAL", Group::StatusLineModeNormal),
+            AppMode::Normal | AppMode::MorePrompt { .. } | AppMode::Confirm(_) => {
+                ("NORMAL", Group::StatusLineModeNormal)
+            }
             AppMode::Visual(selection) => match selection.kind() {
                 SelectionKind::Charwise => ("VISUAL", Group::StatusLineModeVisual),
                 SelectionKind::Rowwise => ("V-LINE", Group::StatusLineModeVisual),

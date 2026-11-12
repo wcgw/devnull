@@ -83,6 +83,18 @@ pub enum Command {
     Hover,
     /// `:pop`: back to where `:open` or `:profile` last left for another buffer from (Vim's tag stack).
     Pop,
+    /// `:star`: stars the commit under the cursor, or takes its star back.
+    Star,
+    /// `:delete`: deletes the account's own commit under the cursor, once confirmed.
+    Delete,
+    /// `:follow [handle]` and `:unfollow [handle]`: the account named, or under the cursor (or the author of the
+    /// commit under it).
+    Follow {
+        /// The handle, `@` or not; `None` for what is under the cursor.
+        handle: Option<String>,
+        /// Whether to follow rather than stop following.
+        on: bool,
+    },
     /// `:pick {list} [query]`: a fuzzy picker over buffers, or a search for people and organizations, starting
     /// with `query`.
     Pick {
@@ -190,6 +202,9 @@ enum Name {
     Hover,
     Pop,
     Pick,
+    Star,
+    Delete,
+    Follow(bool),
     Edit,
     Buffer,
     Buffers,
@@ -238,6 +253,10 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("hover", 3, Name::Hover),
     ("pop", 2, Name::Pop),
     ("pick", 2, Name::Pick),
+    ("star", 4, Name::Star),
+    ("delete", 1, Name::Delete),
+    ("follow", 3, Name::Follow(true)),
+    ("unfollow", 3, Name::Follow(false)),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -310,6 +329,12 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::YankLink => Command::YankLink,
         Name::Hover => Command::Hover,
         Name::Pop => Command::Pop,
+        Name::Star => Command::Star,
+        Name::Delete => Command::Delete,
+        Name::Follow(on) => Command::Follow {
+            handle: (!args.is_empty()).then(|| args.trim_start_matches('@').to_owned()),
+            on,
+        },
         Name::Pick => {
             let (list, query) = required(args)?
                 .split_once(' ')
@@ -442,8 +467,8 @@ mod tests {
     #[test]
     fn unknown_commands_and_misplaced_bangs_are_vim_errors() {
         assert_eq!(
-            parse("star").unwrap_err().to_string(),
-            "E492: Not an editor command: star"
+            parse("tselect").unwrap_err().to_string(),
+            "E492: Not an editor command: tselect"
         );
         assert_eq!(
             parse("frobnicate x").unwrap_err().to_string(),

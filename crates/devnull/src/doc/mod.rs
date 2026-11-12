@@ -158,6 +158,8 @@ pub enum Target {
         author: Option<AccountRef>,
         /// Its page on the web; `None` for a deleted commit.
         url: Option<String>,
+        /// Whether the connected account starred it.
+        starred: bool,
     },
     /// The card the server made for a link, opened in the browser like the link.
     LinkCard(LinkCard),

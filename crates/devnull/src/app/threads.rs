@@ -10,15 +10,19 @@ use crate::render::{commit_block, focused_block};
 /// How many characters of a commit id its short hash is.
 const SHORT_HASH: usize = 7;
 
-/// A thread's buffer name: `thread/` and the commit's short hash. dev-null.sh makes short hashes of the last seven
-/// characters of commit ids, so the name is known before the commit arrives.
+/// A thread's buffer name: `thread/` and the commit's short hash, known before the commit arrives.
 pub(super) fn buffer_name(id: &str) -> String {
+    format!("thread/{}", short_hash(id))
+}
+
+/// The short hash of commit `id`: dev-null.sh makes it of the id's last seven characters.
+pub(super) fn short_hash(id: &str) -> &str {
     let start = id
         .char_indices()
         .rev()
         .nth(SHORT_HASH - 1)
         .map_or(0, |(at, _)| at);
-    format!("thread/{}", &id[start..])
+    &id[start..]
 }
 
 /// The head of a thread: the commits it replies to, root first, then the commit whole.

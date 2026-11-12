@@ -11,7 +11,7 @@ use crate::doc::{Content, Cursor as DocCursor, Document, Layout};
 use crate::hl::Group;
 use crate::render::{account_block, commit_block, notification_block, parse_time};
 
-/// Something to ask dev-null.sh for, on the app's behalf.
+/// Something to ask dev-null.sh for, or to do, on the app's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Request {
@@ -84,6 +84,27 @@ pub enum Request {
         only: Vec<Category>,
         /// Where the page starts; `None` for the first.
         after: Option<Cursor>,
+    },
+    /// Star a commit, or take the star back.
+    Star {
+        /// The commit's id.
+        id: String,
+        /// Whether to star rather than take the star back.
+        on: bool,
+    },
+    /// Follow an account, or stop following it.
+    Follow {
+        /// The handle, without the `@`.
+        handle: String,
+        /// A person or an organization; when not known, a person's, else an organization's.
+        kind: Option<AccountKind>,
+        /// Whether to follow rather than stop following.
+        on: bool,
+    },
+    /// Delete one of the account's commits.
+    DeleteCommit {
+        /// The commit's id.
+        id: String,
     },
 }
 
@@ -181,6 +202,31 @@ pub enum Fetched {
         after: Option<Cursor>,
         /// The page, or why there is none.
         result: Result<Inbox, FetchError>,
+    },
+    /// The answer to [`Request::Star`].
+    Star {
+        /// The commit's id.
+        id: String,
+        /// Whether it was to star.
+        on: bool,
+        /// The commit as the server now counts it, or why not. Boxed: commits are large.
+        result: Result<Box<Commit>, FetchError>,
+    },
+    /// The answer to [`Request::Follow`].
+    Follow {
+        /// The handle.
+        handle: String,
+        /// Whether it was to follow.
+        on: bool,
+        /// Done, or why not.
+        result: Result<(), FetchError>,
+    },
+    /// The answer to [`Request::DeleteCommit`].
+    DeleteCommit {
+        /// The commit's id.
+        id: String,
+        /// Done, or why not.
+        result: Result<(), FetchError>,
     },
 }
 
@@ -373,6 +419,9 @@ impl App {
                     result.map(|inbox| inbox_page(&inbox, now)),
                 )
             }
+            Fetched::Star { id, on, result } => self.starred(&id, on, result, now),
+            Fetched::Follow { handle, on, result } => self.followed(&handle, on, result),
+            Fetched::DeleteCommit { id, result } => self.deleted(&id, result),
             Fetched::Starred { after, result } => {
                 self.page_arrived(&Source::Starred, after.is_some(), result.map(commits))
             }

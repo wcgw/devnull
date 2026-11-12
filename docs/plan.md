@@ -459,7 +459,10 @@ from M1 even though graphics land in M6.
 
 - [x] **M5.1** `devnull-api`: the body budget, preview, publish (commit, reply, quote), delete, star, follow. The preview
   was checked live (it changes nothing); the writes only against a fake server.
-- [ ] **M5.2** Actions: `s` (`:star`), `:follow`/`:unfollow`, `dd` (`:delete`, confirmed).
+- [x] **M5.2** Actions: `s` (`:star`), `:follow`/`:unfollow`, `dd` (`:delete`, confirmed). They act on the commit or
+  account under the cursor as `gX` finds it; a star redraws the commit wherever it shows (a thread's own, whole),
+  following refreshes an open profile, and a deleted commit says so where it was. Only against a fake server: each
+  writes to the account.
 - [ ] **M5.3** `$EDITOR` composer for commit/reply/quote with server preview and keep-draft (D3); `gy` is done (M3.4).
 
 ### M6 Graphics

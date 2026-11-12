@@ -1,5 +1,6 @@
 //! The application core (D10): state and a pure `update`; the runtime does the I/O.
 
+mod actions;
 mod cmdline;
 mod connection;
 mod feed;
@@ -30,6 +31,7 @@ use crate::hl::Theme;
 use crate::key::Key;
 use crate::keymap::{Action, Invocation, Keymap, Mode};
 
+use actions::Confirm;
 use cmdline::{Cmdline, Edit, Purpose};
 use connection::Connection;
 pub use connection::NetEvent;
@@ -217,6 +219,8 @@ enum AppMode {
     },
     /// A picker over the windows, taking keys until something is picked or it is left.
     Picker(Picker),
+    /// A question in the command line, answered by the next key.
+    Confirm(Confirm),
 }
 
 /// A line for the command line area.
@@ -376,6 +380,7 @@ impl App {
                 }
             }
             AppMode::Picker(_) => self.picker_key(key),
+            AppMode::Confirm(_) => self.confirm_key(key),
             AppMode::Cmdline(cmdline) => {
                 let history: &[String] = match cmdline.purpose {
                     Purpose::Ex => &self.ex_history,
@@ -745,7 +750,10 @@ impl App {
                 let ran = self.keymap.replay(self.keymap_mode(), &[key], remap);
                 self.run_all(ran)
             }
-            AppMode::Cmdline(_) | AppMode::MorePrompt { .. } | AppMode::Picker(_) => self.key(key),
+            AppMode::Cmdline(_)
+            | AppMode::MorePrompt { .. }
+            | AppMode::Picker(_)
+            | AppMode::Confirm(_) => self.key(key),
         }
     }
 
@@ -841,6 +849,9 @@ impl App {
             Command::Profile(handle) => return self.following(|app| app.profile(handle)),
             Command::Pop => return self.pop_tag(),
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
+            Command::Star => return self.star(),
+            Command::Delete => return self.delete(),
+            Command::Follow { handle, on } => return self.follow(handle, on),
             Command::Browse { link } => return self.browse(link),
             Command::YankLink => return self.yank_link(),
             Command::Hover => return self.hover(),

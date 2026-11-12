@@ -216,6 +216,29 @@ impl Net {
                         result,
                     }
                 }
+                Request::Star { id, on } => {
+                    let result = if on {
+                        client.star(&id).await
+                    } else {
+                        client.unstar(&id).await
+                    }
+                    .map(Box::new)
+                    .map_err(|error| fetch_error(&error));
+                    Fetched::Star { id, on, result }
+                }
+                Request::Follow { handle, kind, on } => {
+                    let result = follow(&client, &handle, kind, on)
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Follow { handle, on, result }
+                }
+                Request::DeleteCommit { id } => {
+                    let result = client
+                        .delete_commit(&id)
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::DeleteCommit { id, result }
+                }
                 Request::Starred { after } => {
                     let result = client
                         .starred(after.as_ref())
@@ -344,6 +367,29 @@ async fn approve(
         }
         Err(EnrollError::Api(error)) => report(&later, failure(&error)),
         Err(error) => report(&later, NetEvent::Failed(error.to_string())),
+    }
+}
+
+/// Follows `handle` (`on`) or stops following it; of unknown kind, as a person, else as an organization.
+async fn follow(
+    client: &Client,
+    handle: &str,
+    kind: Option<AccountKind>,
+    on: bool,
+) -> Result<(), ApiError> {
+    let set = |kind| async move {
+        if on {
+            client.follow(handle, kind).await
+        } else {
+            client.unfollow(handle, kind).await
+        }
+    };
+    match kind {
+        Some(kind) => set(kind).await,
+        None => match set(AccountKind::User).await {
+            Err(ApiError::NotFound) => set(AccountKind::Organization).await,
+            other => other,
+        },
     }
 }
 

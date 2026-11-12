@@ -34,6 +34,16 @@ pub fn focused_block(commit: &Commit, now: u64) -> Content {
     block(commit, now, Shown::Whole)
 }
 
+/// What is left of a deleted commit.
+#[must_use]
+pub fn deleted_block() -> Content {
+    vec![
+        Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
+        Line::text(""),
+    ]
+    .into()
+}
+
 /// How much of a commit its block shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shown {
@@ -46,14 +56,9 @@ enum Shown {
 fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
     let target = Some(commit_target(commit));
     if commit.is_deleted() {
-        let lines = vec![
-            Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
-            Line::text(""),
-        ];
         return Content {
-            lines,
-            folds: Vec::new(),
             target,
+            ..deleted_block()
         };
     }
     let mut lines = vec![header(commit, now, None)];
@@ -157,6 +162,7 @@ fn commit_target(commit: &Commit) -> Target {
             .as_ref()
             .map(|author| AccountRef::new(author.handle.clone(), Some(author.kind))),
         url: Some(commit.html_url.clone()).filter(|url| !url.is_empty()),
+        starred: commit.starred,
     }
 }
 

@@ -154,6 +154,7 @@ fn a_quote_is_indented_under_a_bar_and_points_at_the_quoted_commit() {
         id: "q1".into(),
         author: Some(AccountRef::new("acme", Some(AccountKind::Organization))),
         url: None,
+        starred: false,
     };
     assert_eq!(targets(block.clone(), 1)[0], quoted);
     assert_eq!(targets(block, 2), [quoted], "the quote's text too");
@@ -175,7 +176,8 @@ fn the_rest_of_a_commit_points_at_it() {
         Some(Target::Commit {
             id: "c1".into(),
             author: Some(AccountRef::new("grace", Some(AccountKind::User))),
-            url: Some("https://dev-null.sh/@grace/commits/c1".into())
+            url: Some("https://dev-null.sh/@grace/commits/c1".into()),
+            starred: false
         })
     );
     assert_eq!(
@@ -183,7 +185,8 @@ fn the_rest_of_a_commit_points_at_it() {
         Some(Target::Commit {
             id: "d1".into(),
             author: None,
-            url: None
+            url: None,
+            starred: false
         })
     );
 }
