@@ -722,7 +722,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         ("<leader>n", "edit notifications", "notifications"),
         ("<leader>s", "edit starred", "starred"),
         ("<leader>p", "edit profile", "your profile"),
-        ("<leader><leader>", "buffers", "buffers"),
+        ("<leader><leader>", "pick buffers", "find buffer"),
     ];
     for (notation, command, description) in commands {
         normal.bind(
@@ -733,7 +733,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
     }
     normal.bind(
         keys("<leader>/"),
-        Target::Action(Action::Ex("users".to_owned())),
+        Target::Action(Action::Ex("pick users".to_owned())),
         "find user",
     );
     HashMap::from([(Mode::Normal, normal), (Mode::Visual, visual)])

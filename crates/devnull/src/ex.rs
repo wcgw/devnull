@@ -83,6 +83,14 @@ pub enum Command {
     Hover,
     /// `:pop`: back to where `:open` or `:profile` last left for another buffer from (Vim's tag stack).
     Pop,
+    /// `:pick {list} [query]`: a fuzzy picker over buffers, or a search for people and organizations, starting
+    /// with `query`.
+    Pick {
+        /// What to pick from.
+        list: PickList,
+        /// What the query starts as; may be empty.
+        query: String,
+    },
     /// `:profile {handle}` opens a profile; `:profile` alone, the profile of the account under the cursor, or of the
     /// author of the commit under it.
     Profile(Option<String>),
@@ -97,6 +105,15 @@ pub enum Command {
         /// Whether to go to the next buffer rather than the previous one.
         forward: bool,
     },
+}
+
+/// What `:pick` picks from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickList {
+    /// `buffers`: the listed buffers, the last shown first.
+    Buffers,
+    /// `users`: people and organizations, as dev-null.sh's search finds them.
+    Users,
 }
 
 /// One `:set` argument.
@@ -172,6 +189,7 @@ enum Name {
     YankLink,
     Hover,
     Pop,
+    Pick,
     Edit,
     Buffer,
     Buffers,
@@ -219,6 +237,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("yanklink", 5, Name::YankLink),
     ("hover", 3, Name::Hover),
     ("pop", 2, Name::Pop),
+    ("pick", 2, Name::Pick),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -291,6 +310,20 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::YankLink => Command::YankLink,
         Name::Hover => Command::Hover,
         Name::Pop => Command::Pop,
+        Name::Pick => {
+            let (list, query) = required(args)?
+                .split_once(' ')
+                .map_or((args, ""), |(list, query)| (list, query.trim_start()));
+            let list = match list {
+                "buffers" => PickList::Buffers,
+                "users" => PickList::Users,
+                _ => return Err(ExError::InvalidArgument(list.to_owned())),
+            };
+            Command::Pick {
+                list,
+                query: query.to_owned(),
+            }
+        }
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Buffer => Command::Buffer(required(args)?.to_owned()),
         Name::Buffers => Command::Buffers,
@@ -596,6 +629,32 @@ mod tests {
         );
         assert_eq!(parsed("yankl"), Command::YankLink);
         assert_eq!(parsed("hov"), Command::Hover);
+    }
+
+    #[test]
+    fn pick_takes_a_list_and_maybe_a_query() {
+        assert_eq!(
+            parsed("pick buffers"),
+            Command::Pick {
+                list: PickList::Buffers,
+                query: String::new()
+            }
+        );
+        assert_eq!(
+            parsed("pi users  ada lo"),
+            Command::Pick {
+                list: PickList::Users,
+                query: "ada lo".into()
+            }
+        );
+        assert_eq!(
+            parse("pick files").unwrap_err().to_string(),
+            "E475: Invalid argument: files"
+        );
+        assert_eq!(
+            parse("pick").unwrap_err().to_string(),
+            "E471: Argument required"
+        );
     }
 
     #[test]

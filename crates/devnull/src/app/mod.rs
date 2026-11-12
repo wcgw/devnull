@@ -7,6 +7,7 @@ mod fetch;
 mod hover;
 mod logs;
 mod options;
+mod picker;
 mod profiles;
 mod threads;
 mod view;
@@ -36,6 +37,7 @@ use feed::{Feed, Source};
 pub use fetch::{FetchError, Fetched, Request};
 use hover::Hover;
 use options::Options;
+use picker::Picker;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
 
@@ -71,6 +73,10 @@ pub struct App {
     polling: bool,
     /// The generation of poll wake-ups, apart from keys so that typing does not stop polling.
     poll_generation: u64,
+    /// The generation of search wake-ups: the user picker's query changed this many times.
+    search_generation: u64,
+    /// Buffers in the order they were last shown, the latest first.
+    recent: Vec<usize>,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -93,6 +99,8 @@ enum WakePurpose {
     WhichKey,
     /// Time to check the logs for new commits.
     Poll,
+    /// Typing paused in the user picker: time to search.
+    Search,
 }
 
 /// Something that happened, for [`App::update`] to react to.
@@ -205,6 +213,8 @@ enum AppMode {
     MorePrompt {
         lines: Vec<Message>,
     },
+    /// A picker over the windows, taking keys until something is picked or it is left.
+    Picker(Picker),
 }
 
 /// A line for the command line area.
@@ -271,6 +281,8 @@ impl App {
             hover: None,
             polling: false,
             poll_generation: 0,
+            search_generation: 0,
+            recent: Vec::new(),
         }
     }
 
@@ -309,13 +321,16 @@ impl App {
                     Vec::new()
                 }
                 WakePurpose::Poll => self.poll(),
+                WakePurpose::Search => self.search_people(),
             },
-            Msg::Paste(text) => {
-                if let AppMode::Cmdline(cmdline) = &mut self.mode {
+            Msg::Paste(text) => match &mut self.mode {
+                AppMode::Cmdline(cmdline) => {
                     cmdline.paste(&text);
+                    Vec::new()
                 }
-                Vec::new()
-            }
+                AppMode::Picker(_) => self.picker_paste(&text),
+                _ => Vec::new(),
+            },
             Msg::Sourced { path, contents } => self.source(&path, contents),
             Msg::Net(event) => self.net(event),
             Msg::Fetched { fetched, now } => self.fetched(fetched, now),
@@ -357,6 +372,7 @@ impl App {
                     self.key(key)
                 }
             }
+            AppMode::Picker(_) => self.picker_key(key),
             AppMode::Cmdline(cmdline) => {
                 let history: &[String] = match cmdline.purpose {
                     Purpose::Ex => &self.ex_history,
@@ -427,6 +443,7 @@ impl App {
         match purpose {
             WakePurpose::KeyTimeout | WakePurpose::WhichKey => self.generation,
             WakePurpose::Poll => self.poll_generation,
+            WakePurpose::Search => self.search_generation,
         }
     }
 
@@ -447,7 +464,14 @@ impl App {
             window.record_jump(&layout, window.cursor.clone());
         }
         window.switch_to(index, start);
+        self.visited(index);
         self.load(index)
+    }
+
+    /// Notes buffer `index` as the last shown.
+    fn visited(&mut self, index: usize) {
+        self.recent.retain(|&recent| recent != index);
+        self.recent.insert(0, index);
     }
 
     /// After the current window jumped from buffer `before`: keeps its cursor in view, and loads the buffer it
@@ -458,6 +482,7 @@ impl App {
         if now == before {
             Vec::new()
         } else {
+            self.visited(now);
             self.load(now)
         }
     }
@@ -717,7 +742,7 @@ impl App {
                 let ran = self.keymap.replay(self.keymap_mode(), &[key], remap);
                 self.run_all(ran)
             }
-            AppMode::Cmdline(_) | AppMode::MorePrompt { .. } => self.key(key),
+            AppMode::Cmdline(_) | AppMode::MorePrompt { .. } | AppMode::Picker(_) => self.key(key),
         }
     }
 
@@ -812,6 +837,7 @@ impl App {
             Command::Open => return self.following(Self::open),
             Command::Profile(handle) => return self.following(|app| app.profile(handle)),
             Command::Pop => return self.pop_tag(),
+            Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Browse { link } => return self.browse(link),
             Command::YankLink => return self.yank_link(),
             Command::Hover => return self.hover(),

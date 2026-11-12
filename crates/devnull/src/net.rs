@@ -205,6 +205,13 @@ impl Net {
                         result,
                     }
                 }
+                Request::SearchProfiles { term } => {
+                    let result = client
+                        .search_profiles(&term)
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::SearchProfiles { term, result }
+                }
                 Request::People {
                     handle,
                     which,

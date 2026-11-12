@@ -92,8 +92,8 @@ Defaults:
 | — | Follow/unfollow (no plain key; `f` stays a motion) | `:follow`, `:unfollow` |
 | `<leader>1/2/3` | Following, Latest, Trending | `:e log/following` … |
 | `<leader>n` `s` `p` | Notifications, Starred, own profile | `:e notifications` … |
-| `<leader><leader>` | Buffer picker | `:ls` |
-| `<leader>/` | User picker | |
+| `<leader><leader>` | Buffer picker | `:pick buffers` |
+| `<leader>/` | User picker | `:pick users` |
 
 Older pages load automatically as the cursor nears the end of a buffer; there is no paging key.
 
@@ -269,6 +269,8 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
   `/organizations/{handle}/{commits,mentions}`. `GET /users/{organization}` is a 404 (checked live in M3.3), so a
   handle of unknown kind is tried as a person, then as an organization.
 - **People lists** (followers, following) carry no account `type`.
+- **Profile search** `GET /search/profiles?q=`: `{users, organizations}`, not paged, best match first; terms up to 100
+  characters (the Go client's limit). Prefixes match (`jolic` finds `jolicode`); an empty term finds nothing.
 - **Errors** are `{message, code?, errors?}`:
   - 404: `{message: "No query results for model [App\\Models\\Commit] …"}` (no `code`).
   - 401 `invalid_signature`: timestamp outside **±300 s** ("Signature expired. Check that your clock is right.").
@@ -424,7 +426,11 @@ from M1 even though graphics land in M6.
   status page. `<C-t>` (`:pop`) is Vim's tag stack: `:open` and `:profile` push where they left from when they show
   another buffer. `<Tab>` also jumps forward: terminals without the kitty keyboard protocol send `<C-i>` as `<Tab>`
   (a gap since M1). Checked live without the kitty protocol: `<CR>`, `<C-o>`, `<Tab>`, `<C-t>`.
-- [ ] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`).
+- [x] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`). `:pick buffers`
+  lists the listed buffers, the last shown first, starts on the one before, and narrows fzf-style (smartcase, word
+  starts and runs score higher); `:pick users` asks `/search/profiles` once typing pauses (120 ms, as the Go client)
+  and ignores answers to older queries. `<C-n>`/`<C-p>` choose, `<CR>` opens, `<Esc>` leaves. Matched characters are
+  not highlighted yet. Checked live: both pickers, opening `@jolicode` from a search.
 
 ### M4 Inbox
 

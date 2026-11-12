@@ -87,6 +87,11 @@ impl App {
                 self.render_messages(frame, lines);
                 return;
             }
+            AppMode::Picker(picker) => {
+                let at = self.render_picker(frame, picker);
+                frame.set_cursor_position(at);
+                return;
+            }
             AppMode::Normal | AppMode::Visual(_) => {}
         }
         if let Some(message) = &self.message {
@@ -204,6 +209,8 @@ impl App {
                 SelectionKind::Rowwise => ("V-LINE", Group::StatusLineModeVisual),
             },
             AppMode::Cmdline(_) => ("COMMAND", Group::StatusLineModeCommand),
+            // As Telescope's prompt, typed into.
+            AppMode::Picker(_) => ("INSERT", Group::StatusLineModeCommand),
         }
     }
 

@@ -1,6 +1,8 @@
 //! What feeds ask dev-null.sh for, and how the answers reach their buffers.
 
-use devnull_api::model::{Account, AccountKind, AccountPage, Commit, Cursor, Page, Thread};
+use devnull_api::model::{
+    Account, AccountKind, AccountPage, Commit, Cursor, Page, ProfileSearch, Thread,
+};
 use devnull_api::{Log, OrganizationTab, People};
 
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
@@ -63,6 +65,11 @@ pub enum Request {
         which: People,
         /// Where the page starts; `None` for the first.
         after: Option<Cursor>,
+    },
+    /// The people and organizations matching a search term.
+    SearchProfiles {
+        /// The term.
+        term: String,
     },
 }
 
@@ -132,6 +139,13 @@ pub enum Fetched {
         after: Option<Cursor>,
         /// The page, or why there is none.
         result: Result<Page<Account>, FetchError>,
+    },
+    /// The answer to [`Request::SearchProfiles`].
+    SearchProfiles {
+        /// The term searched for.
+        term: String,
+        /// What was found, or why nothing could be.
+        result: Result<ProfileSearch, FetchError>,
     },
 }
 
@@ -284,6 +298,7 @@ impl App {
                 let source = Source::People(handle, which);
                 self.page_arrived(&source, after.is_some(), result.map(accounts))
             }
+            Fetched::SearchProfiles { term, result } => self.found(&term, result),
         }
     }
 

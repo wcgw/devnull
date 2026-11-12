@@ -2589,3 +2589,148 @@ fn tab_goes_forward_like_ctrl_i_as_terminals_without_the_kitty_protocol_send_it(
 
     assert_eq!(screen(&app).cursor, (0, 5));
 }
+
+/// Connected, with following, latest and trending opened in that order: trending is shown.
+fn three_logs() -> App {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+    let _ = press(&mut app, "<Space>2<Space>3");
+    app
+}
+
+#[test]
+fn the_buffer_picker_lists_the_buffers_last_shown_first_and_starts_on_the_one_before() {
+    let mut app = three_logs();
+
+    let _ = press(&mut app, "<Space><Space>");
+
+    let rows = screen(&app).rows;
+    // Inside the picker's border: the bufferline names them all too.
+    let at = |name: &str| {
+        rows.iter()
+            .position(|row| row.contains('│') && row.contains(name))
+            .expect(name)
+    };
+    assert!(
+        at("log/trending") < at("log/latest") && at("log/latest") < at("log/following"),
+        "{rows:#?}"
+    );
+    let _ = press(&mut app, "<CR>");
+    assert!(statusline(&app).contains("log/latest"));
+    assert!(!shows(&app, "> "), "the picker is gone");
+}
+
+#[test]
+fn typing_in_the_buffer_picker_narrows_it_fuzzily() {
+    let mut app = three_logs();
+
+    let _ = press(&mut app, "<Space><Space>lgfl");
+
+    assert!(shows(&app, "> lgfl"));
+    let _ = press(&mut app, "<CR>");
+    assert!(statusline(&app).contains("log/following"));
+}
+
+#[test]
+fn the_picker_moves_with_ctrl_n_and_ctrl_p_and_escape_leaves_it() {
+    let mut app = three_logs();
+
+    let _ = press(&mut app, "<Space><Space><C-n><C-p><C-n><CR>");
+    assert!(statusline(&app).contains("log/following"));
+
+    let _ = press(&mut app, "<Space><Space><Esc>");
+    assert!(statusline(&app).contains("log/following"));
+    assert!(!shows(&app, "> "));
+}
+
+#[test]
+fn the_user_picker_searches_once_typing_pauses_and_opens_who_is_picked() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, "<Space>/");
+    assert!(shows(&app, "Type to find people and organizations"));
+
+    let first = press(&mut app, "a");
+    let second = press(&mut app, "d");
+    assert_eq!(fetches(&second), []);
+    let stale = wakes(&first).last().expect("a wake-up").1;
+    let (after, token) = *wakes(&second).last().expect("a wake-up");
+    assert_eq!(after, std::time::Duration::from_millis(120));
+    assert_eq!(app.update(Msg::Wake(stale)), []);
+    let effects = app.update(Msg::Wake(token));
+    assert_eq!(
+        fetches(&effects),
+        [Request::SearchProfiles { term: "ad".into() }]
+    );
+
+    let found = serde_json::from_value(serde_json::json!({
+        "users": [{ "id": "u1", "handle": "ada", "name": "Ada" }],
+        "organizations": [{ "handle": "adacorp", "name": "Ada Corp" }]
+    }))
+    .expect("found");
+    let _ = arrive(
+        &mut app,
+        Fetched::SearchProfiles {
+            term: "ad".into(),
+            result: Ok(found),
+        },
+    );
+    assert!(shows(&app, "Ada @ada") && shows(&app, "Ada Corp (org) @adacorp"));
+    let effects = press(&mut app, "<C-n><CR>");
+    assert_eq!(
+        fetches(&effects)[0],
+        Request::Profile {
+            handle: "adacorp".into(),
+            kind: Some(AccountKind::Organization)
+        }
+    );
+}
+
+#[test]
+fn answers_to_an_older_search_are_ignored() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, "<Space>/ad");
+
+    let found = serde_json::from_value(
+        serde_json::json!({ "users": [{ "id": "u1", "handle": "a", "name": "Old" }] }),
+    )
+    .expect("found");
+    let _ = arrive(
+        &mut app,
+        Fetched::SearchProfiles {
+            term: "a".into(),
+            result: Ok(found),
+        },
+    );
+
+    assert!(!shows(&app, "Old @a"));
+}
+
+#[test]
+fn the_best_match_comes_first_whatever_was_shown_last() {
+    let mut app = three_logs();
+    let _ = press(&mut app, ":e @lin<CR>:b log/following<CR>");
+
+    // log/following, shown last, matches `li` too, but scattered.
+    let _ = press(&mut app, "<Space><Space>li<CR>");
+
+    assert!(statusline(&app).contains("@lin"));
+}
+
+#[test]
+fn backspace_in_an_empty_picker_leaves_it_open() {
+    let mut app = three_logs();
+
+    let _ = press(&mut app, "<Space><Space><BS>");
+
+    assert!(shows(&app, "│> "));
+}
+
+#[test]
+fn buffers_jumped_to_count_as_shown_last() {
+    let mut app = three_logs();
+    let _ = press(&mut app, "<C-o><C-o>");
+    assert!(statusline(&app).contains("log/following"));
+
+    let _ = press(&mut app, "<Space><Space><CR>");
+
+    assert!(statusline(&app).contains("log/latest"));
+}
