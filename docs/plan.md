@@ -51,6 +51,9 @@ Buffers behave like `nomodifiable` Neovim buffers: rendered lines, a (row, col) 
 `b`, `f`, `0`, `$`, `gg`, `G`, …), `/`/`?` search with `n`/`N`, and `v`/`V` + `y` to yank text.
 
 - Commit-wise motion with `]]`/`[[`. Commit actions apply to **the commit containing the cursor**.
+- **Screen-row semantics** (agreed at M1.2): `j`/`k`, `0`/`^`/`$`, counts and `G` act on screen rows, like a pager or
+  Vim's `gj`. Logical lines (a paragraph before wrapping) stay internal: anchors and search use them, so search
+  matches across wrap points. May become configurable later.
 - Under-cursor semantics: `@mention` opens the profile, a commit hash or quote opens its thread, a URL opens in the
   browser (`gx`). `gd` opens the author of the commit under the cursor.
 - Core abstraction, built first: a **document model**, meaning rendered lines carrying span metadata (commit, link,
@@ -292,8 +295,10 @@ from M1 even though graphics land in M6.
 
 - [x] **M1.1** Workspace (`crates/devnull-api`, `crates/devnull` → bin `dn`); CI: fmt, clippy, test on Linux; build on
   macOS.
-- [ ] **M1.2** `doc`: lines, spans, block spans, wrapping; cursor and motions (`hjkl w b e 0 ^ $ gg G H M L { } ]] [[`,
-  counts); anchor preserved across inserts above and re-wraps.
+- [x] **M1.2** `doc`: lines, spans, wrapping; cursor and motions (`hjkl w b e W B E 0 ^ $ f t F T gg G { } ]] [[`,
+  counts); anchor preserved across inserts above, block replacement and removal, and re-wraps; target under the
+  cursor; styled row segments for rendering. 32 tests. Deferred: image lines (with M6), `H M L` (need the window's
+  viewport, M1.6), `; ,` (the keymap repeats the last `f t F T`, M1.5).
 - [ ] **M1.3** `/ ? n N *` search, `v V` + `y`, folds `zo zc za zR zM`. ⏸ review the document model.
 - [ ] **M1.4** Runtime: tokio loop, Elm core, terminal setup/teardown with panic hook, focus events.
 - [ ] **M1.5** `keymap` trie (counts, pending keys, timeout), which-key popup; `ex` parser and command table

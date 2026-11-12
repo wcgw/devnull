@@ -13,3 +13,5 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+unicode-segmentation = "1"
+unicode-width = { version = "0.2", default-features = false }
