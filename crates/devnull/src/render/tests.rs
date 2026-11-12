@@ -3,7 +3,9 @@
 use devnull_api::model::{Account, Commit, OrganizationPage, Profile};
 
 use super::*;
-use crate::doc::{AccountRef, Content, Cursor, Document, Layout, Line, LinkCard, Motion, Target};
+use crate::doc::{
+    AccountRef, Content, Cursor, Document, Layout, Line, LinkCard, Motion, Span, Target,
+};
 
 /// 2026-11-12T15:13:40Z, a little after the fixtures' commits.
 const NOW: u64 = 1_794_496_420;
@@ -633,5 +635,89 @@ fn a_moderation_decision_says_what_and_why() {
             "    reason: spam",
             ""
         ]
+    );
+}
+
+#[test]
+fn an_author_with_an_avatar_shows_it_before_their_name_asked_at_the_size_shown() {
+    let block = commit_block(
+        &commit(serde_json::json!({
+            "author": { "id": "u1", "handle": "grace", "name": "Grace", "type": "user",
+                        "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4" }
+        })),
+        NOW,
+    );
+
+    let Line::Text(spans) = &block.lines[0] else {
+        panic!("a header")
+    };
+    assert_eq!(
+        spans[0],
+        Span::picture("https://avatars.githubusercontent.com/u/1?v=4&s=40", 2)
+    );
+    assert_eq!(
+        rows(block)[0],
+        "\u{2800}\u{2800} Grace @grace · 3m · 6cd1130"
+    );
+}
+
+#[test]
+fn a_profile_opens_with_its_avatar() {
+    let profile: Profile = serde_json::from_value(serde_json::json!({
+        "data": { "handle": "ada", "name": "Ada", "avatar_url": "https://example.org/ada.png" }
+    }))
+    .expect("profile");
+
+    let header = profile_header(&profile);
+
+    assert_eq!(
+        header.lines[0],
+        Line::Image {
+            rows: 4,
+            cols: 8,
+            source: "https://example.org/ada.png".into()
+        }
+    );
+    assert_eq!(
+        rows(header)[4],
+        "Ada @ada",
+        "no second avatar beside the name"
+    );
+}
+
+#[test]
+fn a_link_card_shows_its_picture_under_it() {
+    let block = commit_block(
+        &commit(serde_json::json!({
+            "body_segments": [text("look")],
+            "link_preview": { "url": "https://example.org", "title": "Example", "image_url": "https://example.org/card.png",
+                              "is_pending": false }
+        })),
+        NOW,
+    );
+
+    assert_eq!(
+        block.lines[3],
+        Line::Image {
+            rows: 8,
+            cols: 32,
+            source: "https://example.org/card.png".into()
+        }
+    );
+}
+
+#[test]
+fn github_avatars_are_asked_at_the_size_shown_and_others_as_they_are() {
+    assert_eq!(
+        sized("https://avatars.githubusercontent.com/u/1", 40),
+        "https://avatars.githubusercontent.com/u/1?s=40"
+    );
+    assert_eq!(
+        sized("https://avatars.githubusercontent.com/u/1?s=80", 40),
+        "https://avatars.githubusercontent.com/u/1?s=80"
+    );
+    assert_eq!(
+        sized("https://example.org/a.png", 40),
+        "https://example.org/a.png"
     );
 }

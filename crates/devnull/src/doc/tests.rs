@@ -1095,3 +1095,58 @@ fn a_picture_folded_away_shows_no_picture_rows() {
     assert_eq!(layout.row_count(), 2);
     assert_eq!(layout.picture(1), None, "the fold's summary row");
 }
+
+#[test]
+fn a_picture_in_a_line_of_text_takes_its_cells_and_says_where_it_starts() {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![Line::Text(vec![
+            Span::new("ab", Group::Normal),
+            Span::picture("face.png", 2),
+            Span::new("cd", Group::Normal),
+        ])],
+    );
+    let layout = Layout::new(&doc, 80);
+
+    assert_eq!(layout.row_text(0), "ab\u{2800}\u{2800}cd");
+    assert_eq!(
+        layout.inline_pictures(0),
+        [(
+            2,
+            PictureRow {
+                source: "face.png",
+                cols: 2,
+                rows: 1,
+                row: 0
+            }
+        )]
+    );
+}
+
+#[test]
+fn a_picture_wrapped_onto_the_next_row_belongs_to_that_row() {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![Line::Text(vec![
+            Span::new("abcd efgh ", Group::Normal),
+            Span::picture("face.png", 2),
+        ])],
+    );
+    let layout = Layout::new(&doc, 10);
+
+    assert_eq!(layout.inline_pictures(0), []);
+    assert_eq!(
+        layout.inline_pictures(1),
+        [(
+            0,
+            PictureRow {
+                source: "face.png",
+                cols: 2,
+                rows: 1,
+                row: 0
+            }
+        )]
+    );
+}

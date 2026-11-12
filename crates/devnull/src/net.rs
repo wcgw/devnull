@@ -186,7 +186,7 @@ impl Net {
                         Some(AccountKind::Organization) => client
                             .organization(&handle)
                             .await
-                            .map(AccountPage::Organization),
+                            .map(|page| AccountPage::Organization(Box::new(page))),
                         _ => client.account(&handle).await,
                     }
                     .map_err(|error| fetch_error(&error));

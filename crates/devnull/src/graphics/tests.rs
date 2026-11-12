@@ -160,3 +160,37 @@ fn transparent_pixels_show_the_background() {
         }]]
     );
 }
+
+#[test]
+fn a_picture_keeps_its_shape_in_a_box_of_another_centred_on_nothing() {
+    let square = RgbaImage::from_pixel(8, 8, Rgba([255, 0, 0, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    square.write_to(&mut bytes, ImageFormat::Png).expect("png");
+    let picture = Picture::decode(&bytes.into_inner()).expect("picture");
+
+    // Four cells across, one down: a box twice as wide as tall, so the square takes the middle half.
+    let cells = picture.half_blocks(4, 1);
+
+    let filled: Vec<bool> = cells[0].iter().map(|cell| cell.upper.is_some()).collect();
+    assert_eq!(filled, [false, true, true, false]);
+}
+
+/// The picture a kitty transmission sends, decoded from its chunks.
+fn sent_picture(sent: &str) -> image::DynamicImage {
+    let payload: String = sent
+        .split("\x1b\\")
+        .filter_map(|chunk| chunk.split_once(';').map(|(_, data)| data))
+        .collect();
+    let png = STANDARD.decode(payload).expect("base64");
+    image::load_from_memory(&png).expect("png")
+}
+
+#[test]
+fn a_small_picture_is_sent_at_its_size_for_the_terminal_to_stretch() {
+    let picture = Picture::decode(&png(4, 2)).expect("picture");
+
+    let sent = sent_picture(&picture.kitty(1, 48, 12));
+
+    // The box's shape (48 × 16 by 12 × 32 pixels: 2:1) around the picture's own 4 × 2.
+    assert_eq!((sent.width(), sent.height()), (4, 2));
+}

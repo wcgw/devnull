@@ -1,4 +1,6 @@
 use super::{Document, Pos, Shaped};
+use unicode_width::UnicodeWidthStr;
+
 use crate::hl::Group;
 
 /// A [`Document`] wrapped into screen rows for one width.
@@ -115,6 +117,43 @@ impl<'d> Layout<'d> {
             rows: image.rows,
             row: u16::try_from(start).unwrap_or(u16::MAX),
         })
+    }
+
+    /// The pictures in line with the text of `row`, such as avatars, each with the cell it starts at in the row.
+    #[must_use]
+    pub fn inline_pictures(&self, row: usize) -> Vec<(usize, PictureRow<'d>)> {
+        let Some(&Row {
+            line,
+            start,
+            end,
+            folded: false,
+        }) = self.rows.get(row)
+        else {
+            return Vec::new();
+        };
+        let shaped = self.doc.line(line);
+        let (from, to) = (shaped.byte_offset(start), shaped.byte_offset(end));
+        let mut run_start = 0;
+        let mut pictures = Vec::new();
+        for run in &shaped.runs {
+            let span_start = run_start;
+            run_start = run.end;
+            let Some(source) = &run.picture else { continue };
+            if span_start < from || span_start >= to {
+                continue;
+            }
+            let cols = shaped.text[span_start..run.end.min(to)].width();
+            pictures.push((
+                shaped.text[from..span_start].width(),
+                PictureRow {
+                    source,
+                    cols: u16::try_from(cols).unwrap_or(u16::MAX),
+                    rows: 1,
+                    row: 0,
+                },
+            ));
+        }
+        pictures
     }
 
     /// The number of screen rows.

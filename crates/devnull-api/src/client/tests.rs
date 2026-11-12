@@ -372,7 +372,8 @@ async fn a_profile_has_the_account_its_relationship_and_pinned_commit() {
 #[tokio::test]
 async fn followers_and_following_are_pages_of_accounts() {
     let (server, client, _) = server_and_client().await;
-    let people = serde_json::json!({ "data": [{ "id": "u2", "handle": "lin", "name": "Lin", "follows_you": true, "is_followed": false }], "meta": {} });
+    let people = serde_json::json!({ "data": [{ "id": "u2", "handle": "lin", "name": "Lin", "follows_you": true,
+        "is_followed": false, "avatar_url": "https://example.org/lin.png" }], "meta": {} });
     Mock::given(method("GET"))
         .and(path("/api/v1/users/ada/followers"))
         .respond_with(json(&people.to_string()))
@@ -391,6 +392,7 @@ async fn followers_and_following_are_pages_of_accounts() {
         ),
         ("lin", Some(true))
     );
+    assert_eq!(followers.items[0].avatar_url, "https://example.org/lin.png");
 }
 
 #[tokio::test]
@@ -398,6 +400,7 @@ async fn an_organization_has_its_admins_and_tabs() {
     let (server, client, _) = server_and_client().await;
     let org = serde_json::json!({
         "data": { "handle": "acme", "name": "Acme", "bio": "We make things", "followers_count": 12,
+                  "avatar_url": "https://example.org/acme.png",
                   "admins": [{ "id": "u1", "handle": "ada", "name": "Ada" }] },
         "is_following": false, "can_claim": false, "settings_url": null
     });
@@ -428,6 +431,7 @@ async fn an_organization_has_its_admins_and_tabs() {
         ("Acme", 1, false)
     );
     assert_eq!(mentions.items[0].id, "m1");
+    assert_eq!(org.organization.avatar_url, "https://example.org/acme.png");
 }
 
 #[tokio::test]

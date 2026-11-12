@@ -471,7 +471,7 @@ impl Client {
             Err(ApiError::NotFound) => self
                 .organization(handle)
                 .await
-                .map(AccountPage::Organization),
+                .map(|page| AccountPage::Organization(Box::new(page))),
             other => other.map(|profile| AccountPage::Person(Box::new(profile))),
         }
     }

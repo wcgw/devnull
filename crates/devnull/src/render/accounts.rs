@@ -2,7 +2,13 @@
 
 use devnull_api::model::{Account, AccountKind, Commit, OrganizationPage, Profile};
 
-use super::{commit_block, mention, who};
+use super::{commit_block, mention, sized, who};
+
+/// The cells, across and down, of the avatar heading a profile: a square.
+const PROFILE_AVATAR: (u16, u16) = (8, 4);
+
+/// The width, in pixels, a profile's avatar is asked for at.
+const PROFILE_AVATAR_PIXELS: u32 = 160;
 use crate::doc::{AccountRef, Content, Line, Span, Target};
 use crate::hl::Group;
 
@@ -11,11 +17,13 @@ use crate::hl::Group;
 #[must_use]
 pub fn profile_header(profile: &Profile) -> Content {
     let account = &profile.account;
-    let mut lines = vec![Line::Text(who(
+    let mut lines = avatar(&account.avatar_url);
+    lines.push(Line::Text(who(
         &account.name,
         &account.handle,
         AccountKind::User,
-    ))];
+        "",
+    )));
     lines.extend(text_lines(&account.bio));
     lines.extend(details(
         &[&account.company, &account.location],
@@ -79,11 +87,13 @@ pub fn profile_header(profile: &Profile) -> Content {
 #[must_use]
 pub fn organization_header(page: &OrganizationPage) -> Content {
     let organization = &page.organization;
-    let mut lines = vec![Line::Text(who(
+    let mut lines = avatar(&organization.avatar_url);
+    lines.push(Line::Text(who(
         &organization.name,
         &organization.handle,
         AccountKind::Organization,
-    ))];
+        "",
+    )));
     lines.extend(text_lines(&organization.bio));
     lines.extend(details(&[&organization.location], &organization.website));
     let counts: Vec<(String, Option<String>)> = organization
@@ -136,7 +146,12 @@ pub fn pinned_block(commit: &Commit, now: u64) -> Content {
 /// person or an organization.
 #[must_use]
 pub fn account_block(account: &Account) -> Content {
-    let mut spans = who(&account.name, &account.handle, AccountKind::Other);
+    let mut spans = who(
+        &account.name,
+        &account.handle,
+        AccountKind::Other,
+        &account.avatar_url,
+    );
     let relationship: Vec<&str> = [
         account
             .follows_you
@@ -164,6 +179,18 @@ pub fn account_block(account: &Account) -> Content {
             None,
         ))),
     }
+}
+
+/// The avatar heading a profile: a picture line, if there is an avatar.
+fn avatar(url: &str) -> Vec<Line> {
+    if url.is_empty() {
+        return Vec::new();
+    }
+    vec![Line::Image {
+        rows: PROFILE_AVATAR.1,
+        cols: PROFILE_AVATAR.0,
+        source: sized(url, PROFILE_AVATAR_PIXELS),
+    }]
 }
 
 /// The lines of a bio or description; none when it is empty.

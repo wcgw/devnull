@@ -160,6 +160,14 @@ impl App {
                 self.pictures
                     .draw(frame.buffer_mut(), line, picture, &self.theme);
             }
+            for (col, picture) in layout.inline_pictures(row) {
+                let col = u16::try_from(col).unwrap_or(u16::MAX);
+                if col < area.width {
+                    let cells = Rect::new(area.x + col, y, area.width - col, 1);
+                    self.pictures
+                        .draw(frame.buffer_mut(), cells, picture, &self.theme);
+                }
+            }
         }
         for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
             if layout.is_folded(row) {

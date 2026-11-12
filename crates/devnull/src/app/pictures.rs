@@ -12,6 +12,9 @@ use crate::doc::{Layout, PictureRow};
 use crate::graphics::{self, Graphics, HalfBlock};
 use crate::hl::Group;
 
+/// The narrowest picture that says, while it is not drawn, that it is loading or unavailable.
+const STATUS_COLS: u16 = 12;
+
 /// A picture ready to draw, as the runtime prepares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -117,7 +120,8 @@ impl Pictures {
                     cell.set_symbol(symbol).set_style(style);
                 }
             }
-            state if picture.row == 0 => {
+            // Saying how it stands needs room: a picture in a line of text, such as an avatar, says nothing.
+            state if picture.row == 0 && picture.cols >= STATUS_COLS => {
                 let text = match state {
                     Some(State::Failed) => "unavailable",
                     _ => "loading…",
@@ -165,7 +169,11 @@ impl App {
             };
             let top = window.top(&layout, viewport);
             for row in top..(top + usize::from(area.height)).min(layout.row_count()) {
-                if let Some(picture) = layout.picture(row) {
+                let inline = layout
+                    .inline_pictures(row)
+                    .into_iter()
+                    .map(|(_, picture)| picture);
+                for picture in layout.picture(row).into_iter().chain(inline) {
                     wanted.push(Key {
                         source: picture.source.to_owned(),
                         cols: picture.cols,

@@ -2039,7 +2039,7 @@ fn gd_opens_the_profile_of_an_organization_and_it_leads_to_its_mentions() {
         serde_json::json!({ "data": { "handle": "acme", "name": "Acme", "followers_count": 5 } }),
     )
     .expect("organization");
-    let org = devnull_api::model::AccountPage::Organization(org);
+    let org = devnull_api::model::AccountPage::Organization(Box::new(org));
     let _ = arrive(
         &mut app,
         Fetched::Profile {
@@ -3647,4 +3647,78 @@ fn quitting_frees_the_pictures_sent() {
             Effect::Quit
         ]
     );
+}
+
+#[test]
+fn an_avatar_beside_a_name_is_asked_for_and_drawn_in_its_cells() {
+    let mut commit = commit_with("c1", "hi", None);
+    commit["author"]["avatar_url"] = "https://example.org/ada.png".into();
+    let page = Page::new(
+        serde_json::from_value(serde_json::json!([commit])).expect("page"),
+        None,
+    );
+
+    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+
+    assert_eq!(
+        pictures(&effects),
+        [("https://example.org/ada.png".to_owned(), 2, 1, None)]
+    );
+    assert!(
+        screen(&app).rows[1].contains(" Ada @ada"),
+        "the name shows while the avatar loads"
+    );
+    let face = crate::graphics::HalfBlock {
+        upper: Some((1, 2, 3)),
+        lower: Some((4, 5, 6)),
+    };
+    let prepared = Prepared::HalfBlocks(vec![vec![face; 2]]);
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/ada.png".into(),
+        cols: 2,
+        rows: 1,
+        result: Ok(prepared),
+    });
+    let rows = screen(&app).rows;
+    assert!(rows[1].starts_with("▀▀ Ada @ada"), "{rows:#?}");
+    assert_eq!(style_at(&app, 1, 1).bg, Some(Color::Rgb(4, 5, 6)));
+}
+
+#[test]
+fn an_avatar_further_along_a_row_is_drawn_where_it_is() {
+    let follow: devnull_api::model::Notification = serde_json::from_value(serde_json::json!({
+        "id": "n1", "group_id": "g1", "type": "followed", "created_at": "2026-11-12T15:13:40Z",
+        "actor": { "id": "u2", "handle": "lin", "name": "Lin", "avatar_url": "https://example.org/lin.png" }, "actors_count": 1
+    }))
+    .expect("notification");
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    let _ = press(&mut app, "<Space>n");
+    let inbox =
+        devnull_api::model::Inbox::new(Page::new(vec![follow], None), "2026-11-12T15:13:40Z");
+    let _ = arrive(
+        &mut app,
+        Fetched::Notifications {
+            only: Vec::new(),
+            after: None,
+            result: Ok(inbox),
+        },
+    );
+
+    let face = crate::graphics::HalfBlock {
+        upper: Some((1, 2, 3)),
+        lower: Some((4, 5, 6)),
+    };
+    let prepared = Prepared::HalfBlocks(vec![vec![face; 2]]);
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/lin.png".into(),
+        cols: 2,
+        rows: 1,
+        result: Ok(prepared),
+    });
+
+    // The gutter and the icon come first: "● + ".
+    let rows = screen(&app).rows;
+    assert!(rows[1].starts_with("● + ▀▀ Lin @lin"), "{rows:#?}");
 }

@@ -323,6 +323,9 @@ pub struct Account {
     /// Display name.
     #[serde(default, deserialize_with = "or_default")]
     pub name: String,
+    /// Avatar image; may be empty.
+    #[serde(default, deserialize_with = "or_default")]
+    pub avatar_url: String,
     /// Bio.
     #[serde(default, deserialize_with = "or_default")]
     pub bio: String,
@@ -397,6 +400,9 @@ pub struct Organization {
     /// Display name.
     #[serde(default, deserialize_with = "or_default")]
     pub name: String,
+    /// Avatar image; may be empty.
+    #[serde(default, deserialize_with = "or_default")]
+    pub avatar_url: String,
     /// Description.
     #[serde(default, deserialize_with = "or_default")]
     pub bio: String,
@@ -534,8 +540,8 @@ pub struct ProfileSearch {
 pub enum AccountPage {
     /// A person's profile; boxed, as it carries a whole pinned commit.
     Person(Box<Profile>),
-    /// An organization's page.
-    Organization(OrganizationPage),
+    /// An organization's page; boxed, as it is large too.
+    Organization(Box<OrganizationPage>),
 }
 
 /// An organization's page, from `GET /api/v1/organizations/{handle}`.

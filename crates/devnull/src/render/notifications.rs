@@ -40,7 +40,12 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
         first.push(Span::new(verb, Group::Normal));
     } else {
         if let Some(actor) = &notification.actor {
-            first.extend(who(&actor.name, &actor.handle, actor.kind));
+            first.extend(who(
+                &actor.name,
+                &actor.handle,
+                actor.kind,
+                &actor.avatar_url,
+            ));
         }
         let others = notification.actors_count.saturating_sub(1);
         if others > 0 {
@@ -70,7 +75,12 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
         let start = lines.len();
         for actor in &notification.actors {
             let mut spans = vec![Span::new(INDENT, Group::Normal)];
-            spans.extend(who(&actor.name, &actor.handle, actor.kind));
+            spans.extend(who(
+                &actor.name,
+                &actor.handle,
+                actor.kind,
+                &actor.avatar_url,
+            ));
             lines.push(Line::Text(spans));
         }
         let noun = match kind {

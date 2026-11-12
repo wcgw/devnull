@@ -22,6 +22,16 @@ const SHOWN_LINES: usize = 6;
 const PICTURE_COLS: u16 = 48;
 const PICTURE_ROWS: u16 = 14;
 
+/// The cells a link card's picture takes; cards are about twice as wide as tall.
+const CARD_COLS: u16 = 32;
+const CARD_ROWS: u16 = 8;
+
+/// The cells an avatar takes beside a name: a square, as cells are twice as tall as wide.
+const AVATAR_COLS: u16 = 2;
+
+/// The width, in pixels, avatars beside names are asked for at.
+const AVATAR_PIXELS: u32 = 40;
+
 /// Replies shown under a commit, from those the server sends along.
 const REPLY_PREVIEWS: usize = 3;
 
@@ -96,6 +106,14 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
         lines.push(Line::Text(vec![
             Span::new(text, Group::Link).with_target(target),
         ]));
+        if let Some(picture) = card.image_url.as_deref().filter(|url| !url.is_empty()) {
+            // Its size is not known before it arrives: a box of the usual card shape.
+            lines.push(Line::Image {
+                rows: CARD_ROWS,
+                cols: CARD_COLS,
+                source: picture.to_owned(),
+            });
+        }
     }
     for image in &commit.images {
         let (cols, rows) = fit(image.width, image.height, PICTURE_COLS, PICTURE_ROWS);
@@ -179,10 +197,14 @@ fn commit_target(commit: &Commit) -> Target {
     }
 }
 
-/// `Name @handle`, `Name (org) @handle` for an organization, or `@handle` without a name. The handle refers to the
-/// account, of `kind` unless it is [`AccountKind::Other`].
-fn who(name: &str, handle: &str, kind: AccountKind) -> Vec<Span> {
+/// `Name @handle`, `Name (org) @handle` for an organization, or `@handle` without a name, after the `avatar` when
+/// there is one. The handle refers to the account, of `kind` unless it is [`AccountKind::Other`].
+fn who(name: &str, handle: &str, kind: AccountKind, avatar: &str) -> Vec<Span> {
     let mut spans = Vec::new();
+    if !avatar.is_empty() {
+        spans.push(Span::picture(sized(avatar, AVATAR_PIXELS), AVATAR_COLS));
+        spans.push(Span::new(" ", Group::Normal));
+    }
     if !name.is_empty() {
         spans.push(Span::new(name, Group::Author));
         if kind == AccountKind::Organization {
@@ -195,7 +217,29 @@ fn who(name: &str, handle: &str, kind: AccountKind) -> Vec<Span> {
 }
 
 fn author_spans(author: &Author) -> Vec<Span> {
-    who(&author.name, &author.handle, author.kind)
+    who(
+        &author.name,
+        &author.handle,
+        author.kind,
+        &author.avatar_url,
+    )
+}
+
+/// `url` asking for an avatar `pixels` wide, where the host takes the size: GitHub's.
+fn sized(url: &str, pixels: u32) -> String {
+    let Some(rest) = url.strip_prefix("https://avatars.githubusercontent.com/") else {
+        return url.to_owned();
+    };
+    let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+    if path.contains('#')
+        || query.contains('#')
+        || query.split('&').any(|pair| pair.starts_with("s="))
+    {
+        return url.to_owned();
+    }
+    let joiner = if query.is_empty() { '?' } else { '&' };
+    let url = url.trim_end_matches('?');
+    format!("{url}{joiner}s={pixels}")
 }
 
 /// `@handle`, referring to the account.

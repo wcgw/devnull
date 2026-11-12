@@ -173,22 +173,16 @@ impl Picture {
     /// virtual placement), quietly: a PNG of at most [`CELL_PIXELS`] per cell, base64 in chunks.
     #[must_use]
     pub fn kitty(&self, id: u32, cols: u16, rows: u16) -> String {
-        let (width, height) = self.size();
-        let (max_width, max_height) = (
+        let boxed = self.boxed(
             u32::from(cols) * CELL_PIXELS.0,
             u32::from(rows) * CELL_PIXELS.1,
+            Fill::Shape,
         );
-        let scaled = if width > max_width || height > max_height {
-            DynamicImage::ImageRgba8(self.pixels.clone()).resize(
-                max_width,
-                max_height,
-                FilterType::CatmullRom,
-            )
-        } else {
-            DynamicImage::ImageRgba8(self.pixels.clone())
-        };
         let mut png = Cursor::new(Vec::new());
-        if scaled.write_to(&mut png, ImageFormat::Png).is_err() {
+        if DynamicImage::ImageRgba8(boxed)
+            .write_to(&mut png, ImageFormat::Png)
+            .is_err()
+        {
             return String::new();
         }
         let encoded = STANDARD.encode(png.into_inner());
@@ -215,12 +209,7 @@ impl Picture {
         if cols == 0 || rows == 0 {
             return Vec::new();
         }
-        let scaled = image::imageops::resize(
-            &self.pixels,
-            u32::from(cols),
-            u32::from(rows) * 2,
-            FilterType::Triangle,
-        );
+        let scaled = self.boxed(u32::from(cols), u32::from(rows) * 2, Fill::Exactly);
         let colour = |x: u32, y: u32| {
             let [r, g, b, a] = scaled.get_pixel(x, y).0;
             (a >= 128).then_some((r, g, b))
@@ -236,6 +225,59 @@ impl Picture {
             })
             .collect()
     }
+}
+
+/// How [`Picture::boxed`] fills its box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fill {
+    /// Exactly the box's pixels: the picture scaled up or down to fit.
+    Exactly,
+    /// The box's shape, at most its size: the picture scaled down to fit, never up, for a terminal that stretches
+    /// it over the cells.
+    Shape,
+}
+
+impl Picture {
+    /// The picture centred in a transparent canvas filling a `width` × `height` pixel box as `fill` says, keeping
+    /// its own shape.
+    fn boxed(&self, width: u32, height: u32, fill: Fill) -> RgbaImage {
+        let (w, h) = self.size();
+        let (box_w, box_h) = (f64::from(width.max(1)), f64::from(height.max(1)));
+        let mut scale = (box_w / f64::from(w)).min(box_h / f64::from(h));
+        if fill == Fill::Shape {
+            scale = scale.min(1.0);
+        }
+        let scaled_w = pixels(f64::from(w) * scale);
+        let scaled_h = pixels(f64::from(h) * scale);
+        let scaled = if (scaled_w, scaled_h) == (w, h) {
+            self.pixels.clone()
+        } else {
+            image::imageops::resize(&self.pixels, scaled_w, scaled_h, FilterType::CatmullRom)
+        };
+        let (canvas_w, canvas_h) = match fill {
+            Fill::Exactly => (width.max(1), height.max(1)),
+            Fill::Shape => (
+                scaled_w.max(pixels(f64::from(scaled_h) * box_w / box_h)),
+                scaled_h.max(pixels(f64::from(scaled_w) * box_h / box_w)),
+            ),
+        };
+        let mut canvas = RgbaImage::new(canvas_w, canvas_h);
+        image::imageops::overlay(
+            &mut canvas,
+            &scaled,
+            i64::from((canvas_w - scaled_w.min(canvas_w)) / 2),
+            i64::from((canvas_h - scaled_h.min(canvas_h)) / 2),
+        );
+        canvas
+    }
+}
+
+/// `value`, a positive size in pixels, rounded to at least one.
+fn pixels(value: f64) -> u32 {
+    // Pictures are 8 megapixels at most, and boxes a few thousand pixels: neither truncates nor loses a sign.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let pixels = value.round().clamp(1.0, f64::from(u32::MAX)) as u32;
+    pixels
 }
 
 /// The text of the placeholder cell at `row` and `col` of a picture shown through placeholders; its foreground

@@ -484,7 +484,12 @@ from M1 even though graphics land in M6.
   are freed when switching and on quitting. Multiplexers that rename `$TERM`/`$TERM_PROGRAM` defeat the guess (herdr,
   though it passes kitty placeholders through): there, `:set graphics=kitty` in `init.vim`. Checked live in a pty: 8 pictures sent and freed, placeholders drawn;
   3568 true-colour half blocks. Seen working in Ghostty (through herdr, with `graphics=kitty`).
-- [ ] **M6.4** Avatars and link-card pictures.
+- [x] **M6.4** Avatars and link-card pictures. An avatar sits beside each name (2 × 1 cells, in a line of text:
+  `Span::picture`, braille blanks so it wraps as a word) for authors, people in lists and notification actors; a
+  profile opens with its avatar (8 × 4); a link card's picture follows it (32 × 8, its size unknown until it
+  arrives). Pictures keep their shape in their box (centred, transparent around). GitHub avatars are asked at the
+  size shown. Small pictures say nothing while loading (it would cover the name). Checked live: 27 pictures sent
+  and freed (kitty), 4139 half blocks.
 - [ ] **M6.5** Animation: commit pictures are JPEG, PNG or WebP (the server refuses others), so only link cards could
   move.
 

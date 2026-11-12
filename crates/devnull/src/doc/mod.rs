@@ -123,6 +123,8 @@ pub struct Span {
     pub group: Group,
     /// What `<CR>`, `gd` and `gx` act on when the cursor is on this text, if anything.
     pub target: Option<Target>,
+    /// Where the picture this span makes space for is, if it does (see [`Span::picture`]).
+    pub picture: Option<String>,
 }
 
 impl Span {
@@ -132,6 +134,17 @@ impl Span {
             text: text.into(),
             group,
             target: None,
+            picture: None,
+        }
+    }
+
+    /// Space for a picture a row tall and `cols` cells wide in a line of text, such as an avatar: blank cells,
+    /// over which the window draws the picture at `source`. They are braille blanks, not spaces, so that wrapping
+    /// moves them as a word rather than hanging them past the edge as it does spaces.
+    pub fn picture(source: impl Into<String>, cols: u16) -> Self {
+        Self {
+            picture: Some(source.into()),
+            ..Self::new("\u{2800}".repeat(usize::from(cols)), Group::Normal)
         }
     }
 
@@ -293,6 +306,8 @@ struct Run {
     end: usize,
     group: Group,
     target: Option<Target>,
+    /// Where the picture drawn over the span's text is, for a span made by [`Span::picture`].
+    picture: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -326,6 +341,7 @@ impl Shaped {
                 end: text.len(),
                 group: span.group,
                 target: span.target,
+                picture: span.picture,
             });
         }
         let graphemes = text
