@@ -322,9 +322,22 @@ from M1 even though graphics land in M6.
     continuations. Application keys run ex commands by name (`s` → `:star`).
   - `ex`: `:q :qa :map …noremap :unmap :set :hi :colorscheme :source :messages` with Vim's abbreviations and error
     numbers; blank lines and `"` comments are nothing. No ranges, no `|` chaining.
-- [ ] **M1.6** Wire keymap and ex into the app (Normal, Visual and command-line modes, `:messages`); `window`
-  split tree, `<C-w>` family, `:sp :vs :only :close`, `H M L` and scrolling; bufferline, statusline, cmdline,
-  which-key popup; jumplist. ⏸ review.
+- [x] **M1.6** The app, wired: 130 tests, plus a pty smoke test of the real binary (modes, which-key timer, exit).
+  ⏸ review.
+  - Modes: Normal, Visual (`v`/`V`, switch and leave like Vim, highlight), command line (`:`, `/`, `?` with Vim's
+    editing keys, history, paste), and the `:messages` "Press ENTER" prompt.
+  - Ex: `:q :qa :set :map … :unmap :messages :split :vsplit :close :only :wincmd`; options `ignorecase`,
+    `smartcase`, `scrolloff`, `timeoutlen`, `leader`. `:hi :colorscheme :source` answer E319 until M1.7.
+  - Search: `/ ? n N * #` with Vim's wrap and not-found messages; a match in a closed fold opens it.
+  - Yank: `y`, `yy` to the system clipboard over OSC 52; "N lines yanked" above `'report'`.
+  - Windows: split tree, `<C-w>hjklwsvco`, `q` closes a window and quits with the last; a statusline per window
+    (mode only on the current one); `│` separators.
+  - Viewport: pinned to text like the cursor; `<C-e> <C-y> <C-d> <C-u> <C-f> <C-b> zt zz zb H M L`, `'scrolloff'`.
+  - Timers: the app asks for wake-ups (`Effect::Wake`) for `'timeoutlen'` and the which-key popup (200 ms); stale
+    ones are ignored.
+  - Jumplist per window: searches, `gg G { } ]] [[ H M L` are jumps; `<C-o>`/`<C-i>`, one entry per row.
+  - Known gaps: no `'incsearch'`/`'hlsearch'` yet; a statusline narrower than its content loses the ruler; the
+    separator column also crosses statusline rows; the jumplist does not span buffers yet (M3).
 - [ ] **M1.7** `hl` groups, tokyonight night/storm/moon/day, `~/.config/devnull/init.vim` sourcing.
 - [ ] **M1.8** Fake log buffer wired end to end; `insta` screen snapshots. ⏸ try it in Ghostty.
 
