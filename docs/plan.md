@@ -309,7 +309,10 @@ from M1 even though graphics land in M6.
   - Known gaps: search landing in a closed fold doesn't open it yet (the window will, Vim's `'foldopen'`); `*` only
     picks keywords, not Vim's fallback to any non-blank string; folds don't nest; fold state lives in the document,
     not per window.
-- [ ] **M1.4** Runtime: tokio loop, Elm core, terminal setup/teardown with panic hook, focus events.
+- [x] **M1.4** Runtime: tokio (current-thread) loop, Elm core (`App::update(Msg) -> Vec<Effect>`), terminal
+  setup/teardown with panic hook, focus events, bracketed paste (pastes never run commands), kitty keyboard protocol
+  where supported (`<C-i>` ≠ `<Tab>`), `Key` type in Vim terms. Intro screen as a placeholder; `q` quits. Verified
+  in a pty smoke test (modes entered and left, exit 0); the panic path is not exercised yet.
 - [ ] **M1.5** `keymap` trie (counts, pending keys, timeout), which-key popup; `ex` parser and command table
   (`:q :qa :map :nnoremap :set :hi :colorscheme :source :messages`).
 - [ ] **M1.6** `window` split tree, `<C-w>` family, `:sp :vs :only :close`; bufferline, statusline, cmdline; jumplist.
