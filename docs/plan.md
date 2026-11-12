@@ -290,7 +290,7 @@ from M1 even though graphics land in M6.
 
 ### M1 Skeleton & feel (no network)
 
-- [ ] **M1.1** Workspace (`crates/devnull-api`, `crates/devnull` → bin `dn`); CI: fmt, clippy, test on Linux; build on
+- [x] **M1.1** Workspace (`crates/devnull-api`, `crates/devnull` → bin `dn`); CI: fmt, clippy, test on Linux; build on
   macOS.
 - [ ] **M1.2** `doc`: lines, spans, block spans, wrapping; cursor and motions (`hjkl w b e 0 ^ $ gg G H M L { } ]] [[`,
   counts); anchor preserved across inserts above and re-wraps.
