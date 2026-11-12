@@ -793,8 +793,8 @@ fn star_searches_the_word_under_or_after_the_cursor_as_a_whole_word() {
 }
 
 #[test]
-fn star_without_a_word_on_the_rest_of_the_line_does_nothing() {
-    let doc = doc(&[("a", &["word ...", "next"])]);
+fn star_with_only_blanks_on_the_rest_of_the_line_does_nothing() {
+    let doc = doc(&[("a", &["word   ", "next"])]);
     let layout = Layout::new(&doc, 80);
     let mut cursor = Cursor::new();
     cursor.apply(&layout, Motion::RowEnd, 1);
@@ -804,7 +804,7 @@ fn star_without_a_word_on_the_rest_of_the_line_does_nothing() {
             .search_word(&layout, Direction::Forward, 1, CaseMode::Smart)
             .is_none()
     );
-    assert_eq!(cursor.screen(&layout), at(0, 7));
+    assert_eq!(cursor.screen(&layout), at(0, 6));
 }
 
 #[test]

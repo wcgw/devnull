@@ -76,6 +76,22 @@ impl Pattern {
         Self::new(&pattern, case).expect("an escaped word between word boundaries is a valid regex")
     }
 
+    /// Matches `text` literally, anywhere, as `*` does for a word that is not a keyword; like
+    /// [`Pattern::whole_word`], it ignores `'smartcase'`.
+    ///
+    /// # Panics
+    ///
+    /// Never for any `text`: it is escaped, so the pattern is always valid. A panic here is a bug.
+    #[must_use]
+    pub fn literal(text: &str, case: CaseMode) -> Self {
+        let case = if case == CaseMode::Sensitive {
+            CaseMode::Sensitive
+        } else {
+            CaseMode::Insensitive
+        };
+        Self::new(&regex::escape(text), case).expect("escaped text is a valid regex")
+    }
+
     /// The grapheme columns where matches start in `line`, in order.
     fn starts(&self, line: &Shaped) -> Vec<usize> {
         self.regex

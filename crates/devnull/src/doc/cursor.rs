@@ -300,8 +300,9 @@ impl Cursor {
     }
 
     /// `*` and `#`: searches for the keyword under the cursor, or the first one after it on the line, as a whole
-    /// word. The cursor first moves to the keyword's start, so the search finds another occurrence. Returns the
-    /// pattern, for `n` and `N`, and the outcome; `None`, without moving, when there is no keyword.
+    /// word; without one, for the non-blank word under the cursor or after it, as it is (Vim's order). The cursor
+    /// first moves to the word's start, so the search finds another occurrence. Returns the pattern, for `n` and `N`,
+    /// and the outcome; `None`, without moving, when the line has nothing but blanks from the cursor on.
     pub fn search_word(
         &mut self,
         layout: &Layout<'_>,
@@ -314,14 +315,25 @@ impl Cursor {
         }
         let doc = layout.doc();
         let pos = self.pos(doc);
-        let keyword = word::keyword(doc, pos)?;
         let line = doc.line(pos.line);
-        let text = &line.text[line.byte_offset(keyword.start)..line.byte_offset(keyword.end)];
-        let pattern = Pattern::whole_word(text, case);
+        let text = |word: &std::ops::Range<usize>| {
+            &line.text[line.byte_offset(word.start)..line.byte_offset(word.end)]
+        };
+        let (word, pattern) = match word::keyword(doc, pos) {
+            Some(keyword) => {
+                let pattern = Pattern::whole_word(text(&keyword), case);
+                (keyword, pattern)
+            }
+            None => {
+                let word = word::non_blank_word(doc, pos)?;
+                let pattern = Pattern::literal(text(&word), case);
+                (word, pattern)
+            }
+        };
         self.set(
             doc,
             Pos {
-                col: keyword.start,
+                col: word.start,
                 ..pos
             },
         );

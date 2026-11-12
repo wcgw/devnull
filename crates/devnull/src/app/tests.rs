@@ -3797,3 +3797,12 @@ fn a_narrow_statusline_keeps_the_ruler_and_shortens_the_name_from_the_left() {
     // " NORMAL  log/following  @ada  1,1  All " is 39 cells: the handle goes, then the name's start.
     assert_eq!(statusline(&app), " NORMAL  </following 1,1  All");
 }
+
+#[test]
+fn star_without_a_keyword_ahead_searches_the_non_blank_word_under_the_cursor() {
+    let mut app = app_with(&["fish :=", "and :="], 40, 7);
+
+    let _ = press(&mut app, "5l*");
+
+    assert_eq!(screen(&app).cursor, (4, 2));
+}

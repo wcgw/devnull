@@ -165,11 +165,21 @@ pub(super) fn backward(doc: &Document, pos: Pos, kind: Kind) -> Pos {
 /// The grapheme range of the keyword (a run of letters, digits and `_`) under the cursor, or else the first one after
 /// it on the same line, as Vim's `*` picks it. `None` when the rest of the line has none.
 pub(super) fn keyword(doc: &Document, pos: Pos) -> Option<std::ops::Range<usize>> {
+    word_from(doc, pos, Kind::Small)
+}
+
+/// The non-blank word (a WORD, in Vim's terms) under `pos`, or the first one after it on its line, as a grapheme
+/// range: what `*` falls back to without a keyword.
+pub(super) fn non_blank_word(doc: &Document, pos: Pos) -> Option<std::ops::Range<usize>> {
+    word_from(doc, pos, Kind::Big)
+}
+
+fn word_from(doc: &Document, pos: Pos, kind: Kind) -> Option<std::ops::Range<usize>> {
     let len = doc.line(pos.line).len();
     let is_word = |col| {
         let walk = Walk {
             doc,
-            kind: Kind::Small,
+            kind,
             pos: Pos {
                 line: pos.line,
                 col,
