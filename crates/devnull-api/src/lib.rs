@@ -9,5 +9,5 @@ pub mod model;
 pub mod signing;
 
 pub use client::{
-    ApiError, Client, InvalidOrigin, Log, MAX_SEARCH, ORIGIN, OrganizationTab, People,
+    ApiError, Category, Client, InvalidOrigin, Log, MAX_SEARCH, ORIGIN, OrganizationTab, People,
 };

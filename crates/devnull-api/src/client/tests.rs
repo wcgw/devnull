@@ -8,9 +8,9 @@ use wiremock::matchers::{method, path, query_param};
 use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
 use super::*;
-use crate::model::{AccountKind, AccountPage, Lane, Segment};
+use crate::model::{AccountKind, AccountPage, Lane, NotificationKind, Segment};
 use crate::signing::{Signer, canonical_message};
-use crate::{OrganizationTab, People};
+use crate::{Category, OrganizationTab, People};
 
 fn fixture(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,6 +20,7 @@ fn fixture(name: &str) -> std::path::PathBuf {
 
 /// Matches only requests whose `X-SSH-Signature` verifies, with the test key, over the canonical message rebuilt from
 /// the request as received.
+#[derive(Clone)]
 struct Signed(PublicKey);
 
 impl Match for Signed {
@@ -499,6 +500,93 @@ async fn a_profile_search_longer_than_the_server_takes_is_refused_without_a_requ
         client.search_profiles(&long).await,
         Err(ApiError::Invalid(_))
     ));
+}
+
+#[tokio::test]
+async fn the_inbox_is_a_page_of_notifications_filtered_by_category_with_when_it_was_read() {
+    let (server, client, signed) = server_and_client().await;
+    let inbox = serde_json::json!({
+        "data": [{
+            "id": "n1", "group_id": "g1", "type": "starred", "reason": null, "read_at": null,
+            "created_at": "2026-11-12T15:00:00.000000Z", "actor": { "id": "u2", "handle": "lin", "name": "Lin" },
+            "actors": [{ "id": "u2", "handle": "lin", "name": "Lin" }, { "id": "u3", "handle": "kim", "name": "Kim" }],
+            "event_count": 2, "actors_count": 2, "commit": commit_json("c1")
+        }, {
+            "id": "n2", "group_id": "g2", "type": "a-kind-from-later", "created_at": "2026-11-12T14:00:00Z",
+            "actor": { "id": "u2", "handle": "lin" }
+        }],
+        "read_at": "2026-11-12T15:13:40.000000Z",
+        "meta": { "next_cursor": "n-next" }
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/notifications"))
+        .and(query_param("type", "replies,mentions"))
+        .and(signed.clone())
+        .respond_with(json(&inbox.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/notifications"))
+        .and(query_param("type", "all"))
+        .and(query_param("cursor", "n-next"))
+        .and(signed)
+        .respond_with(json(
+            r#"{"data":[],"read_at":"2026-11-12T15:13:40Z","meta":{}}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let first = client
+        .notifications(&[Category::Replies, Category::Mentions], None)
+        .await
+        .expect("inbox");
+    let next = client
+        .notifications(&[], first.page.next.as_ref())
+        .await
+        .expect("next page");
+
+    let starred = &first.page.items[0];
+    assert_eq!(
+        (
+            starred.kind,
+            starred.actors.len(),
+            starred.event_count,
+            starred.read_at.is_none()
+        ),
+        (NotificationKind::Starred, 2, 2, true)
+    );
+    assert_eq!(starred.commit.as_ref().map(|c| c.id.as_str()), Some("c1"));
+    assert_eq!(first.page.items[1].kind, NotificationKind::Other);
+    assert_eq!(first.read_at, "2026-11-12T15:13:40.000000Z");
+    assert!(next.page.items.is_empty() && next.page.next.is_none());
+}
+
+#[test]
+fn categories_have_the_names_the_inbox_filters_by() {
+    for category in Category::ALL {
+        assert_eq!(Category::named(category.name()), Some(category));
+    }
+    assert_eq!(Category::named("bogus"), None);
+}
+
+#[tokio::test]
+async fn starred_commits_come_in_pages() {
+    let (server, client, signed) = server_and_client().await;
+    let page = serde_json::json!({ "data": [commit_json("s1")], "meta": { "next_cursor": null } });
+    Mock::given(method("GET"))
+        .and(path("/api/v1/starred"))
+        .and(signed)
+        .respond_with(json(&page.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let starred = client.starred(None).await.expect("starred");
+
+    assert_eq!(starred.items[0].id, "s1");
+    assert!(starred.next.is_none());
 }
 
 #[tokio::test]

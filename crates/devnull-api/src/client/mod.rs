@@ -13,8 +13,8 @@ use ssh_key::rand_core::{OsRng, RngCore};
 use url::Url;
 
 use crate::model::{
-    Account, AccountPage, Commit, Cursor, Me, OrganizationPage, Page, Profile, ProfileSearch,
-    Thread,
+    Account, AccountPage, Commit, Cursor, Inbox, Me, Notification, OrganizationPage, Page, Profile,
+    ProfileSearch, Thread,
 };
 use crate::signing::{Namespace, SignError, Signer, canonical_message};
 
@@ -31,6 +31,57 @@ fn segment(value: &str) -> Result<&str, ApiError> {
         Ok(value)
     } else {
         Err(ApiError::Invalid(format!("not a handle or id: {value:?}")))
+    }
+}
+
+/// A category of notifications, as the inbox filters them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum Category {
+    /// Replies to the account's commits.
+    Replies,
+    /// Quotes of its commits.
+    Quotes,
+    /// Stars on its commits.
+    Stars,
+    /// Mentions of it.
+    Mentions,
+    /// New followers.
+    Follows,
+    /// Moderation decisions on its commits.
+    Moderation,
+}
+
+impl Category {
+    /// Every category, in the order the web lists them.
+    pub const ALL: [Self; 6] = [
+        Self::Replies,
+        Self::Quotes,
+        Self::Stars,
+        Self::Mentions,
+        Self::Follows,
+        Self::Moderation,
+    ];
+
+    /// Its name in the inbox's filter, and in buffer names: `replies`, `quotes`, …
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Replies => "replies",
+            Self::Quotes => "quotes",
+            Self::Stars => "stars",
+            Self::Mentions => "mentions",
+            Self::Follows => "follows",
+            Self::Moderation => "moderation",
+        }
+    }
+
+    /// The category of that name.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|category| category.name() == name)
     }
 }
 
@@ -167,6 +218,16 @@ struct Envelope<T> {
     data: T,
     #[serde(default)]
     unread_notifications_count: u64,
+}
+
+/// A page of the inbox as sent.
+#[derive(Deserialize)]
+struct InboxEnvelope {
+    data: Vec<Notification>,
+    #[serde(default)]
+    read_at: String,
+    #[serde(default)]
+    meta: ListMeta,
 }
 
 #[derive(Deserialize)]
@@ -389,6 +450,60 @@ impl Client {
         }
         self.get("/api/v1/search/profiles", &[("q", term)], None)
             .await
+    }
+
+    /// A page of the inbox, of the categories `only` (every category when empty), newest first.
+    ///
+    /// Reading the inbox marks **every** notification read on the server, whatever the categories asked for; the
+    /// unread count in [`Client::me`] does not.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe, though the server may have marked the inbox read by the time it is canceled.
+    pub async fn notifications(
+        &self,
+        only: &[Category],
+        after: Option<&Cursor>,
+    ) -> Result<Inbox, ApiError> {
+        let filter = if only.is_empty() {
+            "all".to_owned()
+        } else {
+            only.iter()
+                .map(|category| category.name())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let inbox: InboxEnvelope = self
+            .get("/api/v1/notifications", &[("type", &filter)], after)
+            .await?;
+        Ok(Inbox {
+            page: Page {
+                items: inbox.data,
+                next: inbox
+                    .meta
+                    .next_cursor
+                    .filter(|cursor| !cursor.is_empty())
+                    .map(Cursor),
+            },
+            read_at: inbox.read_at,
+        })
+    }
+
+    /// A page of the commits the account starred, as the server orders them.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it only reads.
+    pub async fn starred(&self, after: Option<&Cursor>) -> Result<Page<Commit>, ApiError> {
+        self.list("/api/v1/starred", &[], after).await
     }
 
     /// A page of a person's commits, or of their replies.

@@ -417,6 +417,81 @@ pub struct Organization {
     pub admins: Vec<Account>,
 }
 
+/// A notification, or a group of them about the same thing (several stars on one commit, say), from
+/// `GET /api/v1/notifications`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Notification {
+    /// Its id.
+    pub id: String,
+    /// What happened.
+    #[serde(rename = "type", default, deserialize_with = "or_default")]
+    pub kind: NotificationKind,
+    /// Why, for a moderation decision.
+    #[serde(default, deserialize_with = "or_default")]
+    pub reason: String,
+    /// When it was read (RFC 3339); `None` while it is unread.
+    #[serde(default)]
+    pub read_at: Option<String>,
+    /// When it happened (RFC 3339).
+    #[serde(default, deserialize_with = "or_default")]
+    pub created_at: String,
+    /// Who did it, or the latest of a group.
+    #[serde(default)]
+    pub actor: Option<Author>,
+    /// Who did it, for a group; not always all of them (see `actors_count`).
+    #[serde(default, deserialize_with = "or_default")]
+    pub actors: Vec<Author>,
+    /// The group it stands for.
+    #[serde(default, deserialize_with = "or_default")]
+    pub group_id: String,
+    /// How many notifications the group holds.
+    #[serde(default, deserialize_with = "or_default")]
+    pub event_count: u64,
+    /// How many accounts did them.
+    #[serde(default, deserialize_with = "or_default")]
+    pub actors_count: u64,
+    /// The commit it is about: the reply, quote or mention for those; the connected account's own commit for stars
+    /// and moderation.
+    #[serde(default)]
+    pub commit: Option<Box<Commit>>,
+}
+
+/// What a notification says happened.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum NotificationKind {
+    /// Someone followed the account.
+    Followed,
+    /// Someone starred one of its commits.
+    Starred,
+    /// Someone replied to one of its commits.
+    Replied,
+    /// Someone quoted one of its commits.
+    Quoted,
+    /// Someone mentioned it.
+    Mentioned,
+    /// A commit of its was approved.
+    Approved,
+    /// A commit of its was rejected.
+    Rejected,
+    /// A kind this client does not know yet.
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+/// A page of the inbox, with when the inbox was read: notifications read since then are new to this visit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Inbox {
+    /// The notifications, newest first.
+    pub page: Page<Notification>,
+    /// When reading the inbox marked it read (RFC 3339).
+    pub read_at: String,
+}
+
 /// What a search for people and organizations finds, from `GET /api/v1/search/profiles`: one list each, best match
 /// first, not paged.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
