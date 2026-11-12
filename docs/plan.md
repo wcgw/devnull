@@ -481,7 +481,8 @@ from M1 even though graphics land in M6.
 - [x] **M6.3** Commit pictures in buffers: an image line (at most 48 × 14) above the 🖼 caption, asked for once in
   view, drawn by placeholders or half blocks; `:set graphics=kitty|halfblocks`, guessed from `$TERM`/`$TERM_PROGRAM`
   (half blocks in tmux), not by the `a=q` query D7 planned (its answer would come back among the keys). Pictures sent
-  are freed when switching and on quitting. Checked live in a pty: 8 pictures sent and freed, placeholders drawn;
+  are freed when switching and on quitting. Multiplexers that rename `$TERM`/`$TERM_PROGRAM` defeat the guess (herdr,
+  though it passes kitty placeholders through): there, `:set graphics=kitty` in `init.vim`. Checked live in a pty: 8 pictures sent and freed, placeholders drawn;
   3568 true-colour half blocks. Not seen yet in Ghostty itself.
 - [ ] **M6.4** Avatars and link-card pictures.
 - [ ] **M6.5** Animation: commit pictures are JPEG, PNG or WebP (the server refuses others), so only link cards could
