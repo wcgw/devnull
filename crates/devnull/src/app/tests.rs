@@ -3931,3 +3931,29 @@ fn star_shows_the_matches_again_after_noh_and_noincsearch_keeps_the_view() {
     let _ = press(&mut app, "<Esc>/line<CR>:noh<CR>*");
     assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::Search).bg);
 }
+
+#[test]
+fn the_buffer_picker_shows_which_letters_matched() {
+    use crate::hl::Group;
+    let mut app = three_logs();
+
+    let _ = press(&mut app, "<Space><Space>lgfl");
+
+    let rows = screen(&app).rows;
+    let y = rows
+        .iter()
+        .position(|row| row.contains("│  log/following"))
+        .expect("listed");
+    let x = rows[y].chars().position(|c| c == 'l').expect("in the row");
+    let style = |dx: usize| {
+        style_at(
+            &app,
+            u16::try_from(x + dx).expect("x"),
+            u16::try_from(y).expect("y"),
+        )
+    };
+    let matched = app.style(Group::PmenuMatch).fg;
+    // l, g, the f of "following", then its l.
+    assert_eq!([0, 2, 4, 6].map(|dx| style(dx).fg), [matched; 4]);
+    assert_ne!(style(1).fg, matched);
+}

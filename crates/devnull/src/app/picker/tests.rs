@@ -1,6 +1,16 @@
 //! The fuzzy matching behind the buffer picker.
 
-use super::score;
+use super::best;
+
+/// How well `query` matches `text`.
+fn score(query: &str, text: &str) -> Option<i64> {
+    best(query, text).map(|(score, _)| score)
+}
+
+/// Which characters of `text` matched `query`, by index.
+fn matched(query: &str, text: &str) -> Option<Vec<usize>> {
+    best(query, text).map(|(_, positions)| positions)
+}
 
 #[test]
 fn the_query_s_characters_must_appear_in_order() {
@@ -37,4 +47,16 @@ fn a_later_better_place_wins_over_the_first_one() {
     let best = score("tren", "log/trending");
     let only_scattered = score("tren", "log/t-r-e-n");
     assert!(best > only_scattered);
+}
+
+#[test]
+fn a_match_says_which_characters_matched() {
+    assert_eq!(matched("lgfl", "log/following"), Some(vec![0, 2, 4, 6]));
+    assert_eq!(
+        matched("tren", "log/trending"),
+        Some(vec![4, 5, 6, 7]),
+        "the best place, not the first"
+    );
+    assert_eq!(matched("x", "log"), None);
+    assert_eq!(matched("a", "a/a"), Some(vec![0]), "of equal places, the first");
 }

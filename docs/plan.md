@@ -446,8 +446,8 @@ from M1 even though graphics land in M6.
 - [x] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`). `:pick buffers`
   lists the listed buffers, the last shown first, starts on the one before, and narrows fzf-style (smartcase, word
   starts and runs score higher); `:pick users` asks `/search/profiles` once typing pauses (120 ms, as the Go client)
-  and ignores answers to older queries. `<C-n>`/`<C-p>` choose, `<CR>` opens, `<Esc>` leaves. Matched characters are
-  not highlighted yet. Checked live: both pickers, opening `@jolicode` from a search.
+  and ignores answers to older queries. `<C-n>`/`<C-p>` choose, `<CR>` opens, `<Esc>` leaves. The buffer picker shows
+  the characters that matched (`PmenuMatch`), since the v1 leftovers. Checked live: both pickers, opening `@jolicode` from a search.
 
 ### M4 Inbox
 

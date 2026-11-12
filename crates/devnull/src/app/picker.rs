@@ -40,8 +40,9 @@ pub(super) struct Picker {
     query: Cmdline,
     /// What can be picked, in their own order: the last shown buffer first, or as the search found them.
     choices: Vec<Choice>,
-    /// The choices matching the query, best first, as indices into `choices`.
-    shown: Vec<usize>,
+    /// The choices matching the query, best first, as indices into `choices`, each with the characters of its text
+    /// that matched.
+    shown: Vec<(usize, Vec<usize>)>,
     /// The index into `shown` of the chosen one.
     selected: usize,
     /// What to say while nothing is shown.
@@ -79,10 +80,10 @@ enum Outcome {
     Leave,
 }
 
-/// How well `query` matches `text`, as fzf does it: its characters in order, ignoring case unless the query has
+/// How well `query` matches `text`, as fzf does it, and which characters of `text` matched, by index: its characters in order, ignoring case unless the query has
 /// capitals. Matches at the start of words and runs of consecutive characters score higher, gaps lower. `None` when
 /// `text` does not hold the query's characters in order.
-fn score(query: &str, text: &str) -> Option<i64> {
+fn best(query: &str, text: &str) -> Option<(i64, Vec<usize>)> {
     let smart = query.chars().any(char::is_uppercase);
     let fold = |c: char| {
         if smart {
@@ -98,7 +99,7 @@ fn score(query: &str, text: &str) -> Option<i64> {
         .collect();
     let text: Vec<char> = text.chars().map(fold).collect();
     let Some(&first) = query.first() else {
-        return Some(0);
+        return Some((0, Vec::new()));
     };
     let word_start = |i: usize| i == 0 || matches!(text[i - 1], '/' | '@' | '-' | '_' | '.' | ' ');
     // Each place the first character matches starts a greedy run; the best run counts.
@@ -108,6 +109,7 @@ fn score(query: &str, text: &str) -> Option<i64> {
             let mut total = 0;
             let mut at = start;
             let mut previous: Option<usize> = None;
+            let mut positions = Vec::with_capacity(query.len());
             for &wanted in &query {
                 let found = (at..text.len()).find(|&i| text[i] == wanted)?;
                 total += 16;
@@ -122,11 +124,16 @@ fn score(query: &str, text: &str) -> Option<i64> {
                     None => total -= i64::try_from(found).unwrap_or(i64::MAX) / 4,
                 }
                 previous = Some(found);
+                positions.push(found);
                 at = found + 1;
             }
-            Some(total)
+            Some((total, positions))
         })
-        .max()
+        // The first of the best, as `max` would pick the last.
+        .fold(None, |best: Option<(i64, Vec<usize>)>, run| match best {
+            Some(best) if best.0 >= run.0 => Some(best),
+            _ => Some(run),
+        })
 }
 
 impl Picker {
@@ -146,14 +153,19 @@ impl Picker {
     /// The choices matching the query, best first; ties keep their order.
     fn narrow(&mut self) {
         let query = self.query.text();
-        let mut scored: Vec<(usize, i64)> = self
+        let mut scored: Vec<(usize, i64, Vec<usize>)> = self
             .choices
             .iter()
             .enumerate()
-            .filter_map(|(i, choice)| score(&query, &choice.text).map(|score| (i, score)))
+            .filter_map(|(i, choice)| {
+                best(&query, &choice.text).map(|(score, matched)| (i, score, matched))
+            })
             .collect();
-        scored.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
-        self.shown = scored.into_iter().map(|(i, _)| i).collect();
+        scored.sort_by_key(|&(_, score, _)| std::cmp::Reverse(score));
+        self.shown = scored
+            .into_iter()
+            .map(|(i, _, matched)| (i, matched))
+            .collect();
         self.selected = 0;
     }
 
@@ -205,7 +217,7 @@ impl Picker {
     }
 
     fn chosen(&self) -> Option<Pick> {
-        let &index = self.shown.get(self.selected)?;
+        let &(index, _) = self.shown.get(self.selected)?;
         Some(self.choices[index].pick.clone())
     }
 
@@ -394,7 +406,7 @@ impl App {
             )
             .collect();
         // The server ranks them: every one is shown, in its order.
-        picker.shown = (0..picker.choices.len()).collect();
+        picker.shown = (0..picker.choices.len()).map(|i| (i, Vec::new())).collect();
         picker.selected = 0;
         picker.hint = "Nobody found";
         Vec::new()
@@ -450,11 +462,21 @@ impl App {
                 .iter()
                 .skip(first)
                 .take(visible)
-                .map(|&index| {
+                .map(|(index, matched)| {
                     let mut spans = vec![TextSpan::raw("  ")];
-                    spans.extend(picker.choices[index].label.iter().map(|(text, group)| {
-                        TextSpan::styled(text.as_str(), self.theme.style(*group))
-                    }));
+                    // The label's characters, those that matched in `PmenuMatch`.
+                    let mut at = 0;
+                    for (text, group) in &picker.choices[*index].label {
+                        for ch in text.chars() {
+                            let group = if matched.contains(&at) {
+                                Group::PmenuMatch
+                            } else {
+                                *group
+                            };
+                            spans.push(TextSpan::styled(ch.to_string(), self.theme.style(group)));
+                            at += 1;
+                        }
+                    }
                     TextLine::from(spans)
                 })
                 .collect()
