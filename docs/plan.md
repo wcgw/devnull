@@ -313,10 +313,18 @@ from M1 even though graphics land in M6.
   setup/teardown with panic hook, focus events, bracketed paste (pastes never run commands), kitty keyboard protocol
   where supported (`<C-i>` ≠ `<Tab>`), `Key` type in Vim terms. Intro screen as a placeholder; `q` quits. Verified
   in a pty smoke test (modes entered and left, exit 0); the panic path is not exercised yet.
-- [ ] **M1.5** `keymap` trie (counts, pending keys, timeout), which-key popup; `ex` parser and command table
-  (`:q :qa :map :nnoremap :set :hi :colorscheme :source :messages`).
-- [ ] **M1.6** `window` split tree, `<C-w>` family, `:sp :vs :only :close`; bufferline, statusline, cmdline; jumplist.
-  ⏸ review.
+- [x] **M1.5** Pure building blocks, wired into the app in M1.6 (motions need windows to act on):
+  - `key`: Vim key notation, parsed (unknown names taken literally, as Vim does) and printed.
+  - `keymap`: built-in Normal/Visual tables from D5 with descriptions; counts (`0` is a motion unless a count
+    started); `f t F T` with `; ,`; user `map`/`noremap` shadowing built-ins, with the count on the first action
+    and E223 for recursion; a map's keys after a mode change come back as `Action::Keys` for the new mode;
+    built-in prefixes wait indefinitely, ambiguous user maps resolve on `timeout`; `set_leader`; which-key
+    continuations. Application keys run ex commands by name (`s` → `:star`).
+  - `ex`: `:q :qa :map …noremap :unmap :set :hi :colorscheme :source :messages` with Vim's abbreviations and error
+    numbers; blank lines and `"` comments are nothing. No ranges, no `|` chaining.
+- [ ] **M1.6** Wire keymap and ex into the app (Normal, Visual and command-line modes, `:messages`); `window`
+  split tree, `<C-w>` family, `:sp :vs :only :close`, `H M L` and scrolling; bufferline, statusline, cmdline,
+  which-key popup; jumplist. ⏸ review.
 - [ ] **M1.7** `hl` groups, tokyonight night/storm/moon/day, `~/.config/devnull/init.vim` sourcing.
 - [ ] **M1.8** Fake log buffer wired end to end; `insta` screen snapshots. ⏸ try it in Ghostty.
 

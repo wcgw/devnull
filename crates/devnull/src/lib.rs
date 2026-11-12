@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod doc;
+pub mod ex;
 pub mod hl;
 pub mod key;
 pub mod keymap;
