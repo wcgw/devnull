@@ -129,7 +129,29 @@ Older pages load automatically as the cursor nears the end of a buffer; there is
 - **Binary: `dn`.** Crate and repo stay `devnull`.
 - **Replaces the Go client**; no side-by-side coexistence required. Own config dir `~/.config/devnull/`, own device
   enrollment (no import of the Go client's `connection.json`). Owning the `devnull://` handler is fine.
-- Auth spike checks whether the server accepts a loopback callback, which would avoid the URL handler entirely.
+- **No `devnull://` handler at all** (verified in M0.3): the server accepts a loopback `redirect_uri`
+  (`http://127.0.0.1:<port>/callback`, RFC 8252 §7.3), as the current Go client uses. Over SSH, where the browser
+  cannot reach the remote loopback, the fallback is pasting the `127.0.0.1` callback URL from the browser's address bar
+  (`:connect <url>`).
+
+**Enrollment protocol** (Go `auth/attempt.go`, `callback.go`, `flow.go`; verified against dev-null.sh in M0.3):
+
+1. Generate the device key; fingerprint is OpenSSH `SHA256:…`.
+2. PKCE: verifier = base64url-nopad(32 random bytes); challenge = base64url-nopad(SHA-256(verifier)), `S256`;
+   state = 16 random bytes, lowercase hex. Attempts expire after 10 minutes (client-side).
+3. Browser opens `{origin}/mobile/authorize?fingerprint=…&device_name=dn&code_challenge=…&code_challenge_method=S256&state=…&redirect_uri=http://127.0.0.1:<port>/callback`.
+   The approval page shows the fingerprint; `dn` displays it too, for comparison.
+4. The loopback listener accepts only `GET /callback` with the right `Host` and `state`, answers plain text
+   (`Cache-Control: no-store`, `Referrer-Policy: no-referrer`), and yields `code` (≤255 chars) or `error`
+   (`access_denied` = user canceled).
+5. `POST /api/v1/devices` `{"code","code_verifier"}`, signed with the new key → `200 {data: User,
+   unread_notifications_count}`.
+6. `GET /api/v1/me` → same shape. If `terms_accepted` is false, show the terms; `PUT /api/v1/me/terms {"version"}` only
+   on an explicit `:agree`.
+
+Observed `User` fields not in the Go struct: `html_url`, `feed_url`, `created_at`, `pasteis_resets_at`,
+`pasteis_received`, `terms_accepted_at`. `organizations` and `can_post_as_organization` were absent: model them as
+optional.
 
 ### D9. Device key and request signing
 
@@ -191,8 +213,8 @@ a relative socket path or a short temp dir.
 ### D11. Platforms
 
 - **Linux**: first-class, tested in CI.
-- **macOS**: best effort; must build in CI. Platform-specific code is limited to `devnull://` handler registration and
-  browser opening.
+- **macOS**: best effort; must build in CI. Platform-specific code is limited to opening the browser (no URL handler,
+  see D8).
 - **Windows**: not supported.
 
 ### D12. Process
@@ -228,10 +250,11 @@ from M1 even though graphics land in M6.
   user in Ghostty 1.4.0. All passed; D7 holds as designed (results in D7).
 - [x] **M0.2 Signing**: generate a key, SSHSIG-sign from file and via `ssh-agent`, verify with `ssh-keygen -Y verify`,
   and compare with the Go implementation's output for the same input. All byte-identical (results in D9).
-- [ ] **M0.3 Enrollment**: read the Go `auth/flow.go`, `callback.go` and `handler_linux.go`, run enrollment against
-  dev-null.sh, settle the callback mechanism (loopback vs `devnull://`). User approves in the browser.
+- [x] **M0.3 Enrollment**: enrolled a `dn` device against dev-null.sh via the loopback callback (Rust, `reqwest` 0.12 +
+  `rustls`); `POST /api/v1/devices` and signed `GET /api/v1/me` both 200. Protocol recorded in D8.
 - [ ] **M0.4 Capture**: real responses for `/me`, `/log/*`, a thread, a profile, notifications and starred, kept in
-  the scratchpad.
+  the scratchpad. Caveat: `GET /api/v1/notifications` marks every category read on the server (the unread count lives
+  in `/me`'s `unread_notifications_count`, which does not).
 
 ### M1 Skeleton & feel (no network)
 
