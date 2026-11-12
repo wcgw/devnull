@@ -410,6 +410,13 @@ fn pending_keys_show_at_the_right_of_the_command_line() {
     assert!(cmdline(&app).ends_with("3g"), "{:?}", cmdline(&app));
 }
 
+/// The background a cell of plain text gets: the theme's, else the terminal's own.
+fn plain_bg(app: &App) -> Option<Color> {
+    app.style(crate::hl::Group::Normal)
+        .bg
+        .or(Some(Color::Reset))
+}
+
 /// The style of the cell at (`x`, `y`).
 fn style_at(app: &App, x: u16, y: u16) -> ratatui::style::Style {
     let (width, height) = app.size();
@@ -947,14 +954,29 @@ fn the_jumplist_keeps_one_entry_per_row() {
 }
 
 #[test]
+fn the_background_is_the_terminal_s_until_hi_normal_gives_one() {
+    let mut app = app_with(&["one"], 40, 6);
+    assert_eq!(style_at(&app, 0, 1).bg, Some(Color::Reset));
+    assert_eq!(
+        style_at(&app, 20, 3).bg,
+        Some(Color::Reset),
+        "past the text too"
+    );
+
+    let _ = press(&mut app, ":hi Normal guibg=#1a1b26<CR>");
+
+    assert_eq!(style_at(&app, 20, 3).bg, Some(Color::Rgb(0x1a, 0x1b, 0x26)));
+}
+
+#[test]
 fn colorscheme_shows_and_switches_the_colorscheme() {
     let mut app = app_with(&["one"], 40, 6);
 
     let _ = press(&mut app, ":colorscheme<CR>");
     assert_eq!(cmdline(&app), "tokyonight-night");
-    let night = style_at(&app, 0, 1).bg;
+    let night = style_at(&app, 0, 1).fg;
     let _ = press(&mut app, ":colo tokyonight-day<CR>");
-    assert_ne!(style_at(&app, 0, 1).bg, night);
+    assert_ne!(style_at(&app, 0, 1).fg, night);
     let _ = press(&mut app, ":colo nope<CR>");
     assert_eq!(cmdline(&app), "E185: Cannot find color scheme 'nope'");
 }
@@ -4550,9 +4572,9 @@ fn hlsearch_shows_the_last_search_s_matches_and_noh_hides_them_until_the_next() 
         "under the cursor"
     );
     assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Search).bg);
-    assert_eq!(style_at(&app, 0, 2).bg, app.style(Group::Normal).bg);
+    assert_eq!(style_at(&app, 0, 2).bg, plain_bg(&app));
     let _ = press(&mut app, ":noh<CR>");
-    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Normal).bg);
+    assert_eq!(style_at(&app, 4, 2).bg, plain_bg(&app));
     let _ = press(&mut app, "n");
     assert_eq!(
         style_at(&app, 4, 1).bg,
@@ -4560,7 +4582,7 @@ fn hlsearch_shows_the_last_search_s_matches_and_noh_hides_them_until_the_next() 
         "back, the cursor on the other match"
     );
     let _ = press(&mut app, ":set nohls<CR>");
-    assert_eq!(style_at(&app, 4, 1).bg, app.style(Group::Normal).bg);
+    assert_eq!(style_at(&app, 4, 1).bg, plain_bg(&app));
 }
 
 #[test]
@@ -4595,7 +4617,7 @@ fn a_match_is_highlighted_whole_and_on_the_rows_it_wraps_to_only() {
     let _ = press(&mut app, ":set nohls<CR>/fish<CR>");
 
     // Rows: "aaaa ", "fish ", "bbbb"; the first ends two cells short of the window.
-    assert_eq!(style_at(&app, 5, 1).bg, app.style(Group::Normal).bg);
+    assert_eq!(style_at(&app, 5, 1).bg, plain_bg(&app));
     assert_eq!(
         style_at(&app, 3, 2).bg,
         app.style(Group::CurSearch).bg,

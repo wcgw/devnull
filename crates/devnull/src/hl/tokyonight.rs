@@ -1,5 +1,6 @@
 //! The tokyonight colorschemes, generated from [folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim)
-//! (Apache-2.0, Copyright Folke Lemaitre) `extras/lua/tokyonight_*.lua` at commit `cdc07ac78467a233fd62c493de29a17e0cf2b2b6`.
+//! (Apache-2.0, Copyright Folke Lemaitre) `extras/lua/tokyonight_*.lua` at commit `cdc07ac78467a233fd62c493de29a17e0cf2b2b6`, as with its
+//! `transparent = true`: the background is the terminal's own.
 //! Regenerate rather than edit by hand.
 
 use ratatui::style::Color;
@@ -12,7 +13,7 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
         Group::Normal,
         Spec {
             fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
-            bg: Some(Color::Rgb(0x1a, 0x1b, 0x26)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -66,7 +67,7 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
         Group::TabLineFill,
         Spec {
             fg: None,
-            bg: Some(Color::Rgb(0x15, 0x16, 0x1e)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -322,7 +323,7 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Group::Normal,
         Spec {
             fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
-            bg: Some(Color::Rgb(0x24, 0x28, 0x3b)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -376,7 +377,7 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Group::TabLineFill,
         Spec {
             fg: None,
-            bg: Some(Color::Rgb(0x1d, 0x20, 0x2f)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -632,7 +633,7 @@ pub(super) const MOON: &[(Group, Spec)] = &[
         Group::Normal,
         Spec {
             fg: Some(Color::Rgb(0xc8, 0xd3, 0xf5)),
-            bg: Some(Color::Rgb(0x22, 0x24, 0x36)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -686,7 +687,7 @@ pub(super) const MOON: &[(Group, Spec)] = &[
         Group::TabLineFill,
         Spec {
             fg: None,
-            bg: Some(Color::Rgb(0x1b, 0x1d, 0x2b)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -942,7 +943,7 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Group::Normal,
         Spec {
             fg: Some(Color::Rgb(0x37, 0x60, 0xbf)),
-            bg: Some(Color::Rgb(0xe1, 0xe2, 0xe7)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -996,7 +997,7 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Group::TabLineFill,
         Spec {
             fg: None,
-            bg: Some(Color::Rgb(0xb4, 0xb5, 0xb9)),
+            bg: None,
             sp: None,
             attrs: Attrs::NONE,
         },

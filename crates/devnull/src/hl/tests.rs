@@ -23,15 +23,34 @@ fn the_default_theme_is_tokyonight_night() {
     assert_eq!(theme.name(), "tokyonight-night");
     let normal = theme.style(Group::Normal);
     assert_eq!(normal.fg, Some(Color::Rgb(0xc0, 0xca, 0xf5)));
-    assert_eq!(normal.bg, Some(Color::Rgb(0x1a, 0x1b, 0x26)));
+    assert_eq!(normal.bg, None, "the terminal's own");
+}
+
+#[test]
+fn tokyonight_leaves_the_background_to_the_terminal_as_its_transparent_option_does() {
+    for name in [
+        "tokyonight-night",
+        "tokyonight-storm",
+        "tokyonight-moon",
+        "tokyonight-day",
+    ] {
+        let theme = Theme::named(name).expect(name);
+
+        assert_eq!(theme.style(Group::Normal).bg, None, "{name}");
+        assert_eq!(theme.style(Group::TabLineFill).bg, None, "{name}");
+        assert!(
+            theme.style(Group::NormalFloat).bg.is_some(),
+            "{name}: floats keep theirs"
+        );
+    }
 }
 
 #[test]
 fn colorschemes_are_found_by_name_and_tokyonight_means_night() {
     let day = Theme::named("tokyonight-day").expect("day exists");
     assert_ne!(
-        day.style(Group::Normal).bg,
-        Theme::default().style(Group::Normal).bg
+        day.style(Group::Normal).fg,
+        Theme::default().style(Group::Normal).fg
     );
     assert_eq!(
         Theme::named("tokyonight").map(|t| t.style(Group::Normal)),

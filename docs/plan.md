@@ -373,6 +373,8 @@ from M1 even though graphics land in M6.
   E411/E423/E254/E418), `:hi clear`, `:colorscheme`; `init.vim` from `$XDG_CONFIG_HOME/devnull/` or
   `~/.config/devnull/` at startup and `:source`, with Vim's per-line error report. 148 tests; pty smoke test of
   `init.vim` (error report, colorscheme applied).
+  - Since: the tokyonight colorschemes leave the background to the terminal, as the plugin's `transparent = true`
+    does (`Normal` and `TabLineFill` have none; floats keep theirs); `:hi Normal guibg=#1a1b26` paints it again.
   - The tokyonight table is generated from the plugin's resolved highlight groups (`extras/lua`, commit `cdc07ac`);
     its Apache-2.0 license is in `LICENSES/`.
   - `:set nofoo`/`invfoo` prefixes are resolved by the options, so unknown names report as typed.
