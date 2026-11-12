@@ -12,6 +12,8 @@ pub struct Layout<'d> {
     doc: &'d Document,
     folds: Folds,
     width: usize,
+    /// The most rows a picture takes: a taller one shrinks to fit.
+    height: usize,
     rows: Vec<Row>,
     /// The first row of each logical line.
     first_row: Vec<usize>,
@@ -61,7 +63,16 @@ impl<'d> Layout<'d> {
     /// Wraps `doc` to `width` cells, its folds open or closed as `folds` says. A width of 0 is treated as 1.
     #[must_use]
     pub fn with_folds(doc: &'d Document, folds: Folds, width: u16) -> Self {
+        Self::within(doc, folds, width, u16::MAX)
+    }
+
+    /// Wraps `doc` to `width` cells, its folds open or closed as `folds` says, in a window `height` rows tall: a
+    /// picture larger than `width` × `height` cells shrinks to fit, keeping its shape. A width or height of 0 is
+    /// treated as 1.
+    #[must_use]
+    pub fn within(doc: &'d Document, folds: Folds, width: u16, height: u16) -> Self {
         let width = usize::from(width.max(1));
+        let height = usize::from(height.max(1));
         let mut rows = Vec::new();
         let mut first_row = Vec::with_capacity(doc.line_count());
         let mut line = 0;
@@ -78,7 +89,7 @@ impl<'d> Layout<'d> {
                 continue;
             }
             first_row.push(rows.len());
-            wrap(doc.line(line), width, |start, end| {
+            wrap(doc.line(line), width, height, |start, end| {
                 rows.push(Row {
                     line,
                     start,
@@ -92,6 +103,7 @@ impl<'d> Layout<'d> {
             doc,
             folds,
             width,
+            height,
             rows,
             first_row,
         }
@@ -152,10 +164,11 @@ impl<'d> Layout<'d> {
             return None;
         }
         let image = self.doc.line(line).image.as_ref()?;
+        let (cols, rows) = fitted(image.cols, image.rows, self.width, self.height);
         Some(PictureRow {
             source: &image.source,
-            cols: image.cols,
-            rows: image.rows,
+            cols,
+            rows,
             row: u16::try_from(start).unwrap_or(u16::MAX),
         })
     }
@@ -359,10 +372,11 @@ impl<'d> Layout<'d> {
 /// Rows break after the last whitespace that fits, or mid-word when a word alone is wider than the row. Whitespace
 /// that reaches the edge stays on its row, hanging past it, rather than starting the next one. An empty line is one
 /// empty row; an image is as many empty rows as it is tall.
-fn wrap(line: &Shaped, width: usize, mut emit: impl FnMut(usize, usize)) {
+fn wrap(line: &Shaped, width: usize, height: usize, mut emit: impl FnMut(usize, usize)) {
     if let Some(image) = &line.image {
         // Row `i` is the empty range at `i`, so that column `i` lands on it (see `Shaped::image`).
-        (0..usize::from(image.rows)).for_each(|i| emit(i, i));
+        let (_, rows) = fitted(image.cols, image.rows, width, height);
+        (0..usize::from(rows)).for_each(|i| emit(i, i));
         return;
     }
     let mut start = 0;
@@ -384,6 +398,23 @@ fn wrap(line: &Shaped, width: usize, mut emit: impl FnMut(usize, usize)) {
         }
     }
     emit(start, line.len());
+}
+
+/// A picture of `cols` × `rows` cells shrunk to fit `width` × `height` cells when larger, keeping its shape; never
+/// less than a cell each way.
+fn fitted(cols: u16, rows: u16, width: usize, height: usize) -> (u16, u16) {
+    let (cols64, rows64) = (u64::from(cols.max(1)), u64::from(rows.max(1)));
+    let (width, height) = (width as u64, height as u64);
+    if cols64 <= width && rows64 <= height {
+        return (cols, rows.max(1));
+    }
+    let cells = |value: u64| u16::try_from(value.max(1)).unwrap_or(u16::MAX);
+    // The side that has less room sets the scale: compare cols / width with rows / height.
+    if cols64 * height >= rows64 * width {
+        (cells(width), cells(rows64 * width / cols64))
+    } else {
+        (cells(cols64 * height / rows64), cells(height))
+    }
 }
 
 /// The outermost of the folds of `doc` holding `line` that `folds` says are closed, if any: the largest, or of two as

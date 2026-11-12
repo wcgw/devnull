@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use ratatui::layout::Rect;
+
 use super::Buffer;
 use crate::doc::{Cursor, Folds, Layout, Motion};
 use crate::keymap::{Place, Scroll};
@@ -96,19 +98,20 @@ impl Window {
         self.buffer = buffer;
     }
 
-    /// The buffer it shows, laid out to `width` with its folds there.
-    pub(super) fn layout<'d>(&self, buffers: &'d [Buffer], width: u16) -> Layout<'d> {
-        self.layout_of(buffers, self.buffer, width)
+    /// The buffer it shows, laid out to fit `area`, its text area, with its folds there.
+    pub(super) fn layout<'d>(&self, buffers: &'d [Buffer], area: Rect) -> Layout<'d> {
+        self.layout_of(buffers, self.buffer, area)
     }
 
-    /// Buffer `buffer`, laid out to `width` as this window shows it, or would: with its folds there.
+    /// Buffer `buffer`, laid out to fit `area` as this window shows it, or would: with its folds there.
     pub(super) fn layout_of<'d>(
         &self,
         buffers: &'d [Buffer],
         buffer: usize,
-        width: u16,
+        area: Rect,
     ) -> Layout<'d> {
-        Layout::with_folds(&buffers[buffer].doc, self.folds.clone(), width)
+        let folds = self.folds.clone();
+        Layout::within(&buffers[buffer].doc, folds, area.width, area.height)
     }
 
     /// The jumplist, oldest first, and the entry `<C-o>` and `<C-i>` last went to: past the end when they have not

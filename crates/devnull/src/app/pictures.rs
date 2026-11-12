@@ -300,7 +300,7 @@ impl App {
         for &(id, rect) in &arrangement.windows {
             let window = self.windows.get(id);
             let area = super::text_area(rect);
-            let layout = window.layout(&self.buffers, area.width);
+            let layout = window.layout(&self.buffers, area);
             let viewport = super::Viewport {
                 height: usize::from(area.height),
                 scrolloff: self.options.scrolloff,

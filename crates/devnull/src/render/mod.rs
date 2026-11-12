@@ -12,7 +12,7 @@ pub use accounts::{account_block, organization_header, pinned_block, profile_hea
 pub use notifications::notification_block;
 
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
-use crate::graphics::fit;
+use crate::graphics::{fit, natural};
 use crate::hl::Group;
 
 /// Lines of text shown before the rest of a long commit folds away.
@@ -42,11 +42,11 @@ pub fn commit_block(commit: &Commit, now: u64) -> Content {
     block(commit, now, Shown::Summary)
 }
 
-/// `commit` as the block of the thread about it: as [`commit_block`], but all of its text, and without the replies
-/// that the thread lists below it.
+/// `commit` as the block of the thread about it: as [`commit_block`], but all of its text, its pictures at their own
+/// size (a cell being `cell` pixels, across and down), and without the replies that the thread lists below it.
 #[must_use]
-pub fn focused_block(commit: &Commit, now: u64) -> Content {
-    block(commit, now, Shown::Whole)
+pub fn focused_block(commit: &Commit, now: u64, cell: (u16, u16)) -> Content {
+    block(commit, now, Shown::Whole { cell })
 }
 
 /// What is left of a deleted commit.
@@ -64,8 +64,11 @@ pub fn deleted_block() -> Content {
 enum Shown {
     /// Long text folded, and a few replies.
     Summary,
-    /// All the text, and no replies.
-    Whole,
+    /// All the text, pictures at their own size in cells of `cell` pixels, and no replies.
+    Whole {
+        /// A cell's size in pixels, across and down.
+        cell: (u16, u16),
+    },
 }
 
 fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
@@ -116,7 +119,10 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
         }
     }
     for image in &commit.images {
-        let (cols, rows) = fit(image.width, image.height, PICTURE_COLS, PICTURE_ROWS);
+        let (cols, rows) = match shown {
+            Shown::Summary => fit(image.width, image.height, PICTURE_COLS, PICTURE_ROWS),
+            Shown::Whole { cell } => natural(image.width, image.height, cell),
+        };
         if cols > 0 {
             lines.push(Line::Image {
                 rows,

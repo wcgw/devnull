@@ -102,6 +102,22 @@ fn a_picture_fits_the_cells_as_wide_as_allowed_keeping_its_shape() {
 }
 
 #[test]
+fn at_its_own_size_a_picture_takes_the_cells_its_pixels_cover() {
+    assert_eq!(natural(400, 200, (10, 20)), (40, 10));
+    assert_eq!(
+        natural(405, 201, (10, 20)),
+        (41, 10),
+        "a cell started counts, its shape kept"
+    );
+    assert_eq!(
+        natural(4000, 2000, (10, 20)),
+        (96, 24),
+        "within the protocol's limits"
+    );
+    assert_eq!(natural(0, 200, (10, 20)), (0, 0));
+}
+
+#[test]
 fn pictures_decode_from_png_and_anything_else_is_refused() {
     let picture = Picture::decode(&png(8, 4)).expect("picture");
 

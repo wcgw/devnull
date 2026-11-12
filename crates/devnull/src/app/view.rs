@@ -149,7 +149,7 @@ impl App {
             scrolloff: self.options.scrolloff,
         };
         let buffer = &self.buffers[window.buffer];
-        let layout = window.layout(&self.buffers, area.width);
+        let layout = window.layout(&self.buffers, area);
         // While a search is typed, the current window shows where it would go, its cursor left where it is.
         let typed = is_current.then(|| self.typed_search()).flatten();
         let moved;

@@ -94,7 +94,12 @@ pub struct App {
     pictures: pictures::Pictures,
     /// Whether the last search's matches are shown, with `'hlsearch'`: `:noh` hides them until the next search.
     highlighting: bool,
+    /// A cell's size in pixels, across and down: what a picture at its own size takes cells by.
+    cell_size: (u16, u16),
 }
+
+/// A cell's size in pixels until the terminal says otherwise: Ghostty's, as measured in M0.1.
+const DEFAULT_CELL_SIZE: (u16, u16) = (10, 20);
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
 const WHICH_KEY_DELAY: Duration = Duration::from_millis(200);
@@ -344,6 +349,7 @@ impl App {
             drafts: composer::Drafts::new(),
             pictures: pictures::Pictures::default(),
             highlighting: false,
+            cell_size: DEFAULT_CELL_SIZE,
         }
     }
 
@@ -351,6 +357,14 @@ impl App {
     #[must_use]
     pub fn size(&self) -> (u16, u16) {
         self.size
+    }
+
+    /// Takes a cell to be `width` × `height` pixels, as the terminal says, for pictures shown at their own size from
+    /// now on; a size of 0 is ignored.
+    pub fn set_cell_size(&mut self, width: u16, height: u16) {
+        if width > 0 && height > 0 {
+            self.cell_size = (width, height);
+        }
     }
 
     /// Whether the terminal has focus, which slows polling down when it doesn't.
@@ -542,7 +556,7 @@ impl App {
         let window = self.windows.current_mut();
         let shown = &self.buffers[window.buffer];
         if index != window.buffer && shown.is_listed() {
-            let layout = window.layout(&self.buffers, area.width);
+            let layout = window.layout(&self.buffers, area);
             window.record_jump(&layout, window.cursor.clone());
         }
         window.switch_to(index, start);
@@ -574,7 +588,7 @@ impl App {
         let area = self.window_area();
         let window = self.windows.current_mut();
         let before = window.buffer;
-        let layout = window.layout(&self.buffers, area.width);
+        let layout = window.layout(&self.buffers, area);
         if !window.pop_tag(&layout) {
             return Err("E73: Tag stack empty".to_owned());
         }
@@ -591,12 +605,12 @@ impl App {
     /// `:jumps`: the jumplist as Vim lists it: how far each entry is from where `<C-o>` and `<C-i>` last went, its
     /// row and column, and the text there, or the name of its buffer when it is another; `>` marks where one is.
     fn list_jumps(&mut self) {
-        let width = self.window_area().width;
+        let area = self.window_area();
         let window = self.windows.current();
         let (jumps, at) = window.jumplist();
         let mut lines = vec![" jump line  col file/text".to_owned()];
         for (i, jump) in jumps.iter().enumerate() {
-            let layout = window.layout_of(&self.buffers, jump.buffer, width);
+            let layout = window.layout_of(&self.buffers, jump.buffer, area);
             let shown = jump.cursor.screen(&layout);
             let text = if jump.buffer == window.buffer {
                 layout.segments(shown.row).map(|(text, _)| text).collect()
@@ -779,7 +793,7 @@ impl App {
             AppMode::Visual(selection) => AppMode::Visual(selection.with_kind(kind)),
             _ => {
                 let area = self.window_area();
-                let layout = self.windows.current().layout(&self.buffers, area.width);
+                let layout = self.windows.current().layout(&self.buffers, area);
                 AppMode::Visual(Selection::start(
                     &self.windows.current().cursor,
                     &layout,
@@ -792,7 +806,7 @@ impl App {
     /// `y` in Visual mode and `yy` in Normal mode: copies the text and, as Vim does, leaves the cursor at its start.
     fn yank(&mut self) -> Vec<Effect> {
         let area = self.window_area();
-        let layout = self.windows.current().layout(&self.buffers, area.width);
+        let layout = self.windows.current().layout(&self.buffers, area);
         let cursor = &mut self.windows.current_mut().cursor;
         let selection = match std::mem::replace(&mut self.mode, AppMode::Normal) {
             AppMode::Visual(selection) => selection,
@@ -813,7 +827,7 @@ impl App {
     fn follow_cursor(&mut self) {
         let viewport = self.viewport();
         let area = self.window_area();
-        let layout = self.windows.current().layout(&self.buffers, area.width);
+        let layout = self.windows.current().layout(&self.buffers, area);
         self.windows.current_mut().follow_cursor(&layout, viewport);
     }
 
@@ -830,7 +844,7 @@ impl App {
         let viewport = self.viewport();
         let area = self.window_area();
         let window = self.windows.current_mut();
-        let layout = window.layout(&self.buffers, area.width);
+        let layout = window.layout(&self.buffers, area);
         // Searches and these motions are jumps: where they start goes into the jumplist, as in Vim.
         let from = window.cursor.clone();
         match invocation.action {
@@ -1052,7 +1066,7 @@ impl App {
     /// What the text under the current window's cursor refers to, if anything.
     fn target_under_cursor(&self) -> Option<Target> {
         let window = self.windows.current();
-        let layout = window.layout(&self.buffers, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area());
         window.cursor.target(&layout).cloned()
     }
 
@@ -1086,7 +1100,7 @@ impl App {
     /// the account.
     fn web_page(&self) -> Option<String> {
         let window = self.windows.current();
-        let layout = window.layout(&self.buffers, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area());
         let targets = [
             window.cursor.target(&layout),
             window.cursor.block_target(&layout),
@@ -1216,7 +1230,7 @@ impl App {
         };
         let area = self.window_area();
         let window = self.windows.current_mut();
-        let layout = window.layout(&self.buffers, area.width);
+        let layout = window.layout(&self.buffers, area);
         let from = window.cursor.clone();
         let outcome = window.cursor.search(&layout, &pattern, direction, count);
         if outcome != SearchOutcome::NotFound {

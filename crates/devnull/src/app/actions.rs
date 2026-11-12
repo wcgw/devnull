@@ -62,7 +62,7 @@ pub(super) struct UnderCursor {
 impl App {
     pub(super) fn commit_under_cursor(&self) -> Option<UnderCursor> {
         let window = self.windows.current();
-        let layout = window.layout(&self.buffers, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area());
         [
             window.cursor.target(&layout),
             window.cursor.block_target(&layout),
@@ -166,7 +166,7 @@ impl App {
                     };
                     // A thread shows its commit whole.
                     let content = if feed.source == Source::Thread(id.to_owned()) {
-                        focused_block(&commit, now)
+                        focused_block(&commit, now, self.cell_size)
                     } else {
                         commit_block(&commit, now)
                     };

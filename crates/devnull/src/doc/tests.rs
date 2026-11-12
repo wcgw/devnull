@@ -620,7 +620,7 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
 }
 
 #[test]
-fn an_image_line_takes_its_rows_whatever_the_width_and_the_cursor_walks_through_them() {
+fn an_image_line_takes_its_rows_at_any_width_it_fits_and_the_cursor_walks_through_them() {
     let mut doc = Document::new();
     doc.push_back(
         "a",
@@ -635,7 +635,7 @@ fn an_image_line_takes_its_rows_whatever_the_width_and_the_cursor_walks_through_
         ],
     );
 
-    for width in [8, 80] {
+    for width in [16, 80] {
         let layout = Layout::new(&doc, width);
         assert_eq!(layout.row_count(), 5);
         let mut cursor = Cursor::new();
@@ -654,7 +654,7 @@ fn on_an_image_h_and_l_stay_put_and_the_cursor_keeps_its_image_row_across_resize
     doc.push_back(
         "a",
         vec![
-            Line::text("above"),
+            Line::text("above the picture, long"),
             Line::Image {
                 rows: 3,
                 cols: 16,
@@ -668,7 +668,11 @@ fn on_an_image_h_and_l_stay_put_and_the_cursor_keeps_its_image_row_across_resize
     cursor.apply(&Layout::new(&doc, 80), Motion::Right, 1);
     cursor.apply(&Layout::new(&doc, 80), Motion::Left, 1);
     assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(2, 0));
-    assert_eq!(cursor.screen(&Layout::new(&doc, 3)), at(3, 0));
+    assert_eq!(
+        cursor.screen(&Layout::new(&doc, 16)),
+        at(3, 0),
+        "below the text, now two rows"
+    );
 }
 
 #[test]
@@ -1287,6 +1291,47 @@ fn word_motions_step_over_a_closed_fold_inside_an_open_one() {
         walk(&layout, &mut cursor, Motion::WordForward, 3),
         [at(1, 0), at(2, 0), at(3, 0)]
     );
+}
+
+/// A block of a `cols` × `rows` picture between two lines of text.
+fn with_picture(cols: u16, rows: u16) -> Document {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![
+            Line::text("above"),
+            Line::Image {
+                rows,
+                cols,
+                source: "p".into(),
+            },
+            Line::text("below"),
+        ],
+    );
+    doc
+}
+
+#[test]
+fn a_picture_larger_than_the_room_shrinks_to_fit_keeping_its_shape() {
+    let doc = with_picture(40, 10);
+    let size = |layout: &Layout<'_>| {
+        layout
+            .picture(1)
+            .map(|picture| (picture.cols, picture.rows))
+    };
+
+    assert_eq!(
+        size(&Layout::new(&doc, 80)),
+        Some((40, 10)),
+        "whole when it fits"
+    );
+    let narrow = Layout::new(&doc, 20);
+    assert_eq!(size(&narrow), Some((20, 5)));
+    assert_eq!(narrow.row_count(), 1 + 5 + 1);
+    let low = Layout::within(&doc, Folds::default(), 80, 3);
+    assert_eq!(size(&low), Some((12, 3)));
+    assert_eq!(low.row_count(), 1 + 3 + 1);
+    assert_eq!(texts(&low)[4], "below");
 }
 
 #[test]

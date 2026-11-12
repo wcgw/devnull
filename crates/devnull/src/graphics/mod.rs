@@ -118,6 +118,22 @@ pub fn fit(width: u32, height: u32, max_cols: u16, max_rows: u16) -> (u16, u16) 
     (cols, rows)
 }
 
+/// The cells a `width` × `height` pixel picture takes at its own size, a cell being `cell` pixels (across, down):
+/// those its pixels cover, keeping its shape within the protocol's limits, as (columns, rows). `(0, 0)` for an empty
+/// picture.
+#[must_use]
+pub fn natural(width: u32, height: u32, cell: (u16, u16)) -> (u16, u16) {
+    let covered = |pixels: u32, per_cell: u16| {
+        u16::try_from(pixels.div_ceil(u32::from(per_cell.max(1)))).unwrap_or(u16::MAX)
+    };
+    fit(
+        width,
+        height,
+        covered(width, cell.0),
+        covered(height, cell.1),
+    )
+}
+
 /// `value`, which is positive, rounded to cells.
 fn rounded(value: f64) -> u16 {
     // Cells are counted in the thousands at most: the cast neither truncates nor loses a sign.

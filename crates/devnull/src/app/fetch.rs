@@ -353,7 +353,7 @@ impl App {
         if !matches!(&buffer.kind, Kind::Feed(feed) if feed.has_more()) {
             return Vec::new();
         }
-        let layout = window.layout(&self.buffers, area.width);
+        let layout = window.layout(&self.buffers, area);
         if window.cursor.screen(&layout).row + usize::from(area.height) < layout.row_count() {
             return Vec::new();
         }
@@ -386,7 +386,7 @@ impl App {
             }
             Fetched::Thread { id, result } => self.head_arrived(
                 &Source::Thread(id),
-                result.map(|thread| threads::head(&thread, now)),
+                result.map(|thread| threads::head(&thread, now, self.cell_size)),
             ),
             Fetched::Profile { handle, result } => self.profile_arrived(handle, result, now),
             Fetched::Commits {
@@ -543,7 +543,7 @@ impl App {
     fn top_row(&self, index: usize) -> Option<usize> {
         let window = self.windows.current();
         (window.buffer == index).then(|| {
-            let layout = window.layout(&self.buffers, self.window_area().width);
+            let layout = window.layout(&self.buffers, self.window_area());
             window.top(&layout, self.viewport())
         })
     }

@@ -25,13 +25,17 @@ pub(super) fn short_hash(id: &str) -> &str {
     &id[start..]
 }
 
-/// The head of a thread: the commits it replies to, root first, then the commit whole.
-pub(super) fn head(thread: &Thread, now: u64) -> Vec<(String, Content)> {
+/// The head of a thread: the commits it replies to, root first, then the commit whole, its pictures at their own size
+/// in cells of `cell` pixels.
+pub(super) fn head(thread: &Thread, now: u64, cell: (u16, u16)) -> Vec<(String, Content)> {
     thread
         .ancestors
         .iter()
         .map(|commit| (commit.id.clone(), commit_block(commit, now)))
-        .chain([(thread.commit.id.clone(), focused_block(&thread.commit, now))])
+        .chain([(
+            thread.commit.id.clone(),
+            focused_block(&thread.commit, now, cell),
+        )])
         .collect()
 }
 

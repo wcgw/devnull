@@ -41,6 +41,7 @@ pub async fn run() -> io::Result<()> {
     // Nothing was drawn yet, so nothing to free.
     let _ = app.set_graphics(graphics);
     app.number_pictures_from(first_picture_id());
+    measure_cells(&mut app);
     let size = terminal.size()?;
     let _ = app.update(Msg::Resize {
         width: size.width,
@@ -96,6 +97,10 @@ pub async fn run() -> io::Result<()> {
             }
             Some(msg) = arrived.recv() => msg,
         };
+        if let Msg::Resize { .. } = msg {
+            // The font may have changed size with the window.
+            measure_cells(&mut app);
+        }
         for effect in app.update(msg) {
             match perform(effect, &later, &mut net)? {
                 Step::Go => {}
@@ -110,6 +115,17 @@ pub async fn run() -> io::Result<()> {
                 }
             }
         }
+    }
+}
+
+/// Tells `app` a cell's size in pixels, when the terminal reports its own in pixels (Ghostty and kitty do; some
+/// multiplexers do not, and `app` keeps what it had).
+fn measure_cells(app: &mut App) {
+    let Ok(size) = crossterm::terminal::window_size() else {
+        return;
+    };
+    if size.columns > 0 && size.rows > 0 {
+        app.set_cell_size(size.width / size.columns, size.height / size.rows);
     }
 }
 

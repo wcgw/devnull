@@ -506,6 +506,9 @@ from M1 even though graphics land in M6.
   are freed when switching and on quitting. Multiplexers that rename `$TERM`/`$TERM_PROGRAM` defeat the guess (herdr,
   though it passes kitty placeholders through): there, `:set graphics=kitty` in `init.vim`. Checked live in a pty: 8 pictures sent and freed, placeholders drawn;
   3568 true-colour half blocks. Seen working in Ghostty (through herdr, with `graphics=kitty`).
+  Since: a commit's own buffer (its thread) shows its pictures at their own size, a cell being as many pixels as the
+  terminal reports (`TIOCGWINSZ`, measured again on resize; 10 × 20 when it reports none), and any picture larger than
+  its window, in any buffer, shrinks to fit it, keeping its shape. A picture is asked for at each size it is shown at.
 - [x] **M6.4** Avatars and link-card pictures. An avatar sits beside each name (2 × 1 cells, in a line of text:
   `Span::picture`, braille blanks so it wraps as a word) for authors, people in lists and notification actors; a
   profile opens with its avatar (8 × 4); a link card's picture follows it (32 × 8, its size unknown until it

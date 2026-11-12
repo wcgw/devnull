@@ -207,7 +207,7 @@ fn the_commit_a_thread_is_about_shows_whole_and_leaves_its_replies_to_the_thread
         }] }
     }));
 
-    let rows = rows(focused_block(&commit, NOW));
+    let rows = rows(focused_block(&commit, NOW, (10, 20)));
 
     assert_eq!(rows[10..], ["line 10", "☆ 2  ↩ 1", ""]);
 }

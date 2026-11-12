@@ -3834,9 +3834,14 @@ fn with_picture() -> Page<Commit> {
     )
 }
 
-/// A connected app on following, drawing pictures as `graphics` does, and the effects of `page` arriving.
+/// A connected app on following, drawing pictures as `graphics` does, and the effects of `page` arriving: tall enough
+/// that the window has room for `with_picture`'s 48 × 12.
 fn pictured(graphics: crate::graphics::Graphics, page: Page<Commit>) -> (App, Vec<Effect>) {
     let mut app = with_log(Log::Following, page_of(1, 0, None));
+    let _ = app.update(Msg::Resize {
+        width: 60,
+        height: 24,
+    });
     app.set_graphics(graphics);
     let _ = press(&mut app, ":e!<CR>");
     let effects = arrive(
@@ -4112,6 +4117,95 @@ fn a_wake_up_for_pictures_since_forgotten_is_ignored() {
     let _ = app.update(Msg::Wake(stale));
 
     assert_eq!(picture_colour(&app), Some(Color::Rgb(255, 0, 0)));
+}
+
+#[test]
+fn a_picture_taller_than_the_window_shrinks_to_fit_it() {
+    // 60 × 12: nine rows of text area, so the 48 × 12 picture shrinks, keeping its shape.
+    let mut app = with_log(Log::Following, page_of(1, 0, None));
+    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+
+    let effects = press(&mut app, ":e!<CR>");
+    let effects = [
+        effects,
+        arrive(
+            &mut app,
+            Fetched::Log {
+                log: Log::Following,
+                after: None,
+                result: Ok(with_picture()),
+            },
+        ),
+    ]
+    .concat();
+
+    assert_eq!(
+        pictures(&effects),
+        [("https://example.org/p.png".to_owned(), 36, 9, None)]
+    );
+}
+
+/// The thread of a commit with a `width` × `height` pixel picture, arrived in a `columns` × `lines` terminal; the
+/// pictures asked for.
+fn thread_with_picture(
+    app: &mut App,
+    width: u32,
+    height: u32,
+) -> Vec<(String, u16, u16, Option<u32>)> {
+    let mut focus = commit_with("c1", "look", None);
+    focus["images"] = serde_json::json!([{ "id": "i1", "url": "https://example.org/big.png", "width": width, "height": height }]);
+    let mut effects = press(app, "<CR>");
+    effects.extend(arrive(
+        app,
+        Fetched::Thread {
+            id: "c1".into(),
+            result: Ok(thread_of(&[], focus)),
+        },
+    ));
+    pictures(&effects)
+        .into_iter()
+        .filter(|(source, ..)| source.ends_with("big.png"))
+        .collect()
+}
+
+#[test]
+fn a_commit_s_own_buffer_shows_its_picture_at_its_own_size_or_as_large_as_the_window_allows() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    let _ = app.update(Msg::Resize {
+        width: 100,
+        height: 30,
+    });
+    assert_eq!(
+        thread_with_picture(&mut app, 400, 200),
+        [("https://example.org/big.png".to_owned(), 40, 10, None)],
+        "its pixels over cells of 10 × 20"
+    );
+
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    let _ = app.update(Msg::Resize {
+        width: 60,
+        height: 24,
+    });
+    assert_eq!(
+        thread_with_picture(&mut app, 2000, 1000),
+        [("https://example.org/big.png".to_owned(), 60, 15, None)],
+        "the window's width"
+    );
+
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_cell_size(20, 40);
+    let _ = app.update(Msg::Resize {
+        width: 100,
+        height: 30,
+    });
+    assert_eq!(
+        thread_with_picture(&mut app, 400, 200),
+        [("https://example.org/big.png".to_owned(), 20, 5, None)],
+        "the terminal's own cells"
+    );
 }
 
 #[test]
