@@ -6,4 +6,5 @@ pub mod app;
 pub mod doc;
 pub mod hl;
 pub mod key;
+pub mod keymap;
 pub mod runtime;
