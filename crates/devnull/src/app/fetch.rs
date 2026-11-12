@@ -1,13 +1,13 @@
 //! What feeds ask dev-null.sh for, and how the answers reach their buffers.
 
-use devnull_api::Log;
-use devnull_api::model::{Commit, Cursor, Page, Thread};
+use devnull_api::model::{Account, AccountKind, AccountPage, Commit, Cursor, Page, Thread};
+use devnull_api::{Log, OrganizationTab, People};
 
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
 use super::{App, Buffer, Effect, Kind, NetEvent, threads};
 use crate::doc::{Content, Cursor as DocCursor, Document, Layout};
 use crate::hl::Group;
-use crate::render::commit_block;
+use crate::render::{account_block, commit_block};
 
 /// Something to ask dev-null.sh for, on the app's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +29,38 @@ pub enum Request {
     Replies {
         /// The commit's id.
         id: String,
+        /// Where the page starts; `None` for the first.
+        after: Option<Cursor>,
+    },
+    /// A person's profile or an organization's page.
+    Profile {
+        /// The handle, without the `@`.
+        handle: String,
+        /// Which it is, when known; otherwise a person's, else an organization's.
+        kind: Option<AccountKind>,
+    },
+    /// A page of a person's commits.
+    Commits {
+        /// The handle, without the `@`.
+        handle: String,
+        /// Where the page starts; `None` for the first.
+        after: Option<Cursor>,
+    },
+    /// A page of an organization's commits, or of the commits mentioning it.
+    OrganizationCommits {
+        /// The handle, without the `@`.
+        handle: String,
+        /// Which commits.
+        tab: OrganizationTab,
+        /// Where the page starts; `None` for the first.
+        after: Option<Cursor>,
+    },
+    /// A page of who follows a person, or whom they follow.
+    People {
+        /// The handle, without the `@`.
+        handle: String,
+        /// Which list.
+        which: People,
         /// Where the page starts; `None` for the first.
         after: Option<Cursor>,
     },
@@ -62,6 +94,44 @@ pub enum Fetched {
         after: Option<Cursor>,
         /// The page, or why there is none.
         result: Result<Page<Commit>, FetchError>,
+    },
+    /// The answer to [`Request::Profile`].
+    Profile {
+        /// The handle asked for.
+        handle: String,
+        /// The profile or page, or why there is none.
+        result: Result<AccountPage, FetchError>,
+    },
+    /// The answer to [`Request::Commits`].
+    Commits {
+        /// The handle asked for.
+        handle: String,
+        /// Where the page was asked to start.
+        after: Option<Cursor>,
+        /// The page, or why there is none.
+        result: Result<Page<Commit>, FetchError>,
+    },
+    /// The answer to [`Request::OrganizationCommits`].
+    OrganizationCommits {
+        /// The handle asked for.
+        handle: String,
+        /// Which commits.
+        tab: OrganizationTab,
+        /// Where the page was asked to start.
+        after: Option<Cursor>,
+        /// The page, or why there is none.
+        result: Result<Page<Commit>, FetchError>,
+    },
+    /// The answer to [`Request::People`].
+    People {
+        /// The handle asked for.
+        handle: String,
+        /// Which list.
+        which: People,
+        /// Where the page was asked to start.
+        after: Option<Cursor>,
+        /// The page, or why there is none.
+        result: Result<Page<Account>, FetchError>,
     },
 }
 
@@ -176,11 +246,49 @@ impl App {
                 &Source::Thread(id),
                 result.map(|thread| threads::head(&thread, now)),
             ),
+            Fetched::Profile { handle, result } => self.profile_arrived(handle, result, now),
+            Fetched::Commits {
+                handle,
+                after,
+                result,
+            } => {
+                let source = Source::Profile { handle, kind: None };
+                self.page_arrived(&source, after.is_some(), result.map(commits))
+            }
+            Fetched::OrganizationCommits {
+                handle,
+                tab,
+                after,
+                result,
+            } => {
+                let source = match tab {
+                    OrganizationTab::Mentions => Source::Mentions(handle),
+                    _ => Source::Profile { handle, kind: None },
+                };
+                self.page_arrived(&source, after.is_some(), result.map(commits))
+            }
+            Fetched::People {
+                handle,
+                which,
+                after,
+                result,
+            } => {
+                let accounts = |page: Page<Account>| {
+                    let items = page
+                        .items
+                        .iter()
+                        .map(|account| (format!("@{}", account.handle), account_block(account)))
+                        .collect();
+                    Page::new(items, page.next)
+                };
+                let source = Source::People(handle, which);
+                self.page_arrived(&source, after.is_some(), result.map(accounts))
+            }
         }
     }
 
     /// The head of the feed of `source` arrived as blocks, or failed to.
-    fn head_arrived(
+    pub(super) fn head_arrived(
         &mut self,
         source: &Source,
         result: Result<Vec<(String, Content)>, FetchError>,
@@ -224,7 +332,8 @@ impl App {
             Err(error) => return self.failed(index, error),
         };
         let arrived = feed.page_arrived(&mut buffer.doc, next_page, page);
-        if arrived > 0 && top_before.is_some_and(|top| top > 0) {
+        let of_commits = !matches!(source, Source::People(..));
+        if of_commits && arrived > 0 && top_before.is_some_and(|top| top > 0) {
             self.info(format!(
                 "{arrived} new commit{}",
                 if arrived == 1 { "" } else { "s" }

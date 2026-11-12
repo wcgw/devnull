@@ -1,6 +1,6 @@
 //! Commits as blocks: what each part of a commit becomes on screen.
 
-use devnull_api::model::Commit;
+use devnull_api::model::{Account, Commit, OrganizationPage, Profile};
 
 use super::*;
 use crate::doc::{AccountRef, Content, Cursor, Document, Layout, Motion, Target};
@@ -307,4 +307,148 @@ fn a_page_of_commits_is_one_block_each_keyed_by_id() {
 
     // Header, counts and the blank line: these commits have no text.
     assert_eq!(Layout::new(&doc, 80).row_count(), 2 * 3);
+}
+
+fn targets_on(content: Content, row: usize) -> Vec<Target> {
+    let whole = content.target.clone();
+    let mut found = targets(content, row);
+    if let Some(whole) = whole {
+        found.retain(|target| *target != whole);
+    }
+    found
+}
+
+#[test]
+fn a_person_s_header_says_who_they_are_and_its_counts_lead_to_their_lists() {
+    let profile: Profile = serde_json::from_value(serde_json::json!({
+        "data": { "id": "u1", "handle": "ada", "name": "Ada", "bio": "Counts things\nand more",
+                  "company": "Acme", "location": "London", "website": "https://ada.dev",
+                  "commits_count": 42, "followers_count": 10, "following_count": 7 },
+        "is_following": true, "follows_you": true, "streaks": { "current": 3, "longest": 12 }
+    }))
+    .expect("profile");
+
+    let header = profile_header(&profile);
+
+    assert_eq!(
+        header.target,
+        Some(Target::Account(AccountRef::new(
+            "ada",
+            Some(AccountKind::User)
+        )))
+    );
+    assert_eq!(
+        rows(header.clone()),
+        [
+            "Ada @ada",
+            "Counts things",
+            "and more",
+            "Acme · London · https://ada.dev",
+            "42 commits · 10 followers · 7 following",
+            "Follows you · Following",
+            "Streak 3 days · longest 12",
+            ""
+        ]
+    );
+    assert_eq!(
+        targets_on(header.clone(), 3),
+        [Target::Url("https://ada.dev".into())]
+    );
+    assert_eq!(
+        targets_on(header, 4),
+        [
+            Target::Buffer("@ada/followers".into()),
+            Target::Buffer("@ada/following".into())
+        ]
+    );
+}
+
+#[test]
+fn an_empty_profile_shows_only_who_it_is() {
+    let profile: Profile =
+        serde_json::from_value(serde_json::json!({ "data": { "handle": "ada" } }))
+            .expect("profile");
+
+    assert_eq!(rows(profile_header(&profile)), ["@ada", ""]);
+}
+
+#[test]
+fn an_organization_s_header_names_its_admins_and_leads_to_its_mentions() {
+    let page: OrganizationPage = serde_json::from_value(serde_json::json!({
+        "data": { "handle": "acme", "name": "Acme", "bio": "We make things", "location": "Paris",
+                  "followers_count": 12, "admins": [{ "id": "u1", "handle": "ada", "name": "Ada" }] },
+        "is_following": true
+    }))
+    .expect("organization");
+
+    let header = organization_header(&page);
+
+    assert_eq!(
+        rows(header.clone()),
+        [
+            "Acme (org) @acme",
+            "We make things",
+            "Paris",
+            "12 followers · mentions",
+            "Admins: @ada",
+            "Following",
+            ""
+        ]
+    );
+    assert_eq!(
+        targets_on(header.clone(), 3),
+        [Target::Buffer("@acme/mentions".into())]
+    );
+    assert_eq!(
+        targets_on(header, 4),
+        [Target::Account(AccountRef::new(
+            "ada",
+            Some(AccountKind::User)
+        ))]
+    );
+}
+
+#[test]
+fn a_pinned_commit_says_so_above_it() {
+    let pinned = pinned_block(
+        &commit(serde_json::json!({ "body_segments": [text("hello")] })),
+        NOW,
+    );
+
+    assert_eq!(
+        rows(pinned)[..3],
+        ["📌 Pinned", "Grace @grace · 3m · 6cd1130", "hello"]
+    );
+    let body: String = (1..=10)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let long = pinned_block(
+        &commit(serde_json::json!({ "body_segments": [text(&body)] })),
+        NOW,
+    );
+    assert_eq!(
+        rows(long)[7..9],
+        ["line 6", "… 4 more lines"],
+        "folded as in the log"
+    );
+}
+
+#[test]
+fn an_account_in_a_list_is_its_name_relationship_and_bio() {
+    let account: Account = serde_json::from_value(serde_json::json!({
+        "id": "u2", "handle": "lin", "name": "Lin", "bio": "Writes\ncode", "follows_you": true, "is_followed": false
+    }))
+    .expect("account");
+
+    let block = account_block(&account);
+
+    assert_eq!(
+        rows(block.clone()),
+        ["Lin @lin · follows you", "Writes", ""]
+    );
+    assert_eq!(
+        block.target,
+        Some(Target::Account(AccountRef::new("lin", None)))
+    );
 }

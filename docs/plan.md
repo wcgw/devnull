@@ -265,7 +265,9 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
   is_muting, pasteis_received, pinned_commit, streaks}`; lists at `/users/{handle}/{commits[?replies=1],followers,
   following}`.
 - **Organization** `GET /organizations/{handle}`: `{data{…, admins}, can_claim, is_following, settings_url}`; tabs at
-  `/organizations/{handle}/{commits,mentions}`.
+  `/organizations/{handle}/{commits,mentions}`. `GET /users/{organization}` is a 404 (checked live in M3.3), so a
+  handle of unknown kind is tried as a person, then as an organization.
+- **People lists** (followers, following) carry no account `type`.
 - **Errors** are `{message, code?, errors?}`:
   - 404: `{message: "No query results for model [App\\Models\\Commit] …"}` (no `code`).
   - 401 `invalid_signature`: timestamp outside **±300 s** ("Signature expired. Check that your clock is right.").
@@ -403,9 +405,13 @@ from M1 even though graphics land in M6.
   whole (`Content::target`), so any text of a commit without a target of its own refers to the commit, and the text of
   a quote to the quoted one. Threads are named `thread/{short hash}`, start with the cursor on their commit, and
   reload with `:e!`; they are not polled. Checked live: `<CR>` on the following log, then `:e!`.
-- [ ] **M3.3** Profile buffers (`gd`, `<CR>` on a mention): header, pinned commit, commits; followers/following
+- [x] **M3.3** Profile buffers (`gd`, `<CR>` on a mention): header, pinned commit, commits; followers/following
   lists; organization pages. Mention targets know user from organization; `Target::Buffer` links text to a buffer
-  (a profile's counts open its lists).
+  (a profile's counts open its lists). Buffers are `@ada`, `@ada/followers`, `@ada/following` and `@acme/mentions`,
+  all opened with `:e` too; `:e profile` (`<leader>p`) is your own. `:profile [handle]` (`gd`) opens the account under
+  the cursor, else the commit's author. Logs, threads and profiles are one kind of buffer, a feed: a head, then a list
+  a page at a time, merged by the list's order (newest first, oldest first, ranked). Checked live: own profile, its
+  followers, a follower's profile, an organization and its (empty) mentions.
 - [ ] **M3.4** `gx` (link under the cursor), `gX` (commit on the web), `gy` (yank its link); `K` hover card.
 - [ ] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed.
 - [ ] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`).

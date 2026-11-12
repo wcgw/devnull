@@ -6,6 +6,7 @@ mod feed;
 mod fetch;
 mod logs;
 mod options;
+mod profiles;
 mod threads;
 mod view;
 mod window;
@@ -766,11 +767,9 @@ impl App {
                 return Ok(self.show_buffer(index));
             }
             Command::NextBuffer { forward } => return Ok(self.cycle_buffer(forward)),
-            Command::Edit(Some(name)) => match logs::named(&name) {
-                Some(log) => return Ok(self.open_log(log)),
-                None => return Err(format!("E94: No matching buffer for {name}")),
-            },
+            Command::Edit(Some(name)) => return self.edit(&name),
             Command::Open => return self.open(),
+            Command::Profile(handle) => return self.profile(handle),
             Command::Agree => match &self.connection {
                 Connection::Terms(me) => {
                     return Ok(vec![Effect::AcceptTerms(
@@ -783,19 +782,39 @@ impl App {
         Ok(Vec::new())
     }
 
-    /// `:open`: what the text under the cursor refers to: a link opens in the browser, a commit's thread in the
-    /// window.
-    fn open(&mut self) -> Result<Vec<Effect>, String> {
+    /// What the text under the current window's cursor refers to, if anything.
+    fn target_under_cursor(&self) -> Option<Target> {
         let window = self.windows.current();
         let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
-        match window.cursor.target(&layout).cloned() {
+        window.cursor.target(&layout).cloned()
+    }
+
+    /// `:open`: what the text under the cursor refers to: a link opens in the browser, a commit's thread, a profile
+    /// or another buffer in the window.
+    fn open(&mut self) -> Result<Vec<Effect>, String> {
+        match self.target_under_cursor() {
             Some(Target::Url(url)) => Ok(vec![Effect::OpenUrl(url)]),
             Some(Target::Commit { id, .. }) => Ok(self.open_thread(&id)),
-            Some(Target::Account(account)) => {
-                Err(format!("Cannot open @{}'s profile yet", account.handle))
-            }
-            Some(Target::Buffer(name)) => self.execute(Command::Edit(Some(name))),
+            Some(Target::Account(account)) => Ok(self.open_profile(account)),
+            Some(Target::Buffer(name)) => self.edit(&name),
             None => Ok(Vec::new()),
+        }
+    }
+
+    /// `:e {name}`: shows the buffer of that name, or else the feed the name names (see [`Source::named`]), or
+    /// with `profile`, the connected account's profile.
+    fn edit(&mut self, name: &str) -> Result<Vec<Effect>, String> {
+        if let Some(index) = self.buffers.iter().position(|buffer| buffer.name == name) {
+            return Ok(self.show_buffer(index));
+        }
+        let source = if name == "profile" {
+            self.own_profile()
+        } else {
+            Source::named(name)
+        };
+        match source {
+            Some(source) => Ok(self.open_feed(source, Cursor::new())),
+            None => Err(format!("E94: No matching buffer for {name}")),
         }
     }
 

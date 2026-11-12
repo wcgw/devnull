@@ -969,6 +969,35 @@ fn a_fold_keeps_its_state_when_its_block_is_replaced() {
 }
 
 #[test]
+fn a_block_dropped_and_added_again_starts_with_its_folds_as_given() {
+    let mut doc = folded(true);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+    doc.fold(&cursor, FoldOp::Open);
+
+    doc.retain(|key| key != "a");
+    let lines = ["head", "one", "two", "four", "tail"]
+        .map(Line::text)
+        .to_vec();
+    let fold = Fold {
+        lines: 1..4,
+        summary: Line::text("+ 3 more lines"),
+        closed: true,
+    };
+    doc.push_back(
+        "a",
+        Content {
+            lines,
+            folds: vec![fold],
+            ..Content::default()
+        },
+    );
+
+    // "next", then the block's head, summary and tail.
+    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
+}
+
+#[test]
 fn word_motions_treat_a_closed_fold_as_one_stop() {
     let doc = folded(true);
     let layout = Layout::new(&doc, 80);

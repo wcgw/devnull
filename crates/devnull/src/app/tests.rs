@@ -5,8 +5,9 @@ use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 
 use super::*;
-use devnull_api::Log;
+use devnull_api::model::AccountKind;
 use devnull_api::model::{Commit, Cursor, Page};
+use devnull_api::{Log, OrganizationTab, People};
 
 use crate::doc::{Content, Document, Fold, Line};
 use crate::hl::Group;
@@ -1822,4 +1823,354 @@ fn refreshing_a_thread_keeps_the_folds_opened_in_it() {
     });
 
     assert!(shows(&app, "old 8"));
+}
+
+/// A log page of one commit by `@ada` saying "thanks @lin", mentioning the person `@lin`.
+fn mentioning_lin() -> Page<Commit> {
+    let mut commit = commit_with("c1", "thanks @lin", None);
+    commit["mentions"] =
+        serde_json::json!([{ "handle": "lin", "kind": "user", "offset": 7, "length": 4 }]);
+    Page::new(
+        serde_json::from_value(serde_json::json!([commit])).expect("page"),
+        None,
+    )
+}
+
+/// `@lin`'s profile: three commits, two followers, one following, and `c9` pinned.
+fn lin() -> devnull_api::model::AccountPage {
+    let profile = serde_json::from_value(serde_json::json!({
+        "data": { "id": "u2", "handle": "lin", "name": "Lin", "commits_count": 3, "followers_count": 2, "following_count": 1 },
+        "pinned_commit": commit_with("c9", "pinned words", None)
+    }))
+    .expect("profile");
+    devnull_api::model::AccountPage::Person(Box::new(profile))
+}
+
+fn arrive(app: &mut App, fetched: Fetched) -> Vec<Effect> {
+    app.update(Msg::Fetched {
+        fetched,
+        now: FIXTURE_NOW,
+    })
+}
+
+#[test]
+fn enter_on_a_mention_opens_the_profile_with_its_commits() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+
+    let effects = press(&mut app, "j$<CR>");
+
+    assert_eq!(
+        fetches(&effects),
+        [
+            Request::Profile {
+                handle: "lin".into(),
+                kind: Some(AccountKind::User)
+            },
+            Request::Commits {
+                handle: "lin".into(),
+                after: None
+            }
+        ]
+    );
+    assert!(statusline(&app).contains("@lin"));
+    assert!(shows(&app, "Loading @lin…"));
+}
+
+#[test]
+fn a_profile_shows_who_it_is_its_pinned_commit_then_its_commits() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+    let _ = press(&mut app, "j$<CR>");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Commits {
+            handle: "lin".into(),
+            after: None,
+            result: Ok(page_of(10, 2, None)),
+        },
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    let rows = screen(&app).rows;
+    assert!(rows[1].starts_with("Lin @lin"), "{rows:#?}");
+    // The pin is two cells wide: the screen has a blank cell after it.
+    assert!(
+        shows(&app, "📌  Pinned") && shows(&app, "pinned words"),
+        "{rows:#?}"
+    );
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 11"));
+}
+
+#[test]
+fn a_handle_typed_in_is_asked_for_first_and_its_commits_once_its_kind_is_known() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, ":e @lin<CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Profile {
+            handle: "lin".into(),
+            kind: None
+        }]
+    );
+
+    let effects = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Commits {
+            handle: "lin".into(),
+            after: None
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Commits {
+            handle: "lin".into(),
+            after: None,
+            result: Ok(page_of(10, 1, None)),
+        },
+    );
+    assert!(
+        screen(&app).rows[1].starts_with("Lin @lin"),
+        "the profile stays above its commits"
+    );
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 10"));
+    let _ = press(&mut app, ":b log/following<CR>");
+    assert_eq!(
+        fetches(&press(&mut app, ":profile @lin<CR>")),
+        [],
+        "the same buffer"
+    );
+    assert!(statusline(&app).contains("@lin"));
+}
+
+#[test]
+fn a_profile_s_counts_lead_to_its_lists_of_people_and_they_to_their_profiles() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, ":e @lin<CR>");
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "lin".into(),
+            result: Ok(lin()),
+        },
+    );
+
+    let effects = press(&mut app, "/followers<CR><CR>");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::People {
+            handle: "lin".into(),
+            which: People::Followers,
+            after: None
+        }]
+    );
+    assert!(statusline(&app).contains("@lin/followers"));
+    let kim = serde_json::json!([{ "id": "u3", "handle": "kim", "name": "Kim", "bio": "hi", "follows_you": true }]);
+    let page = Page::new(serde_json::from_value(kim).expect("accounts"), None);
+    let _ = arrive(
+        &mut app,
+        Fetched::People {
+            handle: "lin".into(),
+            which: People::Followers,
+            after: None,
+            result: Ok(page),
+        },
+    );
+    assert!(shows(&app, "Kim @kim · follows you"));
+    let effects = press(&mut app, "<CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Profile {
+            handle: "kim".into(),
+            kind: None
+        }]
+    );
+}
+
+#[test]
+fn gd_opens_the_profile_of_an_organization_and_it_leads_to_its_mentions() {
+    let mut commit = commit_with("c1", "we shipped", None);
+    commit["author"] =
+        serde_json::json!({ "id": "o1", "handle": "acme", "name": "Acme", "type": "organization" });
+    let page = Page::new(
+        serde_json::from_value(serde_json::json!([commit])).expect("page"),
+        None,
+    );
+    let mut app = with_log(Log::Following, page);
+
+    let effects = press(&mut app, "jgd");
+
+    assert_eq!(
+        fetches(&effects),
+        [
+            Request::Profile {
+                handle: "acme".into(),
+                kind: Some(AccountKind::Organization)
+            },
+            Request::OrganizationCommits {
+                handle: "acme".into(),
+                tab: OrganizationTab::Commits,
+                after: None
+            }
+        ]
+    );
+    let org = serde_json::from_value(
+        serde_json::json!({ "data": { "handle": "acme", "name": "Acme", "followers_count": 5 } }),
+    )
+    .expect("organization");
+    let org = devnull_api::model::AccountPage::Organization(org);
+    let _ = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "acme".into(),
+            result: Ok(org),
+        },
+    );
+    assert!(shows(&app, "Acme (org) @acme"));
+    let effects = press(&mut app, "/mentions<CR><CR>");
+    assert_eq!(
+        fetches(&effects),
+        [Request::OrganizationCommits {
+            handle: "acme".into(),
+            tab: OrganizationTab::Mentions,
+            after: None
+        }]
+    );
+    assert!(statusline(&app).contains("@acme/mentions"));
+    let _ = arrive(
+        &mut app,
+        Fetched::OrganizationCommits {
+            handle: "acme".into(),
+            tab: OrganizationTab::Mentions,
+            after: None,
+            result: Ok(page_of(20, 1, None)),
+        },
+    );
+    assert!(shows(&app, "commit 20"));
+}
+
+#[test]
+fn gd_on_a_mention_opens_the_mentioned_and_elsewhere_the_author() {
+    let mut app = with_log(Log::Following, mentioning_lin());
+
+    assert_eq!(
+        fetches(&press(&mut app, "j$gd"))[0],
+        Request::Profile {
+            handle: "lin".into(),
+            kind: Some(AccountKind::User)
+        }
+    );
+    let _ = press(&mut app, ":b log/following<CR>");
+    assert_eq!(
+        fetches(&press(&mut app, "0gd"))[0],
+        Request::Profile {
+            handle: "ada".into(),
+            kind: Some(AccountKind::User)
+        }
+    );
+}
+
+#[test]
+fn profile_without_an_account_under_the_cursor_says_so() {
+    let mut app = with_log(Log::Following, page_of(1, 0, None));
+    assert!(shows(&app, "Nothing here yet."));
+
+    let _ = press(&mut app, "gd");
+
+    assert_eq!(cmdline(&app), "No account under the cursor");
+}
+
+#[test]
+fn e_profile_opens_your_own() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, "<Space>p");
+
+    assert_eq!(
+        fetches(&effects),
+        [
+            Request::Profile {
+                handle: "ada".into(),
+                kind: Some(AccountKind::User)
+            },
+            Request::Commits {
+                handle: "ada".into(),
+                after: None
+            }
+        ]
+    );
+    assert!(statusline(&app).contains("@ada"));
+}
+
+#[test]
+fn an_account_that_does_not_exist_says_so() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, ":e @nobody<CR>");
+
+    let effects = arrive(
+        &mut app,
+        Fetched::Profile {
+            handle: "nobody".into(),
+            result: Err(FetchError::Failed("not found".into())),
+        },
+    );
+
+    assert_eq!(cmdline(&app), "Cannot load @nobody: not found");
+    assert_eq!(fetches(&effects), [], "not asked for again until :e!");
+}
+
+#[test]
+fn new_people_in_a_list_are_not_announced_as_commits() {
+    let accounts = |handles: std::ops::Range<usize>| {
+        let accounts: Vec<serde_json::Value> = handles
+            .map(|n| serde_json::json!({ "id": format!("u{n}"), "handle": format!("p{n}"), "name": "P" }))
+            .collect();
+        Page::new(
+            serde_json::from_value(serde_json::Value::Array(accounts)).expect("accounts"),
+            None,
+        )
+    };
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, ":e @lin/followers<CR>");
+    let _ = arrive(
+        &mut app,
+        Fetched::People {
+            handle: "lin".into(),
+            which: People::Followers,
+            after: None,
+            result: Ok(accounts(1..20)),
+        },
+    );
+    let _ = press(&mut app, "G:e!<CR>");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::People {
+            handle: "lin".into(),
+            which: People::Followers,
+            after: None,
+            result: Ok(accounts(0..20)),
+        },
+    );
+
+    assert_eq!(cmdline(&app), "");
+    let _ = press(&mut app, "gg");
+    assert!(shows(&app, "P @p0"), "new followers go above");
 }

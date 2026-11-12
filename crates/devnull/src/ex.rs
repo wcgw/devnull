@@ -71,6 +71,9 @@ pub enum Command {
     Agree,
     /// `:open`: opens what the text under the cursor refers to: a link in the browser, a commit's thread.
     Open,
+    /// `:profile {handle}` opens a profile; `:profile` alone, the profile of the account under the cursor, or of the
+    /// author of the commit under it.
+    Profile(Option<String>),
     /// `:edit {name}` opens a buffer by name; `:edit` alone (or `:e!`) reloads the current one.
     Edit(Option<String>),
     /// `:ls`, `:buffers`: lists the buffers.
@@ -152,6 +155,7 @@ enum Name {
     Connect,
     Agree,
     Open,
+    Profile,
     Edit,
     Buffer,
     Buffers,
@@ -194,6 +198,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("vsplit", 2, Name::Split(true)),
     ("close", 3, Name::Close),
     ("open", 1, Name::Open),
+    ("profile", 4, Name::Profile),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -257,6 +262,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Connect => Command::Connect((!args.is_empty()).then(|| args.to_owned())),
         Name::Agree => Command::Agree,
         Name::Open => Command::Open,
+        Name::Profile => Command::Profile((!args.is_empty()).then(|| args.to_owned())),
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Buffer => Command::Buffer(required(args)?.to_owned()),
         Name::Buffers => Command::Buffers,
@@ -540,6 +546,15 @@ mod tests {
         assert_eq!(
             parse("b").unwrap_err().to_string(),
             "E471: Argument required"
+        );
+    }
+
+    #[test]
+    fn profile_takes_a_handle_or_none() {
+        assert_eq!(parsed("prof"), Command::Profile(None));
+        assert_eq!(
+            parsed("profile @ada"),
+            Command::Profile(Some("@ada".into()))
         );
     }
 

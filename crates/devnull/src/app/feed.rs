@@ -3,8 +3,8 @@
 //!
 //! The head's blocks come first in the document, then the list's, then "Loading more…" while the next page loads.
 
-use devnull_api::Log;
-use devnull_api::model::{Cursor, Page};
+use devnull_api::model::{AccountKind, Cursor, Page};
+use devnull_api::{Log, OrganizationTab, People};
 
 use super::fetch::Request;
 use super::{logs, threads};
@@ -18,13 +18,39 @@ pub(super) const NOTICE: &str = "notice";
 /// The key of the "Loading more…" block at the end of a list while its next page loads.
 const MORE: &str = "~more";
 
-/// What a feed shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a feed shows. Two sources are the same feed whatever is known of a profile's kind.
+#[derive(Debug, Clone, Eq)]
 pub(super) enum Source {
     /// A log; a list alone.
     Log(Log),
     /// The thread of a commit, by id: what the commit replies to and the commit, then its replies.
     Thread(String),
+    /// A person's or an organization's profile, then their commits. Which it is decides where the commits come
+    /// from: until known, they wait for the profile to say.
+    Profile {
+        /// The handle, without the `@`.
+        handle: String,
+        /// A person or an organization, once known.
+        kind: Option<AccountKind>,
+    },
+    /// Who follows a person, or whom they follow; a list alone.
+    People(String, People),
+    /// The commits mentioning an organization; a list alone.
+    Mentions(String),
+}
+
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Log(a), Self::Log(b)) => a == b,
+            (Self::Thread(a), Self::Thread(b)) | (Self::Mentions(a), Self::Mentions(b)) => a == b,
+            (Self::Profile { handle: a, .. }, Self::Profile { handle: b, .. }) => a == b,
+            (Self::People(a, which), Self::People(b, other_which)) => {
+                a == b && which == other_which
+            }
+            _ => false,
+        }
+    }
 }
 
 /// How a list is ordered, which decides where its items go when a fresh first page arrives.
@@ -39,38 +65,97 @@ enum Order {
 }
 
 impl Source {
+    /// The feed a buffer name names, as `:e` takes it: a log's (`log/latest`), a profile (`@ada`), or a list of a
+    /// profile's (`@ada/followers`, `@ada/following`, `@acme/mentions`).
+    pub(super) fn named(name: &str) -> Option<Self> {
+        if let Some(log) = logs::named(name) {
+            return Some(Self::Log(log));
+        }
+        let rest = name.strip_prefix('@')?;
+        let (handle, list) = match rest.split_once('/') {
+            Some((handle, list)) => (handle.to_owned(), Some(list)),
+            None => (rest.to_owned(), None),
+        };
+        if handle.is_empty() {
+            return None;
+        }
+        Some(match list {
+            None => Self::Profile { handle, kind: None },
+            Some("followers") => Self::People(handle, People::Followers),
+            Some("following") => Self::People(handle, People::Following),
+            Some("mentions") => Self::Mentions(handle),
+            Some(_) => return None,
+        })
+    }
+
     /// The name of its buffer.
     pub(super) fn name(&self) -> String {
         match self {
             Self::Log(log) => logs::buffer_name(*log),
             Self::Thread(id) => threads::buffer_name(id),
+            Self::Profile { handle, .. } => format!("@{handle}"),
+            Self::People(handle, which) => format!("@{handle}/{}", which.name()),
+            Self::Mentions(handle) => format!("@{handle}/mentions"),
         }
     }
 
     /// The request for the head, if the feed has one.
     fn head(&self) -> Option<Request> {
         match self {
-            Self::Log(_) => None,
+            Self::Log(_) | Self::People(..) | Self::Mentions(_) => None,
             Self::Thread(id) => Some(Request::Thread { id: id.clone() }),
+            Self::Profile { handle, kind } => Some(Request::Profile {
+                handle: handle.clone(),
+                kind: *kind,
+            }),
         }
     }
 
-    /// The request for the list's page starting `after`, or the first.
-    fn page(&self, after: Option<Cursor>) -> Request {
-        match self {
+    /// The request for the list's page starting `after`, or the first; `None` until it is known where the list
+    /// comes from.
+    fn page(&self, after: Option<Cursor>) -> Option<Request> {
+        Some(match self {
             Self::Log(log) => Request::Log { log: *log, after },
             Self::Thread(id) => Request::Replies {
                 id: id.clone(),
                 after,
             },
-        }
+            Self::Profile {
+                handle,
+                kind: Some(AccountKind::Organization),
+            } => Request::OrganizationCommits {
+                handle: handle.clone(),
+                tab: OrganizationTab::Commits,
+                after,
+            },
+            Self::Profile {
+                handle,
+                kind: Some(_),
+            } => Request::Commits {
+                handle: handle.clone(),
+                after,
+            },
+            Self::Profile { kind: None, .. } => return None,
+            Self::People(handle, which) => Request::People {
+                handle: handle.clone(),
+                which: *which,
+                after,
+            },
+            Self::Mentions(handle) => Request::OrganizationCommits {
+                handle: handle.clone(),
+                tab: OrganizationTab::Mentions,
+                after,
+            },
+        })
     }
 
     fn order(&self) -> Order {
         match self {
             Self::Log(Log::Trending) => Order::Ranked,
-            Self::Log(_) => Order::Newest,
             Self::Thread(_) => Order::Oldest,
+            Self::Log(_) | Self::Profile { .. } | Self::People(..) | Self::Mentions(_) => {
+                Order::Newest
+            }
         }
     }
 }
@@ -155,8 +240,10 @@ impl Feed {
             self.head_loading = true;
             requests.push(head);
         }
-        if self.list.start() {
-            requests.push(self.source.page(None));
+        if let Some(page) = self.source.page(None)
+            && self.list.start()
+        {
+            requests.push(page);
         }
         requests
     }
@@ -170,8 +257,10 @@ impl Feed {
             self.head_loading = true;
             requests.push(head);
         }
-        if self.list.refresh() {
-            requests.push(self.source.page(None));
+        if let Some(page) = self.source.page(None)
+            && self.list.refresh()
+        {
+            requests.push(page);
         }
         requests
     }
@@ -194,12 +283,14 @@ impl Feed {
     /// The request for the next page, noted as asked for and shown at the end of `doc`; `None` when there is no
     /// next page or it is on its way.
     pub(super) fn more(&mut self, doc: &mut Document) -> Option<Request> {
-        let after = self.list.more()?;
+        // A list has a next page only once its first arrived, so it is known where its pages come from.
+        let request = self.source.page(Some(self.list.next.clone()?))?;
+        self.list.more()?;
         doc.push_back(
             MORE,
             vec![Line::Text(vec![Span::new("Loading more…", Group::Time)])],
         );
-        Some(self.source.page(Some(after)))
+        Some(request)
     }
 
     /// Notes the head as no longer on its way.

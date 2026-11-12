@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use devnull_api::enroll::{EnrollError, Enrollment};
+use devnull_api::model::{AccountKind, AccountPage};
 use devnull_api::signing::{KeyError, Signer};
 use devnull_api::{ApiError, Client, ORIGIN};
 use tokio::sync::mpsc;
@@ -165,6 +166,60 @@ impl Net {
                         .await
                         .map_err(|error| fetch_error(&error));
                     Fetched::Replies { id, after, result }
+                }
+                Request::Profile { handle, kind } => {
+                    let result = match kind {
+                        Some(AccountKind::User) => client
+                            .profile(&handle)
+                            .await
+                            .map(|profile| AccountPage::Person(Box::new(profile))),
+                        Some(AccountKind::Organization) => client
+                            .organization(&handle)
+                            .await
+                            .map(AccountPage::Organization),
+                        _ => client.account(&handle).await,
+                    }
+                    .map_err(|error| fetch_error(&error));
+                    Fetched::Profile { handle, result }
+                }
+                Request::Commits { handle, after } => {
+                    let result = client
+                        .commits_of(&handle, false, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Commits {
+                        handle,
+                        after,
+                        result,
+                    }
+                }
+                Request::OrganizationCommits { handle, tab, after } => {
+                    let result = client
+                        .organization_commits(&handle, tab, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::OrganizationCommits {
+                        handle,
+                        tab,
+                        after,
+                        result,
+                    }
+                }
+                Request::People {
+                    handle,
+                    which,
+                    after,
+                } => {
+                    let result = client
+                        .people(&handle, which, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::People {
+                        handle,
+                        which,
+                        after,
+                        result,
+                    }
                 }
             };
             let now = std::time::SystemTime::now()

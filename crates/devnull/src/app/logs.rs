@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use devnull_api::Log;
 
-use super::feed::Source;
 use super::{App, Effect, Kind, Wake, WakePurpose};
-use crate::doc::Cursor;
 
 /// How often chronological logs are checked for new commits while the terminal has focus, and without it.
 const POLL_FOCUSED: Duration = Duration::from_secs(15);
@@ -63,10 +61,5 @@ impl App {
             .collect();
         effects.push(self.next_poll());
         effects
-    }
-
-    /// `:e {name}`: shows the log of that name in the current window, loading it if needed.
-    pub(super) fn open_log(&mut self, log: Log) -> Vec<Effect> {
-        self.open_feed(Source::Log(log), Cursor::new())
     }
 }

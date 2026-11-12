@@ -1,9 +1,12 @@
-//! Commits as document blocks: what the log (and later threads and profiles) show for each commit.
+//! What dev-null.sh sends, as document blocks: commits, and the people and organizations who write them.
 
+mod accounts;
 #[cfg(test)]
 mod tests;
 
 use devnull_api::model::{AccountKind, Author, Commit, Segment};
+
+pub use accounts::{account_block, organization_header, pinned_block, profile_header};
 
 use crate::doc::{AccountRef, Content, Fold, Line, Span, Target};
 use crate::hl::Group;
@@ -147,15 +150,23 @@ fn commit_target(commit: &Commit) -> Target {
     }
 }
 
-/// `Name @handle`, or `Name (org) @handle` for an organization.
-fn author_spans(author: &Author) -> Vec<Span> {
-    let mut spans = vec![Span::new(author.name.clone(), Group::Author)];
-    if author.kind == AccountKind::Organization {
-        spans.push(Span::new(" (org)", Group::Time));
+/// `Name @handle`, `Name (org) @handle` for an organization, or `@handle` without a name. The handle refers to the
+/// account, of `kind` unless it is [`AccountKind::Other`].
+fn who(name: &str, handle: &str, kind: AccountKind) -> Vec<Span> {
+    let mut spans = Vec::new();
+    if !name.is_empty() {
+        spans.push(Span::new(name, Group::Author));
+        if kind == AccountKind::Organization {
+            spans.push(Span::new(" (org)", Group::Time));
+        }
+        spans.push(Span::new(" ", Group::Normal));
     }
-    spans.push(Span::new(" ", Group::Normal));
-    spans.push(mention(&author.handle, Some(author.kind)));
+    spans.push(mention(handle, Some(kind)));
     spans
+}
+
+fn author_spans(author: &Author) -> Vec<Span> {
+    who(&author.name, &author.handle, author.kind)
 }
 
 /// `@handle`, referring to the account.
