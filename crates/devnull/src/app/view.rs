@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::window::{Viewport, Window};
 use super::{App, AppMode, Message, MessageKind, text_area};
@@ -414,7 +414,8 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
 
 /// A statusline: the mode (on the current window only) and the buffer's name on the left, the ruler on the right.
 /// The statusline: mode (in the current window), buffer name, then the unread notifications, the account, the
-/// ruler and where the view is.
+/// ruler and where the view is. Short of room, the account goes first, then the start of the name, as Vim shortens
+/// a file name: `<` and its end.
 fn statusline(
     mode: Option<&str>,
     name: &str,
@@ -423,9 +424,10 @@ fn statusline(
     position: &str,
     width: u16,
 ) -> Line<'static> {
-    let left = match mode {
-        Some(mode) => format!(" {mode}  {name}"),
-        None => format!(" {name}"),
+    let width = usize::from(width);
+    let prefix = match mode {
+        Some(mode) => format!(" {mode}  "),
+        None => " ".to_owned(),
     };
     let unread = if account.unread > 0 {
         format!("󰂚 {}  ", account.unread)
@@ -436,11 +438,38 @@ fn statusline(
         .handle
         .map(|handle| format!("@{handle}  "))
         .unwrap_or_default();
-    let right = format!("{unread}{handle}{ruler}  {position} ");
-    let gap = usize::from(width)
-        .saturating_sub(left.width() + right.width())
-        .max(1);
+    let ruler = format!("{ruler}  {position} ");
+    let full = format!("{unread}{handle}{ruler}");
+    let right = if prefix.width() + name.width() + 1 + full.width() <= width {
+        full
+    } else {
+        ruler
+    };
+    let room = width.saturating_sub(prefix.width() + 1 + right.width());
+    let left = format!("{prefix}{}", shortened(name, room));
+    let gap = width.saturating_sub(left.width() + right.width()).max(1);
     Line::from(format!("{left}{}{right}", " ".repeat(gap)))
+}
+
+/// `name` in at most `room` cells: whole, or `<` and as much of its end as fits.
+fn shortened(name: &str, room: usize) -> String {
+    if name.width() <= room {
+        return name.to_owned();
+    }
+    if room == 0 {
+        return String::new();
+    }
+    let mut kept = Vec::new();
+    let mut used = 1;
+    for ch in name.chars().rev() {
+        let cells = ch.width().unwrap_or(0);
+        if used + cells > room {
+            break;
+        }
+        used += cells;
+        kept.push(ch);
+    }
+    std::iter::once('<').chain(kept.into_iter().rev()).collect()
 }
 
 /// What the statusline says about the account.

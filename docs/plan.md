@@ -357,8 +357,9 @@ from M1 even though graphics land in M6.
   - Timers: the app asks for wake-ups (`Effect::Wake`) for `'timeoutlen'` and the which-key popup (200 ms); stale
     ones are ignored.
   - Jumplist per window: searches, `gg G { } ]] [[ H M L` are jumps; `<C-o>`/`<C-i>`, one entry per row.
-  - Known gaps: no `'incsearch'`/`'hlsearch'` yet; a statusline narrower than its content loses the ruler; the
-    separator column also crosses statusline rows; the jumplist does not span buffers yet (M3).
+  - Known gaps: no `'incsearch'`/`'hlsearch'` yet; the separator column also crosses statusline rows. (A narrow
+    statusline drops the account, then shortens the name as Vim does, `<` and its end, to keep the ruler; the
+    jumplist spans buffers since M3.5.)
 - [x] **M1.7** Highlight groups (`:hi` names, including `DevnullHandle` and `StatusLineMode*`); colorschemes
   `tokyonight` (= night), `tokyonight-night|storm|moon|day` and `default` (terminal colours); `:hi` (set, show, Vim's
   E411/E423/E254/E418), `:hi clear`, `:colorscheme`; `init.vim` from `$XDG_CONFIG_HOME/devnull/` or

@@ -3784,3 +3784,16 @@ fn jumps_into_other_buffers_show_their_names_and_where_one_went_back_to() {
         ]
     );
 }
+
+#[test]
+fn a_narrow_statusline_keeps_the_ruler_and_shortens_the_name_from_the_left() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let _ = app.update(Msg::Resize {
+        width: 30,
+        height: 12,
+    });
+
+    // " NORMAL  log/following  @ada  1,1  All " is 39 cells: the handle goes, then the name's start.
+    assert_eq!(statusline(&app), " NORMAL  </following 1,1  All");
+}
