@@ -172,7 +172,7 @@ impl Cursor {
             Motion::RowEnd => Want::RowEnd,
             _ => {
                 if let Some(pos) = self.destination(layout, motion, count) {
-                    self.set(doc, doc.outside_closed_fold(pos));
+                    self.set(doc, layout.outside_closed_fold(pos));
                 }
                 return;
             }
@@ -198,7 +198,7 @@ impl Cursor {
         // Text motions step over a closed fold as one stop: they leave it from its far side and stop at its start.
         let repeat = |forward: bool, step: &dyn Fn(Pos) -> Pos| {
             (0..count).fold(pos, |pos, _| {
-                doc.outside_closed_fold(step(doc.leaving_closed_fold(pos, forward)))
+                layout.outside_closed_fold(step(layout.leaving_closed_fold(pos, forward)))
             })
         };
         let block_steps = |steps: usize| isize::try_from(steps).unwrap_or(isize::MAX);

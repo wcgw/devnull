@@ -26,8 +26,8 @@ use devnull_api::Answering;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Cursor, Direction, Document, FoldOp, Layout, LinkCard, Motion, Pattern, SearchOutcome,
-    Selection, SelectionKind, Target,
+    Cursor, Direction, Document, FoldOp, LinkCard, Motion, Pattern, SearchOutcome, Selection,
+    SelectionKind, Target,
 };
 use crate::ex::{self, Command};
 use crate::hl::Theme;
@@ -532,7 +532,7 @@ impl App {
         let window = self.windows.current_mut();
         let shown = &self.buffers[window.buffer];
         if index != window.buffer && shown.is_listed() {
-            let layout = Layout::new(&shown.doc, area.width);
+            let layout = window.layout(&self.buffers, area.width);
             window.record_jump(&layout, window.cursor.clone());
         }
         window.switch_to(index, start);
@@ -564,7 +564,7 @@ impl App {
         let area = self.window_area();
         let window = self.windows.current_mut();
         let before = window.buffer;
-        let layout = Layout::new(&self.buffers[before].doc, area.width);
+        let layout = window.layout(&self.buffers, area.width);
         if !window.pop_tag(&layout) {
             return Err("E73: Tag stack empty".to_owned());
         }
@@ -586,7 +586,7 @@ impl App {
         let (jumps, at) = window.jumplist();
         let mut lines = vec![" jump line  col file/text".to_owned()];
         for (i, jump) in jumps.iter().enumerate() {
-            let layout = Layout::new(&self.buffers[jump.buffer].doc, width);
+            let layout = window.layout_of(&self.buffers, jump.buffer, width);
             let shown = jump.cursor.screen(&layout);
             let text = if jump.buffer == window.buffer {
                 layout.segments(shown.row).map(|(text, _)| text).collect()
@@ -746,12 +746,16 @@ impl App {
                 return Vec::new();
             }
             Action::Fold(op) => {
-                let doc = &mut self.buffers[self.windows.current().buffer].doc;
-                doc.fold(&self.windows.current().cursor, op);
+                let window = self.windows.current_mut();
+                let doc = &self.buffers[window.buffer].doc;
+                window.folds.fold(doc, &window.cursor, op);
             }
-            Action::FoldAll { open } => self.buffers[self.windows.current().buffer]
-                .doc
-                .fold_all(open),
+            Action::FoldAll { open } => {
+                let window = self.windows.current_mut();
+                window
+                    .folds
+                    .fold_all(&self.buffers[window.buffer].doc, open);
+            }
             _ => return self.run_in_window(invocation),
         }
         self.follow_cursor();
@@ -765,8 +769,7 @@ impl App {
             AppMode::Visual(selection) => AppMode::Visual(selection.with_kind(kind)),
             _ => {
                 let area = self.window_area();
-                let layout =
-                    Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+                let layout = self.windows.current().layout(&self.buffers, area.width);
                 AppMode::Visual(Selection::start(
                     &self.windows.current().cursor,
                     &layout,
@@ -779,7 +782,7 @@ impl App {
     /// `y` in Visual mode and `yy` in Normal mode: copies the text and, as Vim does, leaves the cursor at its start.
     fn yank(&mut self) -> Vec<Effect> {
         let area = self.window_area();
-        let layout = Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+        let layout = self.windows.current().layout(&self.buffers, area.width);
         let cursor = &mut self.windows.current_mut().cursor;
         let selection = match std::mem::replace(&mut self.mode, AppMode::Normal) {
             AppMode::Visual(selection) => selection,
@@ -800,15 +803,15 @@ impl App {
     fn follow_cursor(&mut self) {
         let viewport = self.viewport();
         let area = self.window_area();
-        let layout = Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+        let layout = self.windows.current().layout(&self.buffers, area.width);
         self.windows.current_mut().follow_cursor(&layout, viewport);
     }
 
     /// Opens the fold hiding the cursor, as Vim's `'foldopen'` does after a search.
     fn open_fold_at_cursor(&mut self) {
-        self.buffers[self.windows.current().buffer]
-            .doc
-            .fold(&self.windows.current().cursor, FoldOp::Open);
+        let window = self.windows.current_mut();
+        let doc = &self.buffers[window.buffer].doc;
+        window.folds.fold(doc, &window.cursor, FoldOp::Open);
         self.follow_cursor();
     }
 
@@ -817,7 +820,7 @@ impl App {
         let viewport = self.viewport();
         let area = self.window_area();
         let window = self.windows.current_mut();
-        let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+        let layout = window.layout(&self.buffers, area.width);
         // Searches and these motions are jumps: where they start goes into the jumplist, as in Vim.
         let from = window.cursor.clone();
         match invocation.action {
@@ -1038,7 +1041,7 @@ impl App {
     /// What the text under the current window's cursor refers to, if anything.
     fn target_under_cursor(&self) -> Option<Target> {
         let window = self.windows.current();
-        let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area().width);
         window.cursor.target(&layout).cloned()
     }
 
@@ -1072,7 +1075,7 @@ impl App {
     /// the account.
     fn web_page(&self) -> Option<String> {
         let window = self.windows.current();
-        let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area().width);
         let targets = [
             window.cursor.target(&layout),
             window.cursor.block_target(&layout),
@@ -1202,7 +1205,7 @@ impl App {
         };
         let area = self.window_area();
         let window = self.windows.current_mut();
-        let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+        let layout = window.layout(&self.buffers, area.width);
         let from = window.cursor.clone();
         let outcome = window.cursor.search(&layout, &pattern, direction, count);
         if outcome != SearchOutcome::NotFound {

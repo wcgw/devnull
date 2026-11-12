@@ -1,8 +1,9 @@
-//! A window: a view of a buffer with its own cursor and scroll position.
+//! A window: a view of a buffer with its own cursor and scroll position, and its own folds.
 
 use std::collections::HashMap;
 
-use crate::doc::{Cursor, Layout, Motion};
+use super::Buffer;
+use crate::doc::{Cursor, Folds, Layout, Motion};
 use crate::keymap::{Place, Scroll};
 
 /// A view of a buffer. Both the cursor and the top of the view are pinned to text, so neither moves when blocks
@@ -11,6 +12,8 @@ use crate::keymap::{Place, Scroll};
 pub(super) struct Window {
     pub(super) buffer: usize,
     pub(super) cursor: Cursor,
+    /// Which folds are open here, in whichever buffer: each block's folds are its own.
+    pub(super) folds: Folds,
     /// The text at the first row shown.
     top: Cursor,
     /// Where jumps started from, oldest first, in whichever buffer (Vim's jumplist).
@@ -66,6 +69,7 @@ impl Window {
         Self {
             buffer,
             cursor: Cursor::new(),
+            folds: Folds::default(),
             top: Cursor::new(),
             jumps: Vec::new(),
             jump: 0,
@@ -90,6 +94,21 @@ impl Window {
         };
         self.left.insert(self.buffer, leaving);
         self.buffer = buffer;
+    }
+
+    /// The buffer it shows, laid out to `width` with its folds there.
+    pub(super) fn layout<'d>(&self, buffers: &'d [Buffer], width: u16) -> Layout<'d> {
+        self.layout_of(buffers, self.buffer, width)
+    }
+
+    /// Buffer `buffer`, laid out to `width` as this window shows it, or would: with its folds there.
+    pub(super) fn layout_of<'d>(
+        &self,
+        buffers: &'d [Buffer],
+        buffer: usize,
+        width: u16,
+    ) -> Layout<'d> {
+        Layout::with_folds(&buffers[buffer].doc, self.folds.clone(), width)
     }
 
     /// The jumplist, oldest first, and the entry `<C-o>` and `<C-i>` last went to: past the end when they have not

@@ -14,6 +14,8 @@ mod word;
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -98,8 +100,7 @@ pub struct Fold {
     pub lines: Range<usize>,
     /// The one row shown in their place while closed; it is cut, not wrapped, at the window's width.
     pub summary: Line,
-    /// Whether the fold starts closed. Once opened or closed with a fold command, it keeps that state, also when its
-    /// block is replaced.
+    /// Whether the fold starts closed; see [`Folds`] for how fold commands change that.
     pub closed: bool,
 }
 
@@ -224,13 +225,58 @@ pub struct Document {
     index: HashMap<BlockKey, usize>,
     /// The first logical line of each block, plus the total line count at the end.
     starts: Vec<usize>,
-    /// Folds opened (`true`) or closed (`false`) by a fold command, by block and fold index, overriding
-    /// [`Fold::closed`].
-    fold_states: HashMap<(BlockKey, usize), bool>,
 }
+
+/// Which folds are open, as one window shows them (folds are per window, as in Vim), in whichever [`Document`]s it
+/// shows: a block's folds are its own. Those a fold command opened or closed stay so, also when their block is
+/// replaced; the others are as [`Fold::closed`] says, as are the folds of a block dropped and added again.
+///
+/// Clones are cheap: they share the state until one of them changes.
+#[derive(Debug, Clone, Default)]
+pub struct Folds {
+    /// Whether a fold is open, by [`FoldAt::id`].
+    open: Rc<HashMap<(u64, usize), bool>>,
+}
+
+impl Folds {
+    /// `zo`, `zc`, `za`: opens, closes or toggles the fold holding the cursor's line in `doc`, if any. The cursor
+    /// keeps its place in the text; while the fold is closed it is drawn on the fold's summary row.
+    pub fn fold(&mut self, doc: &Document, cursor: &Cursor, op: FoldOp) {
+        if doc.line_count() == 0 {
+            return;
+        }
+        let Some(fold) = doc.fold_at(cursor.pos(doc).line) else {
+            return;
+        };
+        let closed = match op {
+            FoldOp::Open => false,
+            FoldOp::Close => true,
+            FoldOp::Toggle => !self.is_closed(&fold),
+        };
+        Rc::make_mut(&mut self.open).insert(fold.id, !closed);
+    }
+
+    /// `zR` (`open`) and `zM`: opens or closes every fold of `doc`.
+    pub fn fold_all(&mut self, doc: &Document, open: bool) {
+        let states = Rc::make_mut(&mut self.open);
+        for block in &doc.blocks {
+            states.extend((0..block.folds.len()).map(|index| ((block.id, index), open)));
+        }
+    }
+
+    fn is_closed(&self, fold: &FoldAt<'_>) -> bool {
+        self.open.get(&fold.id).map_or(fold.closed, |open| !open)
+    }
+}
+
+/// The id of the next block made, in any document.
+static NEXT_BLOCK_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 struct Block {
+    /// Unique among the blocks of every document, and kept when the block is replaced: what [`Folds`] knows a block
+    /// by, so a block dropped and added again under its key, or one of another document, is another.
+    id: u64,
     key: BlockKey,
     lines: Vec<Shaped>,
     folds: Vec<ShapedFold>,
@@ -245,7 +291,14 @@ struct ShapedFold {
 }
 
 impl Block {
+    /// A block with a new id.
     fn new(key: BlockKey, content: Content) -> Self {
+        // Only uniqueness matters: no other memory is ordered by the counter.
+        let id = NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed);
+        Self::with_id(id, key, content)
+    }
+
+    fn with_id(id: u64, key: BlockKey, content: Content) -> Self {
         let lines: Vec<Shaped> = content.lines.into_iter().map(Shaped::new).collect();
         let folds = content
             .folds
@@ -258,6 +311,7 @@ impl Block {
             })
             .collect();
         Self {
+            id,
             key,
             lines,
             folds,
@@ -268,12 +322,13 @@ impl Block {
 
 /// A fold located in the document.
 struct FoldAt<'d> {
-    /// Its block and index there, as `Document::fold_states` keys it.
-    block: usize,
-    index: usize,
+    /// Its block's id and its index there.
+    id: (u64, usize),
     /// The folded logical lines, document-wide.
     lines: Range<usize>,
     summary: &'d Shaped,
+    /// Whether it is closed until a fold command says otherwise.
+    closed: bool,
 }
 
 /// A line with its graphemes pre-segmented, so layout and motions don't segment the same text repeatedly.
@@ -490,7 +545,7 @@ impl Document {
         let Some(&block) = self.index.get(&key) else {
             return false;
         };
-        self.blocks[block] = Block::new(key, content.into());
+        self.blocks[block] = Block::with_id(self.blocks[block].id, key, content.into());
         self.reindex();
         true
     }
@@ -500,8 +555,6 @@ impl Document {
         let key = key.into();
         if let Some(block) = self.index.get(&key).copied() {
             self.blocks.remove(block);
-            self.fold_states
-                .retain(|(block_key, _), _| *block_key != key);
             self.reindex();
         }
     }
@@ -510,43 +563,10 @@ impl Document {
     pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.blocks.retain(|block| keep(&block.key.0));
         self.reindex();
-        let index = &self.index;
-        self.fold_states
-            .retain(|(key, _), _| index.contains_key(key));
     }
 
-    /// `zo`, `zc`, `za`: opens, closes or toggles the fold holding the cursor's line, if any. The cursor keeps its
-    /// place in the text; while the fold is closed it is drawn on the fold's summary row.
-    pub fn fold(&mut self, cursor: &Cursor, op: FoldOp) {
-        if self.line_count() == 0 {
-            return;
-        }
-        let line = cursor.pos(self).line;
-        let Some(fold) = self.fold_at(line, false) else {
-            return;
-        };
-        let closed = match op {
-            FoldOp::Open => false,
-            FoldOp::Close => true,
-            FoldOp::Toggle => !self.is_closed(fold.block, fold.index),
-        };
-        let key = (self.blocks[fold.block].key.clone(), fold.index);
-        self.fold_states.insert(key, !closed);
-    }
-
-    /// `zR` (`open`) and `zM`: opens or closes every fold.
-    pub fn fold_all(&mut self, open: bool) {
-        self.fold_states = self
-            .blocks
-            .iter()
-            .flat_map(|block| {
-                (0..block.folds.len()).map(|index| ((block.key.clone(), index), open))
-            })
-            .collect();
-    }
-
-    /// The fold covering `line`, if any; only a closed one when `closed_only`.
-    fn fold_at(&self, line: usize, closed_only: bool) -> Option<FoldAt<'_>> {
+    /// The fold covering `line`, if any.
+    fn fold_at(&self, line: usize) -> Option<FoldAt<'_>> {
         let block = self.block_of(line);
         let start = self.starts[block];
         let (index, fold) = self.blocks[block]
@@ -554,49 +574,12 @@ impl Document {
             .iter()
             .enumerate()
             .find(|(_, fold)| fold.lines.contains(&(line - start)))?;
-        if closed_only && !self.is_closed(block, index) {
-            return None;
-        }
         Some(FoldAt {
-            block,
-            index,
+            id: (self.blocks[block].id, index),
             lines: start + fold.lines.start..start + fold.lines.end,
             summary: &fold.summary,
+            closed: fold.closed,
         })
-    }
-
-    /// `pos`, or the start of the closed fold hiding it: where a motion that lands in a closed fold stops.
-    fn outside_closed_fold(&self, pos: Pos) -> Pos {
-        self.fold_at(pos.line, true).map_or(pos, |fold| Pos {
-            line: fold.lines.start,
-            col: 0,
-        })
-    }
-
-    /// Where a motion leaving a closed fold that holds `pos` starts from: just past its last character going
-    /// forward, its first line going backward. `pos` itself when no closed fold holds it.
-    fn leaving_closed_fold(&self, pos: Pos, forward: bool) -> Pos {
-        match self.fold_at(pos.line, true) {
-            Some(fold) if forward => {
-                let line = fold.lines.end - 1;
-                Pos {
-                    line,
-                    col: self.line(line).len(),
-                }
-            }
-            Some(fold) => Pos {
-                line: fold.lines.start,
-                col: 0,
-            },
-            None => pos,
-        }
-    }
-
-    fn is_closed(&self, block: usize, index: usize) -> bool {
-        let key = (self.blocks[block].key.clone(), index);
-        self.fold_states
-            .get(&key)
-            .map_or(self.blocks[block].folds[index].closed, |open| !open)
     }
 
     /// The text of line `line` (from 0) of block `key`, if both are there.

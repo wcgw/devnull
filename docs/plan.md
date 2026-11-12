@@ -328,8 +328,9 @@ from M1 even though graphics land in M6.
   - `V` selects screen rows; its yank joins the rows of a wrapped line without a break and ends with `\n`.
   - Folds are declared by buffers per block (`Content { lines, folds }`), keep their state across block replacement,
     and count as one stop for text motions.
-  - Known gaps: folds don't nest; fold state lives in the document, not per window. (`*` falls back to the
-    non-blank word, as Vim does, since the v1 leftovers.)
+  - Known gap: folds don't nest. Since the v1 leftovers, fold state is per window, as in Vim: `zo zc za zR zM`
+    change the current window's, a split starts with its parent's, and a window keeps them across buffers (by
+    block, so a block dropped and added again starts as given); `*` falls back to the non-blank word, as Vim does.
 - [x] **M1.4** Runtime: tokio (current-thread) loop, Elm core (`App::update(Msg) -> Vec<Effect>`), terminal
   setup/teardown with panic hook, focus events, bracketed paste (pastes never run commands), kitty keyboard protocol
   where supported (`<C-i>` ≠ `<Tab>`), `Key` type in Vim terms. Intro screen as a placeholder; `q` quits. Verified

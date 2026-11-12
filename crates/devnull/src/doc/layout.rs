@@ -1,14 +1,16 @@
-use super::{Cursor, Document, Pattern, Pos, Shaped};
+use super::{Cursor, Document, FoldAt, Folds, Pattern, Pos, Shaped};
 use unicode_width::UnicodeWidthStr;
 
 use crate::hl::Group;
 
-/// A [`Document`] wrapped into screen rows for one width.
+/// A [`Document`] wrapped into screen rows for one width, its closed folds a row each.
 ///
-/// It borrows the document, so it can never describe a stale version of it: rebuild it after an edit or a resize.
+/// It borrows the document, so it can never describe a stale version of it: rebuild it after an edit, a fold
+/// command or a resize.
 #[derive(Debug)]
 pub struct Layout<'d> {
     doc: &'d Document,
+    folds: Folds,
     width: usize,
     rows: Vec<Row>,
     /// The first row of each logical line.
@@ -50,15 +52,21 @@ pub struct ScreenPos {
 }
 
 impl<'d> Layout<'d> {
-    /// Wraps `doc` to `width` cells. A width of 0 is treated as 1.
+    /// Wraps `doc` to `width` cells, its folds as the document gives them. A width of 0 is treated as 1.
     #[must_use]
     pub fn new(doc: &'d Document, width: u16) -> Self {
+        Self::with_folds(doc, Folds::default(), width)
+    }
+
+    /// Wraps `doc` to `width` cells, its folds open or closed as `folds` says. A width of 0 is treated as 1.
+    #[must_use]
+    pub fn with_folds(doc: &'d Document, folds: Folds, width: u16) -> Self {
         let width = usize::from(width.max(1));
         let mut rows = Vec::new();
         let mut first_row = Vec::with_capacity(doc.line_count());
         let mut line = 0;
         while line < doc.line_count() {
-            if let Some(fold) = doc.fold_at(line, true) {
+            if let Some(fold) = doc.fold_at(line).filter(|fold| folds.is_closed(fold)) {
                 first_row.extend(fold.lines.clone().map(|_| rows.len()));
                 rows.push(Row {
                     line,
@@ -82,6 +90,7 @@ impl<'d> Layout<'d> {
         }
         Self {
             doc,
+            folds,
             width,
             rows,
             first_row,
@@ -90,6 +99,40 @@ impl<'d> Layout<'d> {
 
     pub(super) fn doc(&self) -> &'d Document {
         self.doc
+    }
+
+    /// The closed fold covering `line`, if any.
+    fn closed_fold_at(&self, line: usize) -> Option<FoldAt<'d>> {
+        self.doc
+            .fold_at(line)
+            .filter(|fold| self.folds.is_closed(fold))
+    }
+
+    /// `pos`, or the start of the closed fold hiding it: where a motion that lands in a closed fold stops.
+    pub(super) fn outside_closed_fold(&self, pos: Pos) -> Pos {
+        self.closed_fold_at(pos.line).map_or(pos, |fold| Pos {
+            line: fold.lines.start,
+            col: 0,
+        })
+    }
+
+    /// Where a motion leaving a closed fold that holds `pos` starts from: just past its last character going
+    /// forward, its first line going backward. `pos` itself when no closed fold holds it.
+    pub(super) fn leaving_closed_fold(&self, pos: Pos, forward: bool) -> Pos {
+        match self.closed_fold_at(pos.line) {
+            Some(fold) if forward => {
+                let line = fold.lines.end - 1;
+                Pos {
+                    line,
+                    col: self.doc.line(line).len(),
+                }
+            }
+            Some(fold) => Pos {
+                line: fold.lines.start,
+                col: 0,
+            },
+            None => pos,
+        }
     }
 
     /// Whether `row` is the summary of a closed fold.
@@ -244,8 +287,7 @@ impl<'d> Layout<'d> {
             end,
             folded,
         } = self.rows[row];
-        let (shaped, from, to) = if let Some(fold) = self.doc.fold_at(line, true).filter(|_| folded)
-        {
+        let (shaped, from, to) = if let Some(fold) = self.closed_fold_at(line).filter(|_| folded) {
             let summary = fold.summary;
             (summary, 0, summary.byte_offset(summary.fitting(self.width)))
         } else {

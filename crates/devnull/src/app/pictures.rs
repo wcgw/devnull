@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 
 use super::{App, Effect};
-use crate::doc::{Layout, PictureRow};
+use crate::doc::PictureRow;
 use crate::graphics::{self, Graphics, HalfBlock};
 use crate::hl::Group;
 
@@ -162,7 +162,7 @@ impl App {
         for &(id, rect) in &arrangement.windows {
             let window = self.windows.get(id);
             let area = super::text_area(rect);
-            let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+            let layout = window.layout(&self.buffers, area.width);
             let viewport = super::Viewport {
                 height: usize::from(area.height),
                 scrolloff: self.options.scrolloff,

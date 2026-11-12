@@ -9,7 +9,7 @@ use super::composer::Composing;
 use super::feed::Source;
 use super::threads::short_hash;
 use super::{App, AppMode, Effect, FetchError, Kind, NetEvent, Request};
-use crate::doc::{Document, Layout, Target};
+use crate::doc::{Document, Target};
 use crate::key::{Code, Key, Mods};
 use crate::render::{commit_block, deleted_block, focused_block};
 
@@ -62,7 +62,7 @@ pub(super) struct UnderCursor {
 impl App {
     pub(super) fn commit_under_cursor(&self) -> Option<UnderCursor> {
         let window = self.windows.current();
-        let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
+        let layout = window.layout(&self.buffers, self.window_area().width);
         [
             window.cursor.target(&layout),
             window.cursor.block_target(&layout),

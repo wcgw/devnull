@@ -7,7 +7,7 @@ use devnull_api::{Category, Draft, Log, OrganizationTab, People};
 
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
 use super::{App, Buffer, Effect, Kind, NetEvent, threads};
-use crate::doc::{Content, Cursor as DocCursor, Document, Layout};
+use crate::doc::{Content, Cursor as DocCursor, Document};
 use crate::hl::Group;
 use crate::render::{account_block, commit_block, notification_block, parse_time};
 
@@ -353,7 +353,7 @@ impl App {
         if !matches!(&buffer.kind, Kind::Feed(feed) if feed.has_more()) {
             return Vec::new();
         }
-        let layout = Layout::new(&buffer.doc, area.width);
+        let layout = window.layout(&self.buffers, area.width);
         if window.cursor.screen(&layout).row + usize::from(area.height) < layout.row_count() {
             return Vec::new();
         }
@@ -543,7 +543,7 @@ impl App {
     fn top_row(&self, index: usize) -> Option<usize> {
         let window = self.windows.current();
         (window.buffer == index).then(|| {
-            let layout = Layout::new(&self.buffers[index].doc, self.window_area().width);
+            let layout = window.layout(&self.buffers, self.window_area().width);
             window.top(&layout, self.viewport())
         })
     }

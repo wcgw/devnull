@@ -523,6 +523,45 @@ fn fold_keys_open_and_close_folds() {
 }
 
 #[test]
+fn each_window_has_its_own_folds_and_a_split_starts_with_its_parent_s() {
+    let mut app = folded_app();
+    let row = |app: &App| screen(app).rows[2].clone();
+
+    let _ = press(&mut app, "jzo:vs<CR>");
+    assert!(
+        row(&app).starts_with("one ") && row(&app).ends_with("│one"),
+        "{:?}",
+        row(&app)
+    );
+    let _ = press(&mut app, "zc");
+    assert!(
+        row(&app).starts_with("+ 3 more") && row(&app).ends_with("│one"),
+        "only the current window's: {:?}",
+        row(&app)
+    );
+    let _ = press(&mut app, "<C-w>lzM<C-w>hzR");
+    assert!(
+        row(&app).starts_with("one ") && row(&app).ends_with("│+ 3 more"),
+        "zR and zM too: {:?}",
+        row(&app)
+    );
+}
+
+#[test]
+fn a_window_keeps_its_folds_in_a_buffer_it_leaves_and_comes_back_to() {
+    let body = (1..=8)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut app = with_log(Log::Following, one_commit(&body, serde_json::json!({})));
+    assert!(shows(&app, "… 2 more lines"), "{:#?}", screen(&app).rows);
+
+    let _ = press(&mut app, "zR:e log/latest<CR>zM<C-^>");
+
+    assert!(shows(&app, "line 8"), "{:#?}", screen(&app).rows);
+}
+
+#[test]
 fn a_search_landing_in_a_closed_fold_opens_it() {
     let mut app = folded_app();
 
@@ -3934,6 +3973,35 @@ fn jumps_into_other_buffers_show_their_names_and_where_one_went_back_to() {
             "   1     1    0 log/trending",
             "Press ENTER or type command to continue"
         ]
+    );
+}
+
+#[test]
+fn jumps_into_another_buffer_count_rows_with_the_folds_left_there() {
+    let body = (1..=8)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut app = with_log(Log::Following, one_commit(&body, serde_json::json!({})));
+    let _ = press(&mut app, "zRG");
+    let ruler = statusline(&app);
+    let row = ruler
+        .split_whitespace()
+        .find_map(|word| word.split_once(',').map(|(row, _)| row.to_owned()))
+        .expect("a ruler");
+
+    let _ = press(&mut app, ":e log/latest<CR>:ju<CR>");
+
+    let rows = screen(&app).rows;
+    // The newest entry there: where the window left it (the one before is where `G` jumped from).
+    let entry = rows
+        .iter()
+        .rfind(|row| row.ends_with("log/following"))
+        .expect("an entry");
+    assert_eq!(
+        entry.split_whitespace().nth(1),
+        Some(row.as_str()),
+        "{entry:?}, as the ruler said: {ruler:?}"
     );
 }
 

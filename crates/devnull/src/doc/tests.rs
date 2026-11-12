@@ -928,36 +928,59 @@ fn a_closed_fold_is_one_summary_row_that_j_and_k_step_over() {
 
 #[test]
 fn zo_zc_and_za_open_close_and_toggle_the_fold_under_the_cursor() {
-    let mut doc = folded(true);
+    let doc = folded(true);
+    let mut folds = Folds::default();
+    let laid_out = |folds: &Folds| Layout::with_folds(&doc, folds.clone(), 80);
     let mut cursor = Cursor::new();
-    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+    cursor.apply(&laid_out(&folds), Motion::Down, 1);
 
-    doc.fold(&cursor, FoldOp::Open);
+    folds.fold(&doc, &cursor, FoldOp::Open);
     assert_eq!(
-        texts(&Layout::new(&doc, 80)),
+        texts(&laid_out(&folds)),
         ["head", "one", "two three", "four", "tail", "next"]
     );
-    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(1, 0));
-    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
-    cursor.apply(&Layout::new(&doc, 80), Motion::RowEnd, 1);
+    assert_eq!(cursor.screen(&laid_out(&folds)), at(1, 0));
+    cursor.apply(&laid_out(&folds), Motion::Down, 1);
+    cursor.apply(&laid_out(&folds), Motion::RowEnd, 1);
 
-    doc.fold(&cursor, FoldOp::Close);
-    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(1, 0));
-    doc.fold(&cursor, FoldOp::Toggle);
-    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(2, 8));
-    doc.fold(&cursor, FoldOp::Toggle);
-    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
+    folds.fold(&doc, &cursor, FoldOp::Close);
+    assert_eq!(cursor.screen(&laid_out(&folds)), at(1, 0));
+    folds.fold(&doc, &cursor, FoldOp::Toggle);
+    assert_eq!(cursor.screen(&laid_out(&folds)), at(2, 8));
+    folds.fold(&doc, &cursor, FoldOp::Toggle);
+    assert_eq!(laid_out(&folds).row_count(), 4);
+    assert_eq!(
+        Layout::new(&doc, 80).row_count(),
+        4,
+        "the document's folds are as given"
+    );
 }
 
 #[test]
 fn zm_closes_and_zr_opens_every_fold() {
-    let mut doc = folded(false);
-    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+    let doc = folded(false);
+    let mut folds = Folds::default();
+    assert_eq!(Layout::with_folds(&doc, folds.clone(), 80).row_count(), 6);
 
-    doc.fold_all(false);
-    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
-    doc.fold_all(true);
-    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+    folds.fold_all(&doc, false);
+    assert_eq!(Layout::with_folds(&doc, folds.clone(), 80).row_count(), 4);
+    folds.fold_all(&doc, true);
+    assert_eq!(Layout::with_folds(&doc, folds.clone(), 80).row_count(), 6);
+}
+
+#[test]
+fn a_clone_of_folds_keeps_its_own_state() {
+    let doc = folded(true);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+    let mut folds = Folds::default();
+    folds.fold(&doc, &cursor, FoldOp::Open);
+
+    let mut other = folds.clone();
+    other.fold(&doc, &cursor, FoldOp::Close);
+
+    assert_eq!(Layout::with_folds(&doc, folds, 80).row_count(), 6);
+    assert_eq!(Layout::with_folds(&doc, other, 80).row_count(), 4);
 }
 
 #[test]
@@ -965,7 +988,8 @@ fn a_fold_keeps_its_state_when_its_block_is_replaced() {
     let mut doc = folded(true);
     let mut cursor = Cursor::new();
     cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
-    doc.fold(&cursor, FoldOp::Open);
+    let mut folds = Folds::default();
+    folds.fold(&doc, &cursor, FoldOp::Open);
 
     let lines = ["head", "one", "two", "four", "tail ★ 4"]
         .map(Line::text)
@@ -984,7 +1008,7 @@ fn a_fold_keeps_its_state_when_its_block_is_replaced() {
         },
     );
 
-    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+    assert_eq!(Layout::with_folds(&doc, folds, 80).row_count(), 6);
 }
 
 #[test]
@@ -992,7 +1016,8 @@ fn a_block_dropped_and_added_again_starts_with_its_folds_as_given() {
     let mut doc = folded(true);
     let mut cursor = Cursor::new();
     cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
-    doc.fold(&cursor, FoldOp::Open);
+    let mut folds = Folds::default();
+    folds.fold(&doc, &cursor, FoldOp::Open);
 
     doc.retain(|key| key != "a");
     let lines = ["head", "one", "two", "four", "tail"]
@@ -1013,7 +1038,7 @@ fn a_block_dropped_and_added_again_starts_with_its_folds_as_given() {
     );
 
     // "next", then the block's head, summary and tail.
-    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
+    assert_eq!(Layout::with_folds(&doc, folds, 80).row_count(), 4);
 }
 
 #[test]
@@ -1029,6 +1054,18 @@ fn word_motions_treat_a_closed_fold_as_one_stop() {
     assert_eq!(
         walk(&layout, &mut cursor, Motion::WordBackward, 2),
         [at(1, 0), at(0, 0)]
+    );
+}
+
+#[test]
+fn word_motions_go_through_an_open_fold_word_by_word() {
+    let doc = folded(false);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+
+    assert_eq!(
+        walk(&layout, &mut cursor, Motion::WordForward, 3),
+        [at(1, 0), at(2, 0), at(2, 4)]
     );
 }
 

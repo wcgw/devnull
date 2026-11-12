@@ -4,7 +4,7 @@ use devnull_api::model::{Account, Commit, OrganizationPage, Profile};
 
 use super::*;
 use crate::doc::{
-    AccountRef, Content, Cursor, Document, Layout, Line, LinkCard, Motion, Span, Target,
+    AccountRef, Content, Cursor, Document, Folds, Layout, Line, LinkCard, Motion, Span, Target,
 };
 
 /// 2026-11-12T15:13:40Z, a little after the fixtures' commits.
@@ -614,8 +614,9 @@ fn a_group_names_the_latest_and_folds_the_others() {
     );
     let mut doc = Document::new();
     doc.push_back("n", block);
-    doc.fold_all(true);
-    let layout = Layout::new(&doc, 200);
+    let mut folds = Folds::default();
+    folds.fold_all(&doc, true);
+    let layout = Layout::with_folds(&doc, folds, 200);
     let open: Vec<String> = (0..layout.row_count())
         .map(|row| layout.segments(row).map(|(text, _)| text).collect())
         .collect();
