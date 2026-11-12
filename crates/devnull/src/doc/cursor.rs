@@ -1,6 +1,6 @@
 use super::search::{self, CaseMode, Direction, Pattern, SearchOutcome};
 use super::word::{self, Kind};
-use super::{Anchor, Document, Layout, Pos, ScreenPos, Target};
+use super::{Anchor, BlockKey, Document, Layout, Pos, ScreenPos, Target};
 
 /// The Normal-mode cursor of one window over a [`super::Document`].
 ///
@@ -109,6 +109,21 @@ impl Cursor {
         cursor
     }
 
+    /// A cursor at the start of block `key`, which may arrive later: until it does, the cursor is at the start of the
+    /// document.
+    #[must_use]
+    pub fn on_block(key: impl Into<BlockKey>) -> Self {
+        Self {
+            anchor: Some(Anchor {
+                block: key.into(),
+                line: 0,
+                col: 0,
+                fallback: 0,
+            }),
+            want: None,
+        }
+    }
+
     /// Where the cursor is drawn.
     #[must_use]
     pub fn screen(&self, layout: &Layout<'_>) -> ScreenPos {
@@ -130,8 +145,7 @@ impl Cursor {
             return None;
         }
         let doc = layout.doc();
-        let pos = self.pos(doc);
-        doc.line(pos.line).target_at(pos.col)
+        doc.target_at(self.pos(doc))
     }
 
     /// Moves `count` times by `motion` (a count of 0 counts as 1, as in Vim). A motion that cannot move, such as

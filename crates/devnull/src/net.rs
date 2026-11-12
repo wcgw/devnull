@@ -151,6 +151,21 @@ impl Net {
                         .map_err(|error| fetch_error(&error));
                     Fetched::Log { log, after, result }
                 }
+                Request::Thread { id } => {
+                    let result = client
+                        .thread(&id)
+                        .await
+                        .map(Box::new)
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Thread { id, result }
+                }
+                Request::Replies { id, after } => {
+                    let result = client
+                        .replies(&id, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Replies { id, after, result }
+                }
             };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

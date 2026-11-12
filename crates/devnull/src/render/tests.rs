@@ -35,8 +35,10 @@ fn rows(content: Content) -> Vec<String> {
         .collect()
 }
 
-/// The targets under each character of the first body row, in order, deduplicated.
+/// The targets under each character of row `row`, in order, deduplicated; text referring to the commit as a whole
+/// is left out.
 fn targets(content: Content, row: usize) -> Vec<Target> {
+    let whole = content.target.clone();
     let mut doc = Document::new();
     doc.push_back("c", content);
     let layout = Layout::new(&doc, 200);
@@ -47,6 +49,7 @@ fn targets(content: Content, row: usize) -> Vec<Target> {
     for _ in 0..200 {
         if let Some(target) = cursor.target(&layout)
             && found.last() != Some(target)
+            && whole.as_ref() != Some(target)
         {
             found.push(target.clone());
         }
@@ -94,13 +97,10 @@ fn mentions_and_links_in_the_text_are_targets() {
 }
 
 #[test]
-fn the_header_points_at_the_author_and_the_commit() {
+fn the_header_points_at_the_author() {
     let block = commit_block(&commit(serde_json::json!({})), NOW);
 
-    assert_eq!(
-        targets(block, 0),
-        [Target::Mention("grace".into()), Target::Commit("c1".into())]
-    );
+    assert_eq!(targets(block, 0), [Target::Mention("grace".into())]);
 }
 
 #[test]
@@ -145,7 +145,49 @@ fn a_quote_is_indented_under_a_bar_and_points_at_the_quoted_commit() {
         rows[1..3],
         ["┃ Acme (org) @acme · 1h · 82e820a", "┃ quoted text"]
     );
-    assert!(targets(block, 1).contains(&Target::Commit("q1".into())));
+    assert_eq!(targets(block.clone(), 1)[0], Target::Commit("q1".into()));
+    assert_eq!(
+        targets(block, 2),
+        [Target::Commit("q1".into())],
+        "the quote's text too"
+    );
+}
+
+#[test]
+fn the_rest_of_a_commit_points_at_it() {
+    let block = commit_block(
+        &commit(serde_json::json!({ "body_segments": [text("plain")] })),
+        NOW,
+    );
+    let deleted: Commit = serde_json::from_value(
+        serde_json::json!({ "id": "d1", "deleted_at": "2026-11-12T15:00:00Z" }),
+    )
+    .expect("commit");
+
+    assert_eq!(block.target, Some(Target::Commit("c1".into())));
+    assert_eq!(
+        commit_block(&deleted, NOW).target,
+        Some(Target::Commit("d1".into()))
+    );
+}
+
+#[test]
+fn the_commit_a_thread_is_about_shows_whole_and_leaves_its_replies_to_the_thread() {
+    let body: String = (1..=10)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let commit = commit(serde_json::json!({
+        "body_segments": [text(&body)],
+        "reply_preview": { "data": [{
+            "id": "r1", "short_hash": "aaaaaaa", "body_segments": [text("a reply")],
+            "author": { "id": "u2", "handle": "lin", "name": "Lin" }, "created_at": "2026-11-12T15:12:40.000000Z", "images": []
+        }] }
+    }));
+
+    let rows = rows(focused_block(&commit, NOW));
+
+    assert_eq!(rows[10..], ["line 10", "☆ 2  ↩ 1", ""]);
 }
 
 #[test]

@@ -73,13 +73,16 @@ pub struct Content {
     /// nest: a line belongs to the first fold covering it. Folds with an empty range or reaching past the lines are
     /// ignored.
     pub folds: Vec<Fold>,
+    /// What the block as a whole refers to, such as the commit it shows: the target of its text that has none of its
+    /// own, empty lines included.
+    pub target: Option<Target>,
 }
 
 impl From<Vec<Line>> for Content {
     fn from(lines: Vec<Line>) -> Self {
         Self {
             lines,
-            folds: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -169,6 +172,7 @@ struct Block {
     key: BlockKey,
     lines: Vec<Shaped>,
     folds: Vec<ShapedFold>,
+    target: Option<Target>,
 }
 
 #[derive(Debug)]
@@ -191,7 +195,12 @@ impl Block {
                 closed: fold.closed,
             })
             .collect();
-        Self { key, lines, folds }
+        Self {
+            key,
+            lines,
+            folds,
+            target: content.target,
+        }
     }
 }
 
@@ -568,5 +577,12 @@ impl Document {
     fn line(&self, line: usize) -> &Shaped {
         let block = self.block_of(line);
         &self.blocks[block].lines[line - self.starts[block]]
+    }
+
+    /// What the text at `pos` refers to: its span's target, else its block's.
+    fn target_at(&self, pos: Pos) -> Option<&Target> {
+        self.line(pos.line)
+            .target_at(pos.col)
+            .or(self.blocks[self.block_of(pos.line)].target.as_ref())
     }
 }

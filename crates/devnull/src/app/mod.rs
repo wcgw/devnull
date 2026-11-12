@@ -2,8 +2,10 @@
 
 mod cmdline;
 mod connection;
+mod fetch;
 mod logs;
 mod options;
+mod threads;
 mod view;
 mod window;
 mod windows;
@@ -16,7 +18,8 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Direction, Document, FoldOp, Layout, Motion, Pattern, SearchOutcome, Selection, SelectionKind,
+    Cursor, Direction, Document, FoldOp, Layout, Motion, Pattern, SearchOutcome, Selection,
+    SelectionKind, Target,
 };
 use crate::ex::{self, Command};
 use crate::hl::Theme;
@@ -26,9 +29,10 @@ use crate::keymap::{Action, Invocation, Keymap, Mode};
 use cmdline::{Cmdline, Edit, Purpose};
 use connection::Connection;
 pub use connection::NetEvent;
-use logs::LogState;
-pub use logs::{FetchError, Fetched, Request};
+use fetch::Paging;
+pub use fetch::{FetchError, Fetched, Request};
 use options::Options;
+use threads::ThreadState;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
 
@@ -162,10 +166,31 @@ pub enum Effect {
 struct Buffer {
     name: String,
     doc: Document,
-    /// For a log's buffer, what it loaded so far.
-    log: Option<LogState>,
-    /// Whether `:ls`, `:b` and the bufferline show it; status pages such as `connect` are not listed.
-    listed: bool,
+    kind: Kind,
+}
+
+/// What a buffer shows, and so where its document comes from.
+#[derive(Debug)]
+enum Kind {
+    /// A page saying where something stands, such as `connect`; unlike the others, `:ls`, `:b` and the bufferline
+    /// leave it out.
+    Status,
+    /// A document given whole, as to [`App::with_buffer`].
+    Fixed,
+    /// A log, a page at a time.
+    Log {
+        log: devnull_api::Log,
+        paging: Paging,
+    },
+    /// A commit's thread.
+    Thread(ThreadState),
+}
+
+impl Buffer {
+    /// Whether `:ls`, `:b` and the bufferline show it.
+    fn is_listed(&self) -> bool {
+        !matches!(self.kind, Kind::Status)
+    }
 }
 
 /// What keys are for right now.
@@ -215,8 +240,7 @@ impl App {
     pub fn new() -> Self {
         let doc = Connection::Checking.document().unwrap_or_default();
         let mut app = Self::with_buffer("connect", doc);
-        // A status page, not one of the buffers `:ls` lists.
-        app.buffers[0].listed = false;
+        app.buffers[0].kind = Kind::Status;
         app
     }
 
@@ -232,8 +256,7 @@ impl App {
             buffers: vec![Buffer {
                 name: name.into(),
                 doc,
-                log: None,
-                listed: true,
+                kind: Kind::Fixed,
             }],
             windows: Windows::new(Window::new(0)),
             mode: AppMode::Normal,
@@ -404,17 +427,22 @@ impl App {
         }
     }
 
-    /// Shows buffer `index` in the current window, where the window last left it, and loads it if it is a log
-    /// never loaded.
+    /// Shows buffer `index` in the current window, where the window last left it, and loads what it shows unless
+    /// it has it or is getting it.
     fn show_buffer(&mut self, index: usize) -> Vec<Effect> {
-        self.windows.current_mut().switch_to(index);
-        self.load_log(index)
+        self.show_buffer_at(index, Cursor::new())
+    }
+
+    /// As [`App::show_buffer`], starting at `start` when the window never showed the buffer.
+    fn show_buffer_at(&mut self, index: usize, start: Cursor) -> Vec<Effect> {
+        self.windows.current_mut().switch_to(index, start);
+        self.load(index)
     }
 
     /// The listed buffers' indices, in order: what `:ls`, `:b` and the bufferline count.
     fn listed(&self) -> Vec<usize> {
         (0..self.buffers.len())
-            .filter(|&index| self.buffers[index].listed)
+            .filter(|&index| self.buffers[index].is_listed())
             .collect()
     }
 
@@ -747,6 +775,7 @@ impl App {
                 Some(log) => return Ok(self.open_log(log)),
                 None => return Err(format!("E94: No matching buffer for {name}")),
             },
+            Command::Open => return self.open(),
             Command::Agree => match &self.connection {
                 Connection::Terms(me) => {
                     return Ok(vec![Effect::AcceptTerms(
@@ -757,6 +786,19 @@ impl App {
             },
         }
         Ok(Vec::new())
+    }
+
+    /// `:open`: what the text under the cursor refers to: a link opens in the browser, a commit's thread in the
+    /// window.
+    fn open(&mut self) -> Result<Vec<Effect>, String> {
+        let window = self.windows.current();
+        let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
+        match window.cursor.target(&layout).cloned() {
+            Some(Target::Url(url)) => Ok(vec![Effect::OpenUrl(url)]),
+            Some(Target::Commit(id)) => Ok(self.open_thread(&id)),
+            Some(Target::Mention(handle)) => Err(format!("Cannot open @{handle}'s profile yet")),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Runs the lines of a sourced file, carrying on after errors and then listing them as Vim does.
@@ -942,8 +984,7 @@ impl App {
                         self.buffers.push(Buffer {
                             name: "connect".to_owned(),
                             doc: Document::new(),
-                            log: None,
-                            listed: false,
+                            kind: Kind::Status,
                         });
                         self.buffers.len() - 1
                     }

@@ -398,8 +398,11 @@ from M1 even though graphics land in M6.
   followers/following, organization page and its commits and mentions. Handles and ids are validated before they go
   into a path. Checked live (thread, replies, profile, both lists, own commits, organization and tabs) and
   against the M0.4 captures.
-- [ ] **M3.2** Thread buffers: `<CR>` opens the thread of the commit under the cursor, or of a hash or quote under it;
-  ancestors, the commit whole, then paged replies.
+- [x] **M3.2** Thread buffers: `<CR>` (`:open`) opens the thread of the commit under the cursor, or of a quote under
+  it, and links in the browser; ancestors, the commit whole, then paged replies. A block can refer to something as a
+  whole (`Content::target`), so any text of a commit without a target of its own refers to the commit, and the text of
+  a quote to the quoted one. Threads are named `thread/{short hash}`, start with the cursor on their commit, and
+  reload with `:e!`; they are not polled. Checked live: `<CR>` on the following log, then `:e!`.
 - [ ] **M3.3** Profile buffers (`gd`, `<CR>` on a mention): header, pinned commit, commits; followers/following
   lists; organization pages. Mention targets know user from organization; `Target::Buffer` links text to a buffer
   (a profile's counts open its lists).

@@ -14,16 +14,41 @@ const SHOWN_LINES: usize = 6;
 /// Replies shown under a commit, from those the server sends along.
 const REPLY_PREVIEWS: usize = 3;
 
-/// `commit` as a block: header, text, quote, link card, images, counts, a few replies, and a blank line. Ages are
-/// relative to `now` (Unix seconds).
+/// `commit` as a block: header, text (long text folded), quote, link card, images, counts, a few replies, and a
+/// blank line. The block refers to the commit. Ages are relative to `now` (Unix seconds).
 #[must_use]
 pub fn commit_block(commit: &Commit, now: u64) -> Content {
+    block(commit, now, Shown::Summary)
+}
+
+/// `commit` as the block of the thread about it: as [`commit_block`], but all of its text, and without the replies
+/// that the thread lists below it.
+#[must_use]
+pub fn focused_block(commit: &Commit, now: u64) -> Content {
+    block(commit, now, Shown::Whole)
+}
+
+/// How much of a commit its block shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    /// Long text folded, and a few replies.
+    Summary,
+    /// All the text, and no replies.
+    Whole,
+}
+
+fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
+    let target = Some(Target::Commit(commit.id.clone()));
     if commit.is_deleted() {
-        return vec![
+        let lines = vec![
             Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
             Line::text(""),
-        ]
-        .into();
+        ];
+        return Content {
+            lines,
+            folds: Vec::new(),
+            target,
+        };
     }
     let mut lines = vec![header(commit, now, None)];
     let body = body_lines(commit);
@@ -63,6 +88,7 @@ pub fn commit_block(commit: &Commit, now: u64) -> Content {
     let replies = commit
         .reply_preview
         .iter()
+        .filter(|_| shown == Shown::Summary)
         .flat_map(|preview| &preview.data);
     for reply in replies
         .filter(|reply| !reply.is_deleted())
@@ -72,7 +98,7 @@ pub fn commit_block(commit: &Commit, now: u64) -> Content {
     }
     lines.push(Line::text(""));
     let mut folds = Vec::new();
-    if body_len > SHOWN_LINES {
+    if shown == Shown::Summary && body_len > SHOWN_LINES {
         let hidden = body_len - SHOWN_LINES;
         folds.push(Fold {
             lines: 1 + SHOWN_LINES..1 + body_len,
@@ -86,7 +112,11 @@ pub fn commit_block(commit: &Commit, now: u64) -> Content {
             closed: true,
         });
     }
-    Content { lines, folds }
+    Content {
+        lines,
+        folds,
+        target,
+    }
 }
 
 /// `Name @handle · age · hash`, after `prefix` when given (for quotes).
@@ -102,10 +132,7 @@ fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
         .map(|then| age(then, now))
         .unwrap_or_default();
     spans.push(Span::new(format!(" · {age} · "), Group::Time));
-    spans.push(
-        Span::new(commit.short_hash.clone(), Group::Hash)
-            .with_target(Target::Commit(commit.id.clone())),
-    );
+    spans.push(Span::new(commit.short_hash.clone(), Group::Hash));
     Line::Text(spans)
 }
 
@@ -124,24 +151,33 @@ fn mention(handle: &str) -> Span {
     Span::new(format!("@{handle}"), Group::Handle).with_target(Target::Mention(handle.to_owned()))
 }
 
-/// The quoted commit, indented under a bar.
+/// The quoted commit, indented under a bar. Its text refers to it, unless it refers to something of its own.
 fn quote(quoted: &Commit, now: u64) -> Vec<Line> {
     const BAR: &str = "┃ ";
-    if quoted.is_deleted() {
-        return vec![Line::Text(vec![Span::new(
+    let mut lines = if quoted.is_deleted() {
+        vec![Line::Text(vec![Span::new(
             format!("{BAR}Commit deleted"),
             Group::Time,
-        )])];
+        )])]
+    } else {
+        let mut lines = vec![header(quoted, now, Some(BAR))];
+        lines.extend(body_lines(quoted).into_iter().map(|line| {
+            let Line::Text(spans) = line else { return line };
+            Line::Text(
+                std::iter::once(Span::new(BAR, Group::Time))
+                    .chain(spans)
+                    .collect(),
+            )
+        }));
+        lines
+    };
+    for line in &mut lines {
+        if let Line::Text(spans) = line {
+            for span in spans.iter_mut().filter(|span| span.target.is_none()) {
+                span.target = Some(Target::Commit(quoted.id.clone()));
+            }
+        }
     }
-    let mut lines = vec![header(quoted, now, Some(BAR))];
-    lines.extend(body_lines(quoted).into_iter().map(|line| {
-        let Line::Text(spans) = line else { return line };
-        Line::Text(
-            std::iter::once(Span::new(BAR, Group::Time))
-                .chain(spans)
-                .collect(),
-        )
-    }));
     lines
 }
 

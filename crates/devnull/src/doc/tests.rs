@@ -439,6 +439,57 @@ fn the_target_under_the_cursor_is_the_one_of_the_span_it_sits_in() {
 }
 
 #[test]
+fn text_without_a_target_of_its_own_refers_to_its_block_s() {
+    let mut doc = Document::new();
+    let lines = vec![
+        Line::Text(vec![
+            Span::new("by ", Group::Normal),
+            Span::new("@ada", Group::Normal).with_target(Target::Mention("ada".into())),
+        ]),
+        Line::text(""),
+    ];
+    doc.push_back(
+        "a",
+        Content {
+            lines,
+            target: Some(Target::Commit("c1".into())),
+            ..Content::default()
+        },
+    );
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+    let mut target_after = |motion, count| {
+        cursor.apply(&layout, motion, count);
+        cursor.target(&layout).cloned()
+    };
+
+    assert_eq!(
+        target_after(Motion::Left, 1),
+        Some(Target::Commit("c1".into()))
+    );
+    assert_eq!(
+        target_after(Motion::Right, 3),
+        Some(Target::Mention("ada".into()))
+    );
+    assert_eq!(
+        target_after(Motion::Down, 1),
+        Some(Target::Commit("c1".into())),
+        "an empty line too"
+    );
+}
+
+#[test]
+fn a_cursor_can_wait_at_a_block_that_has_not_arrived_yet() {
+    let mut doc = doc(&[("a", &["one", "two"])]);
+    let cursor = Cursor::on_block("b");
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(0, 0));
+
+    doc.push_back("b", vec![Line::text("three")]);
+
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(2, 0));
+}
+
+#[test]
 fn an_empty_document_has_no_target_and_ignores_motions() {
     let doc = Document::new();
     let layout = Layout::new(&doc, 80);
@@ -788,6 +839,7 @@ fn folded(closed: bool) -> Document {
         Content {
             lines,
             folds: vec![fold],
+            ..Content::default()
         },
     );
     doc.push_back("b", vec![Line::text("next")]);
@@ -869,6 +921,7 @@ fn a_fold_keeps_its_state_when_its_block_is_replaced() {
         Content {
             lines,
             folds: vec![fold],
+            ..Content::default()
         },
     );
 

@@ -24,7 +24,7 @@ impl App {
             .set_style(screen, self.theme.style(Group::Normal));
         let current = self.windows.current().buffer;
         // The listed buffers, or the current one alone while it is a status page such as `connect`.
-        let shown = if self.buffers[current].listed {
+        let shown = if self.buffers[current].is_listed() {
             self.listed()
         } else {
             vec![current]

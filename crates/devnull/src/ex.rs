@@ -69,6 +69,8 @@ pub enum Command {
     Connect(Option<String>),
     /// `:agree`: accept dev-null.sh's current terms.
     Agree,
+    /// `:open`: opens what the text under the cursor refers to: a link in the browser, a commit's thread.
+    Open,
     /// `:edit {name}` opens a buffer by name; `:edit` alone (or `:e!`) reloads the current one.
     Edit(Option<String>),
     /// `:ls`, `:buffers`: lists the buffers.
@@ -149,6 +151,7 @@ enum Name {
     Wincmd,
     Connect,
     Agree,
+    Open,
     Edit,
     Buffer,
     Buffers,
@@ -190,6 +193,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("split", 2, Name::Split(false)),
     ("vsplit", 2, Name::Split(true)),
     ("close", 3, Name::Close),
+    ("open", 1, Name::Open),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
     ("connect", 4, Name::Connect),
@@ -252,6 +256,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Only => Command::Only,
         Name::Connect => Command::Connect((!args.is_empty()).then(|| args.to_owned())),
         Name::Agree => Command::Agree,
+        Name::Open => Command::Open,
         Name::Edit => Command::Edit((!args.is_empty()).then(|| args.to_owned())),
         Name::Buffer => Command::Buffer(required(args)?.to_owned()),
         Name::Buffers => Command::Buffers,
@@ -536,5 +541,12 @@ mod tests {
             parse("b").unwrap_err().to_string(),
             "E471: Argument required"
         );
+    }
+
+    #[test]
+    fn o_is_open_and_on_is_only() {
+        assert_eq!(parsed("o"), Command::Open);
+        assert_eq!(parsed("open"), Command::Open);
+        assert_eq!(parsed("on"), Command::Only);
     }
 }

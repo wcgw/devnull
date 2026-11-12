@@ -500,6 +500,7 @@ fn folded_app() -> App {
         Content {
             lines,
             folds: vec![fold],
+            ..Content::default()
         },
     );
     app
@@ -1456,4 +1457,369 @@ fn b_bn_and_bp_switch_buffers_by_number_name_or_order() {
     assert_eq!(cmdline(&app), "E93: More than one match for log");
     let _ = press(&mut app, ":b nope<CR>");
     assert_eq!(cmdline(&app), "E94: No matching buffer for nope");
+}
+
+/// A commit `id` with `text` as its body, `replies` and an optional quote.
+fn commit_with(id: &str, text: &str, quoted: Option<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!({
+        "id": id, "short_hash": format!("{:0>7}", id.trim_start_matches('c')), "body": text, "created_at": "2026-11-12T15:13:40Z",
+        "body_segments": [{ "type": "text", "text": text }], "author": { "id": "u", "handle": "ada", "name": "Ada" },
+        "replies_count": 2, "images": [], "quoted_commit": quoted
+    })
+}
+
+fn thread_of(ancestors: &[&str], focus: serde_json::Value) -> Box<devnull_api::model::Thread> {
+    let ancestors: Vec<serde_json::Value> = ancestors
+        .iter()
+        .map(|id| commit_with(id, &format!("ancestor {id}"), None))
+        .collect();
+    serde_json::from_value(serde_json::json!({ "data": focus, "ancestors": ancestors }))
+        .expect("thread")
+}
+
+#[test]
+fn enter_on_a_commit_opens_its_thread() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "]]j");
+
+    let effects = press(&mut app, "<CR>");
+
+    assert_eq!(
+        fetches(&effects),
+        [
+            Request::Thread { id: "c2".into() },
+            Request::Replies {
+                id: "c2".into(),
+                after: None
+            }
+        ]
+    );
+    assert!(statusline(&app).contains("thread/c2"));
+    assert!(shows(&app, "Loading thread/c2…"));
+}
+
+#[test]
+fn a_thread_shows_ancestors_the_whole_commit_then_replies_and_starts_on_the_commit() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "]]<CR>");
+    let long: String = (1..=8)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let replies = Fetched::Replies {
+        id: "c2".into(),
+        after: None,
+        result: Ok(page_of(7, 2, None)),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: replies,
+        now: FIXTURE_NOW,
+    });
+    let thread = Fetched::Thread {
+        id: "c2".into(),
+        result: Ok(thread_of(&["c1"], commit_with("c2", &long, None))),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: thread,
+        now: FIXTURE_NOW,
+    });
+
+    let cursor_row = |app: &App| screen(app).rows[screen(app).cursor.1 as usize].clone();
+    assert!(
+        cursor_row(&app).contains("0000002"),
+        "{:#?}",
+        screen(&app).rows
+    );
+    assert!(shows(&app, "ancestor c1"));
+    let _ = press(&mut app, "]]");
+    assert!(shows(&app, "line 8"), "the commit is never folded");
+    assert!(
+        cursor_row(&app).contains("0000007"),
+        "its replies follow it"
+    );
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 8"));
+}
+
+#[test]
+fn enter_on_a_quote_opens_the_quoted_commit() {
+    let quote = commit_with("c9", "the quoted one", None);
+    let page: Page<Commit> = Page::new(
+        serde_json::from_value(serde_json::json!([commit_with("c1", "look", Some(quote))]))
+            .expect("page"),
+        None,
+    );
+    let mut app = with_log(Log::Following, page);
+    let _ = press(&mut app, "2j");
+    assert!(screen(&app).rows[screen(&app).cursor.1 as usize].starts_with("┃ Ada @ada"));
+
+    let effects = press(&mut app, "$<CR>");
+
+    assert_eq!(fetches(&effects)[0], Request::Thread { id: "c9".into() });
+}
+
+#[test]
+fn enter_on_a_link_opens_it_in_the_browser() {
+    let commit = commit_with("c1", "see https://example.org/x", None);
+    let page: Page<Commit> = Page::new(
+        serde_json::from_value(serde_json::json!([commit])).expect("page"),
+        None,
+    );
+    let mut app = with_log(Log::Following, page);
+
+    let effects = press(&mut app, "j$<CR>");
+
+    assert_eq!(effects, [Effect::OpenUrl("https://example.org/x".into())]);
+}
+
+#[test]
+fn a_thread_that_cannot_load_says_why() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "<CR>");
+
+    let failed = Fetched::Thread {
+        id: "c1".into(),
+        result: Err(FetchError::Failed("not found".into())),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: failed,
+        now: FIXTURE_NOW,
+    });
+
+    assert_eq!(cmdline(&app), "Cannot load thread/c1: not found");
+}
+
+#[test]
+fn a_thread_is_named_by_the_short_hash_dev_null_makes_of_the_id() {
+    let id = "01a1d052-5c65-72dc-8937-b8409a82e820";
+    let page: Page<Commit> = Page::new(
+        serde_json::from_value(serde_json::json!([commit_with(id, "hi", None)])).expect("page"),
+        None,
+    );
+    let mut app = with_log(Log::Following, page);
+
+    let _ = press(&mut app, "<CR>");
+
+    assert!(
+        statusline(&app).contains("thread/a82e820"),
+        "{}",
+        statusline(&app)
+    );
+}
+
+/// A connected app showing the thread of `c2` with ancestor `c1`, and the first page of its replies, `replies`.
+fn in_thread(replies: Page<Commit>) -> App {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "]]<CR>");
+    let thread = Fetched::Thread {
+        id: "c2".into(),
+        result: Ok(thread_of(&["c1"], commit_with("c2", "the commit", None))),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: thread,
+        now: FIXTURE_NOW,
+    });
+    let replies = Fetched::Replies {
+        id: "c2".into(),
+        after: None,
+        result: Ok(replies),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: replies,
+        now: FIXTURE_NOW,
+    });
+    app
+}
+
+#[test]
+fn nearing_the_end_of_a_thread_loads_more_replies() {
+    let mut app = in_thread(page_of(10, 5, Some("r2")));
+
+    let effects = press(&mut app, "G");
+
+    assert_eq!(
+        fetches(&effects),
+        [Request::Replies {
+            id: "c2".into(),
+            after: Some(Cursor::new("r2"))
+        }]
+    );
+    let more = Fetched::Replies {
+        id: "c2".into(),
+        after: Some(Cursor::new("r2")),
+        result: Ok(page_of(15, 1, None)),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: more,
+        now: FIXTURE_NOW,
+    });
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "commit 15"));
+}
+
+#[test]
+fn refreshing_a_thread_asks_for_the_commit_and_its_replies_again() {
+    let mut app = in_thread(page_of(10, 2, None));
+
+    let effects = press(&mut app, ":e!<CR>");
+
+    assert_eq!(
+        fetches(&effects),
+        [
+            Request::Thread { id: "c2".into() },
+            Request::Replies {
+                id: "c2".into(),
+                after: None
+            }
+        ]
+    );
+    assert_eq!(
+        fetches(&press(&mut app, ":e!<CR>")),
+        [],
+        "not again while on their way"
+    );
+    let edited = Fetched::Thread {
+        id: "c2".into(),
+        result: Ok(thread_of(&["c1"], commit_with("c2", "edited", None))),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: edited,
+        now: FIXTURE_NOW,
+    });
+    assert!(shows(&app, "edited") && !shows(&app, "the commit"));
+    assert!(shows(&app, "ancestor c1"));
+    let replies: Page<Commit> = Page::new(
+        serde_json::from_value(serde_json::json!([commit_with(
+            "c10",
+            "edited reply",
+            None
+        )]))
+        .expect("replies"),
+        None,
+    );
+    let replies = Fetched::Replies {
+        id: "c2".into(),
+        after: None,
+        result: Ok(replies),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: replies,
+        now: FIXTURE_NOW,
+    });
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "edited reply") && !shows(&app, "commit 10"));
+}
+
+#[test]
+fn a_refreshed_thread_shows_what_the_commit_replies_to_now() {
+    let mut app = in_thread(page_of(10, 2, None));
+    let _ = press(&mut app, ":e!<CR>");
+
+    let edited = Fetched::Thread {
+        id: "c2".into(),
+        result: Ok(thread_of(&["c0"], commit_with("c2", "the commit", None))),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: edited,
+        now: FIXTURE_NOW,
+    });
+
+    let _ = press(&mut app, "gg");
+    assert!(shows(&app, "ancestor c0") && !shows(&app, "ancestor c1"));
+    // Row 0 is the bufferline.
+    assert!(screen(&app).rows[1].contains("0000000"));
+}
+
+#[test]
+fn replies_without_their_commit_say_why_it_is_missing() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "<CR>");
+    let replies = Fetched::Replies {
+        id: "c1".into(),
+        after: None,
+        result: Ok(page_of(10, 1, None)),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: replies,
+        now: FIXTURE_NOW,
+    });
+    assert!(shows(&app, "Loading thread/c1…") && shows(&app, "commit 10"));
+
+    let failed = Fetched::Thread {
+        id: "c1".into(),
+        result: Err(FetchError::Failed("not found".into())),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched: failed,
+        now: FIXTURE_NOW,
+    });
+
+    assert!(!shows(&app, "Loading thread/c1…"));
+    assert!(screen(&app).rows[1].starts_with("Cannot load thread/c1: not found"));
+    assert!(shows(&app, "commit 10"));
+}
+
+#[test]
+fn a_thread_opened_again_is_not_asked_for_again() {
+    let mut app = in_thread(page_of(10, 2, None));
+    let _ = press(&mut app, ":b log/following<CR>");
+
+    // Back where the window left the log: on c2.
+    let effects = press(&mut app, "<CR>");
+
+    assert_eq!(fetches(&effects), []);
+    assert!(statusline(&app).contains("thread/c2"));
+    assert_eq!(
+        press(&mut app, "<CR>"),
+        [],
+        "the thread's own commit is where the window is already"
+    );
+}
+
+#[test]
+fn a_thread_on_its_way_is_not_asked_for_twice() {
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "<CR>:b log/following<CR>");
+
+    let effects = press(&mut app, "<CR>");
+
+    assert_eq!(fetches(&effects), []);
+}
+
+#[test]
+fn refreshing_a_thread_keeps_the_folds_opened_in_it() {
+    let long: String = (1..=8)
+        .map(|n| format!("old {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let thread = || {
+        let ancestor = commit_with("c1", &long, None);
+        serde_json::from_value(serde_json::json!({ "data": commit_with("c2", "the commit", None), "ancestors": [ancestor] }))
+            .map(Box::new)
+            .expect("thread")
+    };
+    let mut app = with_log(Log::Following, page_of(1, 3, None));
+    let _ = press(&mut app, "]]<CR>");
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Thread {
+            id: "c2".into(),
+            result: Ok(thread()),
+        },
+        now: FIXTURE_NOW,
+    });
+    // The header, six lines, then the fold.
+    let _ = press(&mut app, "gg7jzo");
+    assert!(shows(&app, "old 8"));
+
+    let _ = press(&mut app, ":e!<CR>");
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Thread {
+            id: "c2".into(),
+            result: Ok(thread()),
+        },
+        now: FIXTURE_NOW,
+    });
+
+    assert!(shows(&app, "old 8"));
 }

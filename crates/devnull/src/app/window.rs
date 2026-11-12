@@ -63,13 +63,14 @@ impl Window {
         }
     }
 
-    /// Shows buffer `buffer` instead, where this window last left it, or at its top.
-    pub(super) fn switch_to(&mut self, buffer: usize) {
+    /// Shows buffer `buffer` instead, where this window last left it, or with the cursor at `start` when it never
+    /// showed it.
+    pub(super) fn switch_to(&mut self, buffer: usize, start: Cursor) {
         if buffer == self.buffer {
             return;
         }
         let view = self.left.remove(&buffer).unwrap_or(View {
-            cursor: Cursor::new(),
+            cursor: start,
             top: Cursor::new(),
             jumps: Vec::new(),
             jump: 0,
