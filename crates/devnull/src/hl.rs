@@ -15,6 +15,10 @@ pub enum Group {
     NonText,
     /// The statusline of the current window.
     StatusLine,
+    /// The statuslines of the other windows.
+    StatusLineNC,
+    /// The column between side-by-side windows.
+    WinSeparator,
     /// The current buffer in the bufferline.
     TabLineSel,
     /// The rest of the bufferline.
@@ -51,6 +55,10 @@ impl Group {
             Self::Handle => Style::new().fg(Color::Cyan),
             Self::NonText => Style::new().fg(Color::Blue),
             Self::StatusLine => Style::new().add_modifier(Modifier::REVERSED),
+            Self::StatusLineNC => Style::new()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::REVERSED),
+            Self::WinSeparator => Style::new().fg(Color::DarkGray),
             Self::TabLineSel => Style::new().add_modifier(Modifier::BOLD),
             Self::TabLineFill => Style::new().fg(Color::DarkGray),
             Self::ErrorMsg => Style::new().fg(Color::Red),

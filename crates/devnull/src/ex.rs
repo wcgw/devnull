@@ -53,6 +53,17 @@ pub enum Command {
     Source(String),
     /// `:messages`.
     Messages,
+    /// `:split` and `:vsplit` (`vertical`).
+    Split {
+        /// Side by side rather than stacked.
+        vertical: bool,
+    },
+    /// `:close`: the current window, unless it is the last.
+    Close,
+    /// `:only`: every window but the current one.
+    Only,
+    /// `:wincmd {char}`: what `<C-w>{char}` does.
+    Wincmd(char),
 }
 
 /// One `:set` argument.
@@ -117,6 +128,10 @@ enum Name {
     Colorscheme,
     Source,
     Messages,
+    Split(bool),
+    Close,
+    Only,
+    Wincmd,
 }
 
 const NORMAL: &[Mode] = &[Mode::Normal];
@@ -145,6 +160,11 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("colorscheme", 4, Name::Colorscheme),
     ("source", 2, Name::Source),
     ("messages", 3, Name::Messages),
+    ("split", 2, Name::Split(false)),
+    ("vsplit", 2, Name::Split(true)),
+    ("close", 3, Name::Close),
+    ("only", 2, Name::Only),
+    ("wincmd", 4, Name::Wincmd),
 ];
 
 /// Parses one command line, as typed after `:` or written in `init.vim`. Blank lines and `"` comments are
@@ -198,6 +218,16 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Colorscheme => Command::Colorscheme((!args.is_empty()).then(|| args.to_owned())),
         Name::Source => Command::Source(required(args)?.to_owned()),
         Name::Messages => Command::Messages,
+        Name::Split(vertical) => Command::Split { vertical },
+        Name::Close => Command::Close,
+        Name::Only => Command::Only,
+        Name::Wincmd => {
+            let mut chars = required(args)?.chars();
+            match (chars.next(), chars.next()) {
+                (Some(ch), None) => Command::Wincmd(ch),
+                _ => return Err(ExError::InvalidArgument(args.to_owned())),
+            }
+        }
     };
     Ok(Some(command))
 }

@@ -622,3 +622,86 @@ fn which_key_marks_groups_of_further_keys() {
         "{rows:#?}"
     );
 }
+
+#[test]
+fn split_stacks_two_windows_on_the_same_buffer_with_their_own_cursors() {
+    let mut app = app_with(&["one", "two", "three"], 30, 12);
+
+    let _ = press(&mut app, ":sp<CR>");
+    let rows = screen(&app).rows;
+    assert_eq!(rows[1..4], ["one", "two", "three"]);
+    assert_eq!(rows[6..9], ["one", "two", "three"]);
+    assert!(
+        rows[5].contains("NORMAL") && rows[5].contains("test"),
+        "{rows:#?}"
+    );
+    assert!(
+        !rows[10].contains("NORMAL") && rows[10].contains("test"),
+        "{rows:#?}"
+    );
+    assert_eq!(screen(&app).cursor, (0, 1));
+
+    let _ = press(&mut app, "jj<C-w>j");
+    assert_eq!(screen(&app).cursor, (0, 6));
+    let _ = press(&mut app, "<C-w>k");
+    assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+#[test]
+fn vsplit_puts_windows_side_by_side_with_a_separator() {
+    let mut app = app_with(&["one", "two"], 21, 8);
+
+    let _ = press(&mut app, "<C-w>v");
+    let rows = screen(&app).rows;
+    assert_eq!(rows[1], "one       │one");
+    assert_eq!(rows[2], "two       │two");
+    let _ = press(&mut app, "<C-w>l");
+    assert_eq!(screen(&app).cursor, (11, 1));
+    let _ = press(&mut app, "<C-w>h");
+    assert_eq!(screen(&app).cursor, (0, 1));
+}
+
+#[test]
+fn ctrl_w_w_cycles_through_the_windows() {
+    let mut app = app_with(&["one"], 30, 16);
+    let _ = press(&mut app, ":sp<CR>:sp<CR>");
+    let first = screen(&app).cursor;
+
+    let _ = press(&mut app, "<C-w>w<C-w>w");
+    assert_ne!(screen(&app).cursor, first);
+    let _ = press(&mut app, "<C-w>w");
+    assert_eq!(screen(&app).cursor, first);
+}
+
+#[test]
+fn close_and_only_remove_windows_but_never_the_last() {
+    let mut app = app_with(&["one"], 60, 12);
+    let _ = press(&mut app, ":sp<CR>:vs<CR>");
+
+    let _ = press(&mut app, "<C-w>o");
+    assert_eq!(statuslines(&app), 1);
+    let _ = press(&mut app, ":sp<CR><C-w>c");
+    assert_eq!(statuslines(&app), 1);
+    let _ = press(&mut app, ":close<CR>");
+    assert_eq!(cmdline(&app), "E444: Cannot close last window");
+}
+
+#[test]
+fn q_closes_a_window_and_quits_only_with_the_last() {
+    let mut app = app_with(&["one"], 60, 12);
+    let _ = press(&mut app, ":vs<CR>");
+    assert_eq!(statuslines(&app), 2);
+
+    assert_eq!(press(&mut app, "q"), []);
+    assert_eq!(statuslines(&app), 1);
+    assert_eq!(press(&mut app, ":q<CR>"), [Effect::Quit]);
+}
+
+/// How many statuslines the screen shows, counted by their rulers (every window's cursor is at 1,1 here).
+fn statuslines(app: &App) -> usize {
+    screen(app)
+        .rows
+        .iter()
+        .map(|row| row.matches("1,1").count())
+        .sum()
+}

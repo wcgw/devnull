@@ -5,7 +5,7 @@ use crate::keymap::{Place, Scroll};
 
 /// A view of a buffer. Both the cursor and the top of the view are pinned to text, so neither moves when blocks
 /// arrive above them; a view that has never scrolled stays at the top, showing new blocks as they come.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Window {
     pub(super) buffer: usize,
     pub(super) cursor: Cursor,

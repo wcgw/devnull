@@ -6,7 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
-use super::{App, AppMode, MessageKind};
+use super::window::{Viewport, Window};
+use super::{App, AppMode, MessageKind, text_area};
 use crate::doc::{Layout, SelectionKind};
 use crate::hl::Group;
 
@@ -17,57 +18,30 @@ impl App {
     /// Draws the whole screen.
     pub fn render(&self, frame: &mut Frame<'_>) {
         let (width, height) = self.size;
-        let buffer = &self.buffers[self.window.buffer];
+        let current = self.windows.current();
         let bufferline = Line::from(Span::styled(
-            format!(" {} ", buffer.name),
+            format!(" {} ", self.buffers[current.buffer].name),
             Group::TabLineSel.style(),
         ))
         .style(Group::TabLineFill.style());
         frame.render_widget(Paragraph::new(bufferline), Rect::new(0, 0, width, 1));
 
-        let area = self.window_area();
-        let viewport = self.viewport();
-        let layout = Layout::new(&buffer.doc, area.width);
-        let top = self.window.top(&layout, viewport);
-        let rows: Vec<Line<'_>> = (top..top + usize::from(area.height))
-            .map(|row| {
-                if row < layout.row_count() {
-                    Line::from(
-                        layout
-                            .segments(row)
-                            .map(|(text, group)| Span::styled(text, group.style()))
-                            .collect::<Vec<_>>(),
-                    )
-                } else {
-                    Line::from(Span::styled("~", Group::NonText.style()))
-                }
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(rows), area);
-        if let AppMode::Visual(selection) = &self.mode {
-            for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
-                if let Some(cells) = selection.cells(&self.window.cursor, &layout, row) {
-                    let x = area.x.saturating_add(to_u16(cells.start));
-                    let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
-                    frame
-                        .buffer_mut()
-                        .set_style(Rect::new(x, y, width, 1), Group::Visual.style());
-                }
+        let arrangement = self.windows.arrange(self.windows_area());
+        for separator in &arrangement.separators {
+            let bar: Vec<Line<'_>> = (0..separator.height).map(|_| Line::from("│")).collect();
+            frame.render_widget(
+                Paragraph::new(bar).style(Group::WinSeparator.style()),
+                *separator,
+            );
+        }
+        let mut cursor = None;
+        for &(id, rect) in &arrangement.windows {
+            let is_current = id == self.windows.current_id();
+            let shown = self.render_window(frame, self.windows.get(id), rect, is_current);
+            if is_current {
+                cursor = Some(shown);
             }
         }
-
-        let cursor = self.window.cursor.screen(&layout);
-        let status = statusline(
-            self.mode_name(),
-            &buffer.name,
-            &format!("{},{}", cursor.row + 1, cursor.col + 1),
-            &position(top, viewport.height, layout.row_count()),
-            width,
-        );
-        frame.render_widget(
-            Paragraph::new(status),
-            Rect::new(0, area.bottom(), width, 1),
-        );
 
         if self.which_key {
             self.render_which_key(frame);
@@ -104,10 +78,77 @@ impl App {
             );
         }
         self.render_showcmd(frame, cmdline_area);
+        if let Some(cursor) = cursor {
+            frame.set_cursor_position(cursor);
+        }
+    }
+
+    /// Draws `window` in `rect`, its statusline on the last row, and returns where its cursor is.
+    fn render_window(
+        &self,
+        frame: &mut Frame<'_>,
+        window: &Window,
+        rect: Rect,
+        is_current: bool,
+    ) -> Position {
+        let area = text_area(rect);
+        let viewport = Viewport {
+            height: usize::from(area.height),
+            scrolloff: self.options.scrolloff,
+        };
+        let buffer = &self.buffers[window.buffer];
+        let layout = Layout::new(&buffer.doc, area.width);
+        let top = window.top(&layout, viewport);
+        let rows: Vec<Line<'_>> = (top..top + usize::from(area.height))
+            .map(|row| {
+                if row < layout.row_count() {
+                    Line::from(
+                        layout
+                            .segments(row)
+                            .map(|(text, group)| Span::styled(text, group.style()))
+                            .collect::<Vec<_>>(),
+                    )
+                } else {
+                    Line::from(Span::styled("~", Group::NonText.style()))
+                }
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(rows), area);
+        if let (true, AppMode::Visual(selection)) = (is_current, &self.mode) {
+            for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+                if let Some(cells) = selection.cells(&window.cursor, &layout, row) {
+                    let x = area.x.saturating_add(to_u16(cells.start));
+                    let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
+                    frame
+                        .buffer_mut()
+                        .set_style(Rect::new(x, y, width, 1), Group::Visual.style());
+                }
+            }
+        }
+
+        let cursor = window.cursor.screen(&layout);
+        let status = statusline(
+            is_current.then(|| self.mode_name()),
+            &buffer.name,
+            &format!("{},{}", cursor.row + 1, cursor.col + 1),
+            &position(top, viewport.height, layout.row_count()),
+            rect.width,
+        );
+        let group = if is_current {
+            Group::StatusLine
+        } else {
+            Group::StatusLineNC
+        };
+        frame.render_widget(
+            Paragraph::new(status).style(group.style()),
+            Rect::new(rect.x, area.bottom(), rect.width, 1),
+        );
 
         let x = area.x.saturating_add(to_u16(cursor.col));
-        let y = area.y.saturating_add(to_u16(cursor.row - top));
-        frame.set_cursor_position(Position::new(x.min(area.right().saturating_sub(1)), y));
+        let y = area
+            .y
+            .saturating_add(to_u16(cursor.row.saturating_sub(top)));
+        Position::new(x.min(area.right().saturating_sub(1)), y)
     }
 
     /// The mode as the statusline names it.
@@ -237,20 +278,23 @@ impl App {
     }
 }
 
-/// A statusline: the mode and the buffer's name on the left, the ruler on the right.
-fn statusline<'a>(
-    mode: &'a str,
-    name: &'a str,
+/// A statusline: the mode (on the current window only) and the buffer's name on the left, the ruler on the right.
+fn statusline(
+    mode: Option<&str>,
+    name: &str,
     ruler: &str,
     position: &str,
     width: u16,
-) -> Line<'a> {
-    let left = format!(" {mode}  {name}");
+) -> Line<'static> {
+    let left = match mode {
+        Some(mode) => format!(" {mode}  {name}"),
+        None => format!(" {name}"),
+    };
     let right = format!("{ruler}  {position} ");
     let gap = usize::from(width)
         .saturating_sub(left.width() + right.width())
         .max(1);
-    Line::from(format!("{left}{}{right}", " ".repeat(gap))).style(Group::StatusLine.style())
+    Line::from(format!("{left}{}{right}", " ".repeat(gap)))
 }
 
 /// Where the view is in its buffer, as Vim's ruler says it: `All`, `Top`, `Bot`, or the share of rows above it.

@@ -4,6 +4,7 @@ mod cmdline;
 mod options;
 mod view;
 mod window;
+mod windows;
 
 #[cfg(test)]
 mod tests;
@@ -22,6 +23,7 @@ use crate::keymap::{Action, CmdlineKind, Invocation, Keymap, Mode};
 use cmdline::{Cmdline, Edit};
 use options::Options;
 use window::{Viewport, Window};
+use windows::{Axis, Toward, Windows};
 
 /// Everything `dn` knows, and the only place that decides what happens next.
 #[derive(Debug)]
@@ -32,7 +34,7 @@ pub struct App {
     keymap: Keymap,
     options: Options,
     buffers: Vec<Buffer>,
-    window: Window,
+    windows: Windows,
     mode: AppMode,
     /// The message shown in the command line until the next key, if any.
     message: Option<Message>,
@@ -172,7 +174,7 @@ impl App {
                 name: name.into(),
                 doc,
             }],
-            window: Window::new(0),
+            windows: Windows::new(Window::new(0)),
             mode: AppMode::Normal,
             message: None,
             messages: Vec::new(),
@@ -343,10 +345,12 @@ impl App {
                 return Vec::new();
             }
             Action::Fold(op) => {
-                let doc = &mut self.buffers[self.window.buffer].doc;
-                doc.fold(&self.window.cursor, op);
+                let doc = &mut self.buffers[self.windows.current().buffer].doc;
+                doc.fold(&self.windows.current().cursor, op);
             }
-            Action::FoldAll { open } => self.buffers[self.window.buffer].doc.fold_all(open),
+            Action::FoldAll { open } => self.buffers[self.windows.current().buffer]
+                .doc
+                .fold_all(open),
             _ => return self.run_in_window(invocation),
         }
         self.follow_cursor();
@@ -360,8 +364,13 @@ impl App {
             AppMode::Visual(selection) => AppMode::Visual(selection.with_kind(kind)),
             _ => {
                 let area = self.window_area();
-                let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
-                AppMode::Visual(Selection::start(&self.window.cursor, &layout, kind))
+                let layout =
+                    Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+                AppMode::Visual(Selection::start(
+                    &self.windows.current().cursor,
+                    &layout,
+                    kind,
+                ))
             }
         };
     }
@@ -369,8 +378,8 @@ impl App {
     /// `y` in Visual mode and `yy` in Normal mode: copies the text and, as Vim does, leaves the cursor at its start.
     fn yank(&mut self) -> Vec<Effect> {
         let area = self.window_area();
-        let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
-        let cursor = &mut self.window.cursor;
+        let layout = Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+        let cursor = &mut self.windows.current_mut().cursor;
         let selection = match std::mem::replace(&mut self.mode, AppMode::Normal) {
             AppMode::Visual(selection) => selection,
             _ => Selection::start(cursor, &layout, SelectionKind::Rowwise),
@@ -390,15 +399,15 @@ impl App {
     fn follow_cursor(&mut self) {
         let viewport = self.viewport();
         let area = self.window_area();
-        let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
-        self.window.follow_cursor(&layout, viewport);
+        let layout = Layout::new(&self.buffers[self.windows.current().buffer].doc, area.width);
+        self.windows.current_mut().follow_cursor(&layout, viewport);
     }
 
     /// Opens the fold hiding the cursor, as Vim's `'foldopen'` does after a search.
     fn open_fold_at_cursor(&mut self) {
-        self.buffers[self.window.buffer]
+        self.buffers[self.windows.current().buffer]
             .doc
-            .fold(&self.window.cursor, FoldOp::Open);
+            .fold(&self.windows.current().cursor, FoldOp::Open);
         self.follow_cursor();
     }
 
@@ -406,7 +415,7 @@ impl App {
         let count = invocation.count.unwrap_or(1);
         let viewport = self.viewport();
         let area = self.window_area();
-        let window = &mut self.window;
+        let window = self.windows.current_mut();
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
         match invocation.action {
             Action::Motion(motion) => {
@@ -478,7 +487,17 @@ impl App {
             }
         };
         match command {
+            Command::Quit { all: false, .. } if self.windows.count() > 1 => {
+                self.windows.close();
+            }
             Command::Quit { .. } => return vec![Effect::Quit],
+            Command::Split { vertical } => {
+                self.windows
+                    .split(if vertical { Axis::Columns } else { Axis::Rows })
+            }
+            Command::Close => self.close_window(),
+            Command::Only => self.windows.only(),
+            Command::Wincmd(ch) => return self.wincmd(ch),
             Command::Set(args) => {
                 for arg in &args {
                     match self.options.set(arg, &mut self.keymap) {
@@ -523,6 +542,32 @@ impl App {
         Vec::new()
     }
 
+    fn close_window(&mut self) {
+        if !self.windows.close() {
+            self.error("E444: Cannot close last window");
+        }
+    }
+
+    /// `:wincmd {ch}`, which `<C-w>{ch}` runs.
+    fn wincmd(&mut self, ch: char) -> Vec<Effect> {
+        let area = self.windows_area();
+        match ch {
+            'h' => self.windows.focus(area, Toward::Left),
+            'j' => self.windows.focus(area, Toward::Down),
+            'k' => self.windows.focus(area, Toward::Up),
+            'l' => self.windows.focus(area, Toward::Right),
+            'w' => self.windows.cycle(true),
+            'W' => self.windows.cycle(false),
+            's' => self.windows.split(Axis::Rows),
+            'v' => self.windows.split(Axis::Columns),
+            'c' => self.close_window(),
+            'o' => self.windows.only(),
+            'q' => return self.ex("quit"),
+            _ => {}
+        }
+        Vec::new()
+    }
+
     /// `/` and `?` submitted with `text`; an empty pattern repeats the last one.
     fn search(&mut self, text: &str, direction: Direction, count: usize) {
         let pattern = if text.is_empty() {
@@ -537,7 +582,7 @@ impl App {
             }
         };
         let area = self.window_area();
-        let window = &mut self.window;
+        let window = self.windows.current_mut();
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
         let outcome = window.cursor.search(&layout, &pattern, direction, count);
         self.last_search = Some(LastSearch { pattern, direction });
@@ -576,10 +621,22 @@ impl App {
         self.message = Some(message);
     }
 
-    /// Where the window's text goes: below the bufferline, above its statusline and the command line.
-    fn window_area(&self) -> Rect {
+    /// Where windows go: between the bufferline and the command line.
+    fn windows_area(&self) -> Rect {
         let (width, height) = self.size;
-        Rect::new(0, 1, width, height.saturating_sub(3))
+        Rect::new(0, 1, width, height.saturating_sub(2))
+    }
+
+    /// Where the current window's text goes: its share of the windows area, above its statusline.
+    fn window_area(&self) -> Rect {
+        let current = self.windows.current_id();
+        let arrangement = self.windows.arrange(self.windows_area());
+        let rect = arrangement
+            .windows
+            .into_iter()
+            .find(|(id, _)| *id == current)
+            .map(|(_, rect)| rect);
+        text_area(rect.unwrap_or_default())
     }
 
     fn viewport(&self) -> Viewport {
@@ -592,7 +649,15 @@ impl App {
     /// The document of the current window, for tests to change as the network would.
     #[cfg(test)]
     pub(crate) fn doc_mut(&mut self) -> &mut Document {
-        &mut self.buffers[self.window.buffer].doc
+        &mut self.buffers[self.windows.current().buffer].doc
+    }
+}
+
+/// A window's text area: all of `rect` but its last row, the statusline.
+fn text_area(rect: Rect) -> Rect {
+    Rect {
+        height: rect.height.saturating_sub(1),
+        ..rect
     }
 }
 
