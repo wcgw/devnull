@@ -26,6 +26,11 @@ use crate::key::Key;
 pub async fn run() -> io::Result<()> {
     let mut terminal = Session::start()?;
     let mut app = App::new();
+    let size = terminal.size()?;
+    let _ = app.update(Msg::Resize {
+        width: size.width,
+        height: size.height,
+    });
     let mut events = EventStream::new();
     loop {
         terminal.draw(|frame| app.render(frame))?;
@@ -42,8 +47,7 @@ pub async fn run() -> io::Result<()> {
     }
 }
 
-/// The message for a terminal event, if `App` cares. Resizes need no message: every event is followed by a redraw,
-/// which picks up the new size.
+/// The message for a terminal event, if `App` cares.
 fn to_msg(event: Event) -> Option<Msg> {
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -52,7 +56,8 @@ fn to_msg(event: Event) -> Option<Msg> {
         Event::Paste(text) => Some(Msg::Paste(text)),
         Event::FocusGained => Some(Msg::FocusGained),
         Event::FocusLost => Some(Msg::FocusLost),
-        Event::Key(_) | Event::Mouse(_) | Event::Resize(..) => None,
+        Event::Resize(width, height) => Some(Msg::Resize { width, height }),
+        Event::Key(_) | Event::Mouse(_) => None,
     }
 }
 
@@ -150,13 +155,19 @@ mod tests {
     }
 
     #[test]
-    fn focus_and_paste_become_messages_and_resizes_only_redraw() {
+    fn focus_paste_and_resize_become_messages() {
         assert_eq!(to_msg(Event::FocusLost), Some(Msg::FocusLost));
         assert_eq!(to_msg(Event::FocusGained), Some(Msg::FocusGained));
         assert_eq!(
             to_msg(Event::Paste("hi".into())),
             Some(Msg::Paste("hi".into()))
         );
-        assert_eq!(to_msg(Event::Resize(80, 24)), None);
+        assert_eq!(
+            to_msg(Event::Resize(80, 24)),
+            Some(Msg::Resize {
+                width: 80,
+                height: 24
+            })
+        );
     }
 }

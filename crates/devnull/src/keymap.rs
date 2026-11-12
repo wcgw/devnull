@@ -46,6 +46,12 @@ pub enum Action {
         /// Whether every fold opens rather than closes.
         open: bool,
     },
+    /// Scrolls the window, moving the cursor only as far as it must to stay in view.
+    Scroll(Scroll),
+    /// `zt`, `zz`, `zb`: scrolls so the cursor's row is at the top, middle or bottom of the window.
+    Place(Place),
+    /// `H`, `M`, `L`: the cursor to the top, middle or bottom row of the window (`count` rows in for `H` and `L`).
+    ViewRow(Place),
     /// `<C-o>`: back in the jumplist.
     JumpOlder,
     /// `<C-i>`: forward in the jumplist.
@@ -62,6 +68,34 @@ pub enum Action {
     },
     /// A key sequence that cannot run, such as a recursive mapping; the message says why.
     Error(String),
+}
+
+/// How far a scroll goes, and which way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scroll {
+    /// `<C-e>`: one row down the buffer.
+    LineDown,
+    /// `<C-y>`: one row up.
+    LineUp,
+    /// `<C-d>`: half a window down, cursor along.
+    HalfDown,
+    /// `<C-u>`: half a window up, cursor along.
+    HalfUp,
+    /// `<C-f>`: a window down, keeping two rows.
+    PageDown,
+    /// `<C-b>`: a window up, keeping two rows.
+    PageUp,
+}
+
+/// A place in the window: its top, middle or bottom row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// The top row.
+    Top,
+    /// The middle row.
+    Middle,
+    /// The bottom row.
+    Bottom,
 }
 
 /// What the command line is for.
@@ -550,6 +584,23 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
             Target::Row { last: true },
             "last row, or row [count]",
         );
+        let view: [(&str, Action, &str); 12] = [
+            ("<C-e>", Action::Scroll(Scroll::LineDown), "scroll down"),
+            ("<C-y>", Action::Scroll(Scroll::LineUp), "scroll up"),
+            ("<C-d>", Action::Scroll(Scroll::HalfDown), "half page down"),
+            ("<C-u>", Action::Scroll(Scroll::HalfUp), "half page up"),
+            ("<C-f>", Action::Scroll(Scroll::PageDown), "page down"),
+            ("<C-b>", Action::Scroll(Scroll::PageUp), "page up"),
+            ("zt", Action::Place(Place::Top), "row to top"),
+            ("zz", Action::Place(Place::Middle), "row to middle"),
+            ("zb", Action::Place(Place::Bottom), "row to bottom"),
+            ("H", Action::ViewRow(Place::Top), "top of window"),
+            ("M", Action::ViewRow(Place::Middle), "middle of window"),
+            ("L", Action::ViewRow(Place::Bottom), "bottom of window"),
+        ];
+        for (notation, action, description) in view {
+            table.bind(keys(notation), Target::Action(action), description);
+        }
         table.bind(
             keys("v"),
             Target::Action(Action::Visual(SelectionKind::Charwise)),
@@ -886,8 +937,10 @@ mod tests {
                 ("M", "close all folds"),
                 ("R", "open all folds"),
                 ("a", "toggle fold"),
+                ("b", "row to bottom"),
                 ("c", "close fold"),
                 ("o", "open fold"),
+                ("t", "row to top"),
                 ("z", ":center<CR>"),
             ]
             .map(|(k, d)| (k.to_owned(), d.to_owned()))

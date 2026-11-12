@@ -91,6 +91,24 @@ impl Cursor {
         Self::default()
     }
 
+    /// A cursor at the start of screen row `row` of `layout`, pinned to the text there. Rows past the end clamp to
+    /// the last one; an empty layout gives a fresh cursor.
+    #[must_use]
+    pub fn at_row(layout: &Layout<'_>, row: usize) -> Self {
+        let mut cursor = Self::new();
+        if layout.row_count() > 0 {
+            let row = layout.row(row.min(layout.row_count() - 1));
+            cursor.set(
+                layout.doc(),
+                Pos {
+                    line: row.line,
+                    col: row.start,
+                },
+            );
+        }
+        cursor
+    }
+
     /// Where the cursor is drawn.
     #[must_use]
     pub fn screen(&self, layout: &Layout<'_>) -> ScreenPos {
