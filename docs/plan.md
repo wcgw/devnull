@@ -250,6 +250,8 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
 - **Cursor pagination** (Laravel): `links.next` is an absolute URL on the API origin, `meta.next_cursor` the opaque
   cursor, `per_page` 20. Validate `links.next` stays on `/api/v1/log/<same log>` before following it (as the Go client
   does).
+- **Mentions** `offset`/`length` count Unicode characters (code points) of `body`, `@` included: all 13 captured
+  mentions match that way; byte and UTF-16 offsets fail on the 4 after non-ASCII text.
 - **Commit**: `body`, `body_segments` (`text {text}`, inline `code {code}`, code `block {language, filename, html}`
   where `html` is server-highlighted markup, so `dn` either parses it or re-highlights from source), `preview_segments`
   (excerpt for long commits, else null), `mentions` (`handle`, `kind` user|organization, `offset`, `length`), `images` (`url`,
@@ -269,6 +271,9 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
   - 401 `invalid_signature`: timestamp outside **±300 s** ("Signature expired. Check that your clock is right.").
     `dn` should say so, not ask to reconnect.
   - 401 `device_not_approved`: unknown or revoked key; offer `:connect`.
+- **Nulls and minimal objects**: some strings arrive as `null` (an author's `avatar_url`, a link card's `title` and
+  `description`), and a deleted reply in `reply_preview` is only `{id, deleted_at, parent_id, replies_count}`. The
+  models treat null like absent and require nothing but a commit's `id`.
 - **Not observed** (no data on the account, or side effects): starred items, polls, image descriptions,
   notifications. Use the Go testdata for those.
 
@@ -355,8 +360,19 @@ from M1 even though graphics land in M6.
 
 ### M2 Auth & logs
 
-- `devnull-api`: signing, enrollment, terms consent, `/me`, `/log/*`.
-- `dn`: login flow; Following, Latest, Trending buffers; auto-paging; `:e!`; polling with cursor anchoring.
+- [x] **M2.1** `devnull-api` signing: key file or ssh-agent (D9), canonical message; tested against the Go client's
+  signatures from M0.2 (throwaway test key, never enrolled), including through a private ssh-agent and an encrypted
+  key.
+- [x] **M2.2** `devnull-api` client: async `reqwest` 0.13 (rustls), models for `/me` and `/log/*`, errors by what a
+  caller does (`NotApproved`, `BadSignature`, `NotFound`, `RateLimited`, `Network`, `Refused`, `Invalid`); tested
+  against a mock server that verifies every signature. Checked live against dev-null.sh (`/me`, three logs, a second
+  page) and against all 89 commits captured in M0.4.
+- [ ] **M2.3** `devnull-api` enrollment: the M0.3 loopback flow as a library.
+- [ ] **M2.4** `dn` connection: load the key, verify with `/me`, a `connect` buffer when there is none, terms consent.
+- [ ] **M2.5** `dn` log buffers rendered from real commits (segments, mentions, quotes, link cards, counts), through
+  request/response messages. ⏸ try against dev-null.sh.
+- [ ] **M2.6** Paging near the end, `:e!`, polling with new commits arriving above.
+- [ ] **M2.7** Buffers: `:e log/latest`, `<leader>1/2/3`, a bufferline listing them.
 
 ### M3 Navigation
 

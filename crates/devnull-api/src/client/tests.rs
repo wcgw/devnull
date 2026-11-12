@@ -1,0 +1,250 @@
+//! The client against a mock dev-null.sh that verifies every signature like the real server.
+
+use std::path::Path;
+
+use ssh_encoding::Decode;
+use ssh_key::{PublicKey, SshSig};
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
+
+use super::*;
+use crate::model::{AccountKind, Lane, Segment};
+use crate::signing::{Signer, canonical_message};
+
+fn fixture(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+}
+
+/// Matches only requests whose `X-SSH-Signature` verifies, with the test key, over the canonical message rebuilt from
+/// the request as received.
+struct Signed(PublicKey);
+
+impl Match for Signed {
+    fn matches(&self, request: &Request) -> bool {
+        let header = |name| {
+            request
+                .headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned)
+        };
+        let (Some(timestamp), Some(nonce), Some(signature)) = (
+            header("x-devnull-timestamp"),
+            header("x-devnull-nonce"),
+            header("x-ssh-signature"),
+        ) else {
+            return false;
+        };
+        let Ok(timestamp) = timestamp.parse() else {
+            return false;
+        };
+        let Ok(nonce) = (0..32)
+            .step_by(2)
+            .map(|i| u8::from_str_radix(nonce.get(i..i + 2).unwrap_or("zz"), 16))
+            .collect::<Result<Vec<u8>, _>>()
+        else {
+            return false;
+        };
+        let Ok(nonce) = <[u8; 16]>::try_from(nonce) else {
+            return false;
+        };
+        let uri = match request.url.query() {
+            Some(query) => format!("{}?{query}", request.url.path()),
+            None => request.url.path().to_owned(),
+        };
+        let body = String::from_utf8_lossy(&request.body);
+        let message = canonical_message(timestamp, &nonce, request.method.as_str(), &uri, &[&body]);
+        let Ok(blob) =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature)
+        else {
+            return false;
+        };
+        let Ok(sig) = SshSig::decode(&mut blob.as_slice()) else {
+            return false;
+        };
+        self.0
+            .verify("devnull-api", message.as_bytes(), &sig)
+            .is_ok()
+    }
+}
+
+async fn server_and_client() -> (MockServer, Client, Signed) {
+    let server = MockServer::start().await;
+    let signer = Signer::open(&fixture("signing/device_ed25519"), None).expect("test key");
+    let public =
+        PublicKey::read_openssh_file(&fixture("signing/device_ed25519.pub")).expect("public key");
+    let client = Client::new(&server.uri(), signer).expect("loopback origin");
+    (server, client, Signed(public))
+}
+
+fn json(body: &str) -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_raw(body.to_owned(), "application/json")
+}
+
+#[tokio::test]
+async fn me_is_a_signed_get_and_carries_the_unread_count() {
+    let (server, client, signed) = server_and_client().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/me"))
+        .and(signed)
+        .respond_with(json(
+            r#"{"data":{"id":"u1","handle":"ada","name":"Ada","terms_accepted":true,"terms_version":"v1"},
+                "unread_notifications_count":4}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let me = client.me().await.expect("me");
+
+    assert_eq!(
+        (
+            me.handle.as_str(),
+            me.terms_accepted,
+            me.unread_notifications
+        ),
+        ("ada", true, 4)
+    );
+}
+
+#[tokio::test]
+async fn a_log_page_parses_commits_and_its_next_cursor() {
+    let (server, client, signed) = server_and_client().await;
+    let page = std::fs::read_to_string(fixture("api/log-page.json")).expect("fixture");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/log/latest"))
+        .and(signed)
+        .respond_with(json(&page))
+        .mount(&server)
+        .await;
+
+    let page = client.log(Log::Latest, None).await.expect("page");
+
+    assert_eq!(page.items.len(), 2);
+    let commit = &page.items[0];
+    let author = commit.author.as_ref().expect("author");
+    assert_eq!(
+        (author.handle.as_str(), author.kind, &author.lane),
+        ("grace", AccountKind::User, &Lane::Color("#ff0000".into()))
+    );
+    assert_eq!(commit.mentions[0].offset, 6);
+    assert!(matches!(&commit.body_segments[1], Segment::Code { code } if code == "x"));
+    assert!(
+        matches!(&commit.body_segments[3], Segment::Block { language: Some(l), .. } if l == "rust")
+    );
+    assert!(matches!(commit.body_segments[4], Segment::Unknown));
+    let quoted = commit.quoted_commit.as_ref().expect("quote");
+    assert_eq!(
+        (
+            quoted.author.as_ref().map(|a| a.kind),
+            quoted.author.as_ref().map(|a| &a.lane)
+        ),
+        (Some(AccountKind::Organization), Some(&Lane::Index(3)))
+    );
+    // Real responses send null for some strings (avatar, card title and description): they read as empty.
+    assert_eq!(
+        commit.link_preview.as_ref().map(|p| p.title.as_str()),
+        Some("")
+    );
+    assert_eq!(
+        quoted.author.as_ref().map(|a| a.avatar_url.as_str()),
+        Some("")
+    );
+    // A deleted reply comes as little more than its id.
+    let replies = &commit.reply_preview.as_ref().expect("replies").data;
+    assert_eq!(replies.len(), 2);
+    assert!(replies[1].is_deleted() && replies[1].short_hash.is_empty());
+    assert!(page.items[1].is_deleted() && page.items[1].author.is_none());
+    assert!(page.next.is_some());
+}
+
+#[tokio::test]
+async fn the_next_page_is_asked_for_with_the_cursor_on_the_same_log() {
+    let (server, client, signed) = server_and_client().await;
+    let page = std::fs::read_to_string(fixture("api/log-page.json")).expect("fixture");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/log/latest"))
+        .and(query_param("cursor", "eyJpZCI6IngifQ"))
+        .and(signed)
+        .respond_with(json(
+            r#"{"data":[],"links":{"next":null},"meta":{"next_cursor":null}}"#,
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/log/latest"))
+        .respond_with(json(&page))
+        .mount(&server)
+        .await;
+
+    let first = client.log(Log::Latest, None).await.expect("first page");
+    let second = client
+        .log(Log::Latest, first.next.as_ref())
+        .await
+        .expect("second page");
+
+    assert!(second.items.is_empty() && second.next.is_none());
+}
+
+async fn error_for(status: u16, body: &str, header: Option<(&str, &str)>) -> ApiError {
+    let (server, client, _) = server_and_client().await;
+    let mut response =
+        ResponseTemplate::new(status).set_body_raw(body.to_owned(), "application/json");
+    if let Some((name, value)) = header {
+        response = response.insert_header(name, value);
+    }
+    Mock::given(method("GET"))
+        .respond_with(response)
+        .mount(&server)
+        .await;
+    client.me().await.expect_err("an error")
+}
+
+#[tokio::test]
+async fn refusals_become_errors_a_caller_can_act_on() {
+    let not_approved = r#"{"message":"This key isn't approved","code":"device_not_approved"}"#;
+    assert!(matches!(
+        error_for(401, not_approved, None).await,
+        ApiError::NotApproved
+    ));
+    let expired = r#"{"message":"Signature expired. Check that your clock is right.","code":"invalid_signature"}"#;
+    assert!(
+        matches!(error_for(401, expired, None).await, ApiError::BadSignature { message } if message.contains("clock"))
+    );
+    assert!(matches!(
+        error_for(404, r#"{"message":"No query results"}"#, None).await,
+        ApiError::NotFound
+    ));
+    let limited = error_for(
+        429,
+        r#"{"message":"Too many"}"#,
+        Some(("retry-after", "30")),
+    )
+    .await;
+    assert!(
+        matches!(limited, ApiError::RateLimited { retry_after: Some(ref after) } if after == "30"),
+        "{limited:?}"
+    );
+    let refused = error_for(422, r#"{"message":"No.","code":"nope"}"#, None).await;
+    assert!(
+        matches!(refused, ApiError::Refused { status: 422, ref message, .. } if message == "No."),
+        "{refused:?}"
+    );
+    assert!(matches!(
+        error_for(200, "not json", None).await,
+        ApiError::Invalid(_)
+    ));
+}
+
+#[test]
+fn only_https_origins_are_accepted_except_on_loopback() {
+    let signer = || Signer::open(&fixture("signing/device_ed25519"), None).expect("test key");
+
+    assert!(Client::new("https://dev-null.sh", signer()).is_ok());
+    assert!(Client::new("http://127.0.0.1:8080", signer()).is_ok());
+    assert!(Client::new("http://dev-null.sh", signer()).is_err());
+    assert!(Client::new("https://dev-null.sh/some/path", signer()).is_err());
+}

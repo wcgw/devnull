@@ -1,0 +1,168 @@
+{
+  "data": [
+    {
+      "id": "01a1d077-9448-7190-852d-567786cd1130",
+      "short_hash": "6cd1130",
+      "body": "héllo @ada, see `x` and https://example.org",
+      "body_segments": [
+        {
+          "type": "text",
+          "text": "héllo @ada, see "
+        },
+        {
+          "type": "code",
+          "code": "x"
+        },
+        {
+          "type": "text",
+          "text": " and https://example.org"
+        },
+        {
+          "type": "block",
+          "language": "rust",
+          "filename": "main.rs",
+          "html": "<span>fn</span> main() {}"
+        },
+        {
+          "type": "something-new"
+        }
+      ],
+      "preview_segments": null,
+      "mentions": [
+        {
+          "handle": "ada",
+          "kind": "user",
+          "offset": 6,
+          "length": 4
+        }
+      ],
+      "author": {
+        "id": "u1",
+        "handle": "grace",
+        "name": "Grace",
+        "avatar_url": "https://example.org/g.png",
+        "type": "user",
+        "lane": "#ff0000",
+        "live": null
+      },
+      "created_at": "2026-11-12T15:13:40.000000Z",
+      "deleted_at": null,
+      "html_url": "https://dev-null.sh/@grace/6cd1130",
+      "stars_count": 2,
+      "replies_count": 1,
+      "pasteis_count": 0,
+      "starred": true,
+      "status": "approved",
+      "is_pinned": false,
+      "parent_id": null,
+      "quoted_commit_id": "01a1d052-5c65-72dc-8937-b8409a82e820",
+      "quoted_commit": {
+        "id": "01a1d052-5c65-72dc-8937-b8409a82e820",
+        "short_hash": "82e820a",
+        "body": "quoted",
+        "body_segments": [
+          {
+            "type": "text",
+            "text": "quoted"
+          }
+        ],
+        "mentions": [],
+        "author": {
+          "id": "o1",
+          "handle": "acme",
+          "name": "Acme",
+          "avatar_url": null,
+          "type": "organization",
+          "lane": 3
+        },
+        "created_at": "2026-11-12T14:00:00.000000Z",
+        "html_url": "https://dev-null.sh/@acme/82e820a",
+        "status": "approved",
+        "images": []
+      },
+      "link_preview": {
+        "url": "https://example.org",
+        "title": null,
+        "description": null,
+        "site_name": null,
+        "image_url": "https://example.org/card.png",
+        "is_pending": false,
+        "embed": null
+      },
+      "images": [
+        {
+          "id": "i1",
+          "url": "https://example.org/i.png",
+          "width": 640,
+          "height": 480,
+          "description": null
+        }
+      ],
+      "reply_preview": {
+        "data": [
+          {
+            "id": "r1",
+            "short_hash": "aaaaaaa",
+            "body": "a reply",
+            "body_segments": [
+              {
+                "type": "text",
+                "text": "a reply"
+              }
+            ],
+            "mentions": [],
+            "author": {
+              "id": "u2",
+              "handle": "lin",
+              "name": "Lin",
+              "avatar_url": "",
+              "type": "user",
+              "lane": null
+            },
+            "created_at": "2026-11-12T15:20:00.000000Z",
+            "html_url": "https://dev-null.sh/@lin/aaaaaaa",
+            "status": "approved",
+            "parent_id": "01a1d077-9448-7190-852d-567786cd1130",
+            "images": []
+          },
+          {
+            "deleted_at": "2026-11-12T16:00:00.000000Z",
+            "id": "r2",
+            "parent_id": "01a1d077-9448-7190-852d-567786cd1130",
+            "replies_count": 0
+          }
+        ],
+        "next_cursor": null
+      },
+      "poll": null
+    },
+    {
+      "id": "01a1d000-0000-7000-8000-000000000001",
+      "short_hash": "0000001",
+      "body": "",
+      "body_segments": [],
+      "mentions": [],
+      "author": null,
+      "created_at": "2026-11-12T10:00:00.000000Z",
+      "deleted_at": "2026-11-12T11:00:00.000000Z",
+      "html_url": "https://dev-null.sh/c/0000001",
+      "status": "approved",
+      "images": []
+    }
+  ],
+  "links": {
+    "first": null,
+    "last": null,
+    "next": "https://dev-null.sh/api/v1/log/latest?cursor=eyJpZCI6IngifQ",
+    "prev": null
+  },
+  "meta": {
+    "next_cursor": "eyJpZCI6IngifQ",
+    "path": "https://dev-null.sh/api/v1/log/latest",
+    "per_page": 20,
+    "prev_cursor": null
+  },
+  "log": "latest",
+  "is_ranked": false,
+  "suggestions": []
+}
