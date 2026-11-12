@@ -6,6 +6,7 @@
 pub mod body;
 mod client;
 pub mod enroll;
+pub mod media;
 pub mod model;
 pub mod signing;
 
