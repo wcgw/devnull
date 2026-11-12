@@ -400,7 +400,10 @@ from M1 even though graphics land in M6.
   cards, image placeholders, counts and status, reply previews, "Commit deleted"; bodies over six lines fold.
   `fake.rs` retired: the invented log is now an API-shaped fixture. Verified in a pty against the real log.
   ⏸ try against dev-null.sh.
-  - Not yet: `preview_segments` (the server's excerpt) is not used; the fold shows the first six lines instead.
+  - Won't do (decided in the v1 leftovers): `preview_segments`, the server's excerpt. It cuts a commit mid-line at
+    about 280 characters and ends it with `…` (14 of 89 captured commits had one), so it would make a fold whose
+    closed form is other text over several lines, and fold commits that fit; a Vim fold hides whole lines behind
+    one. The fold keeps the first six lines, and `zo`/`zc`/`za` and search work on it as on any fold.
 - [x] **M2.6** Paging when the cursor is within a window's height of the end (one request at a time, a "Loading
   more…" line); `:e!`/`<C-l>` refresh merges the first page (new commits above, known ones updated in place, the
   cursor stays on its commit; no overlap or Trending replaces the log); following and latest polled every 15 s
