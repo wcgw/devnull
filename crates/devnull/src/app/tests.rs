@@ -886,13 +886,12 @@ fn long_messages_wrap_in_the_message_view() {
     );
 }
 
-/// The app as `dn` starts it, in an 80 × 24 terminal.
+/// The app as `dn` starts it, in an 80 × 24 terminal, once connected as `@ada`.
 fn started() -> App {
     let mut app = App::new();
-    let _ = app.update(Msg::Resize {
-        width: 80,
-        height: 24,
-    });
+    let _ = app.update(Msg::Resize { width: 80, height: 24 });
+    let _ = app.start();
+    let _ = app.update(Msg::Net(NetEvent::Connected(me("ada", true))));
     app
 }
 
@@ -915,5 +914,117 @@ fn double_brackets_go_from_commit_to_commit_and_zo_shows_the_rest_of_a_long_one(
         rows.iter()
             .any(|row| row.starts_with("Moral: never let a test read the clock")),
         "{rows:#?}"
+    );
+}
+
+/// A fresh `dn` as the runtime starts it, before the network answered.
+fn starting() -> (App, Vec<Effect>) {
+    let mut app = App::new();
+    let _ = app.update(Msg::Resize {
+        width: 100,
+        height: 20,
+    });
+    let effects = app.start();
+    (app, effects)
+}
+
+fn net(app: &mut App, event: NetEvent) -> Vec<Effect> {
+    app.update(Msg::Net(event))
+}
+
+fn me(handle: &str, terms_accepted: bool) -> devnull_api::model::Me {
+    serde_json::from_value(serde_json::json!({
+        "id": "u1", "handle": handle, "name": "Ada", "terms_accepted": terms_accepted, "terms_version": "2026-11-01"
+    }))
+    .expect("me")
+}
+
+fn shows(app: &App, text: &str) -> bool {
+    screen(app).rows.iter().any(|row| row.contains(text))
+}
+
+#[test]
+fn dn_starts_by_checking_its_connection() {
+    let (app, effects) = starting();
+
+    assert_eq!(effects, [Effect::Connect]);
+    assert!(shows(&app, "Connecting to dev-null.sh"));
+}
+
+#[test]
+fn without_a_key_connect_enrolls_and_opens_the_approval_page() {
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::NoKey);
+    assert!(shows(&app, "This device is not connected"));
+
+    assert_eq!(press(&mut app, ":connect<CR>"), [Effect::Enroll]);
+    let url = "https://dev-null.sh/mobile/authorize?state=s";
+    let effects = net(
+        &mut app,
+        NetEvent::Enrolling {
+            url: url.into(),
+            fingerprint: "SHA256:abc".into(),
+        },
+    );
+
+    assert_eq!(effects, [Effect::OpenUrl(url.into())]);
+    assert!(shows(&app, url) && shows(&app, "SHA256:abc"));
+    let pasted = "http://127.0.0.1:4242/callback?code=c&state=s";
+    assert_eq!(
+        press(&mut app, &format!(":connect {pasted}<CR>")),
+        [Effect::EnrollPasted(pasted.into())]
+    );
+}
+
+#[test]
+fn once_connected_the_log_shows_and_the_statusline_names_the_account() {
+    let (mut app, _) = starting();
+
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+
+    assert!(shows(&app, "log/following"));
+    assert!(statusline(&app).contains("@ada"), "{:?}", statusline(&app));
+}
+
+#[test]
+fn an_unapproved_or_unreachable_device_says_why_and_connect_tries_again() {
+    let (mut app, _) = starting();
+
+    let _ = net(&mut app, NetEvent::NotApproved);
+    assert!(shows(&app, "not approved"));
+    assert_eq!(press(&mut app, ":connect<CR>"), [Effect::Enroll]);
+
+    let _ = net(&mut app, NetEvent::Failed("cannot reach the server".into()));
+    assert!(shows(&app, "cannot reach the server"));
+    assert_eq!(press(&mut app, ":connect<CR>"), [Effect::Connect]);
+}
+
+#[test]
+fn an_encrypted_key_asks_for_its_passphrase_without_showing_it() {
+    let (mut app, _) = starting();
+
+    let _ = net(&mut app, NetEvent::NeedsPassphrase { wrong: false });
+    let effects = press(&mut app, "s3cret");
+    assert_eq!(cmdline(&app), "Passphrase: ******");
+    assert_eq!(effects, []);
+    assert_eq!(press(&mut app, "<CR>"), [Effect::Unlock("s3cret".into())]);
+
+    let _ = net(&mut app, NetEvent::NeedsPassphrase { wrong: true });
+    assert!(shows(&app, "Wrong passphrase"));
+    // The screen helper trims trailing blanks: this is the bare prompt.
+    assert_eq!(cmdline(&app), "Passphrase:");
+}
+
+#[test]
+fn terms_must_be_agreed_to_before_anything_else() {
+    let (mut app, _) = starting();
+
+    let _ = net(&mut app, NetEvent::Connected(me("ada", false)));
+    assert!(shows(&app, "terms"));
+    assert!(!shows(&app, "log/following"));
+
+    assert_eq!(
+        press(&mut app, ":agree<CR>"),
+        [Effect::AcceptTerms("2026-11-01".into())]
     );
 }

@@ -480,6 +480,12 @@ impl Document {
             .map_or(self.blocks[block].folds[index].closed, |open| !open)
     }
 
+    /// Whether the document has no blocks.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
     /// The anchor for `pos`, which must be a position in this document.
     fn anchor(&self, pos: Pos) -> Anchor {
         let block = self.block_of(pos.line);

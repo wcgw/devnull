@@ -9,4 +9,5 @@ pub mod fake;
 pub mod hl;
 pub mod key;
 pub mod keymap;
+mod net;
 pub mod runtime;

@@ -1,6 +1,7 @@
 //! The application core (D10): state and a pure `update`; the runtime does the I/O.
 
 mod cmdline;
+mod connection;
 mod options;
 mod view;
 mod window;
@@ -19,9 +20,11 @@ use crate::doc::{
 use crate::ex::{self, Command};
 use crate::hl::Theme;
 use crate::key::Key;
-use crate::keymap::{Action, CmdlineKind, Invocation, Keymap, Mode};
+use crate::keymap::{Action, Invocation, Keymap, Mode};
 
-use cmdline::{Cmdline, Edit};
+use cmdline::{Cmdline, Edit, Purpose};
+use connection::Connection;
+pub use connection::NetEvent;
 use options::Options;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
@@ -47,6 +50,7 @@ pub struct App {
     /// Patterns searched for, oldest first.
     search_history: Vec<String>,
     last_search: Option<LastSearch>,
+    connection: Connection,
     /// Counts key presses, so a [`Wake`] asked for before the latest key is recognised as stale.
     generation: u64,
     /// Whether the which-key popup is showing.
@@ -86,6 +90,8 @@ pub enum Msg {
     FocusLost,
     /// The delay of an [`Effect::Wake`] has passed.
     Wake(Wake),
+    /// News about the connection.
+    Net(NetEvent),
     /// A file to run as ex commands, such as `init.vim` at startup or what `:source` asked for, or why it could not
     /// be read.
     Sourced {
@@ -112,6 +118,18 @@ pub enum Effect {
     Copy(String),
     /// Read this file (`~` is the home directory) and send its contents back as [`Msg::Sourced`].
     Source(String),
+    /// Connect with the device key, reporting back as [`Msg::Net`].
+    Connect,
+    /// Decrypt the device key with this passphrase, then connect.
+    Unlock(String),
+    /// Approve this device in the browser: use the device key, creating it if there is none.
+    Enroll,
+    /// Finish approval with the callback link the browser ended on.
+    EnrollPasted(String),
+    /// Accept the terms of this version.
+    AcceptTerms(String),
+    /// Open this link in the browser.
+    OpenUrl(String),
     /// Send [`Msg::Wake`] with `token` once `after` has passed.
     Wake {
         /// How long to wait.
@@ -170,10 +188,11 @@ impl Default for App {
 }
 
 impl App {
-    /// A fresh session on the following log; made up until M2 (see [`crate::fake`]).
+    /// A fresh session, connecting: [`App::start`] says how.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_buffer("log/following", crate::fake::following())
+        let doc = Connection::Checking.document().unwrap_or_default();
+        Self::with_buffer("connect", doc)
     }
 
     /// A fresh session showing `doc` as a buffer called `name`.
@@ -196,6 +215,7 @@ impl App {
             ex_history: Vec::new(),
             search_history: Vec::new(),
             last_search: None,
+            connection: Connection::Checking,
             generation: 0,
             which_key: false,
         }
@@ -242,6 +262,7 @@ impl App {
                 Vec::new()
             }
             Msg::Sourced { path, contents } => self.source(&path, contents),
+            Msg::Net(event) => self.net(event),
             Msg::FocusGained => {
                 self.focused = true;
                 Vec::new()
@@ -279,9 +300,10 @@ impl App {
                 }
             }
             AppMode::Cmdline(cmdline) => {
-                let history = match cmdline.kind {
-                    CmdlineKind::Ex => &self.ex_history,
-                    CmdlineKind::Search(_) => &self.search_history,
+                let history: &[String] = match cmdline.purpose {
+                    Purpose::Ex => &self.ex_history,
+                    Purpose::Search(_) => &self.search_history,
+                    Purpose::Passphrase => &[],
                 };
                 match cmdline.key(key, history) {
                     Edit::Editing => Vec::new(),
@@ -295,16 +317,17 @@ impl App {
                         else {
                             unreachable!("the mode was just matched as the command line");
                         };
-                        match cmdline.kind {
-                            CmdlineKind::Ex => {
+                        match cmdline.purpose {
+                            Purpose::Ex => {
                                 remember(&mut self.ex_history, &text);
                                 self.ex(&text)
                             }
-                            CmdlineKind::Search(direction) => {
+                            Purpose::Search(direction) => {
                                 remember(&mut self.search_history, &text);
                                 self.search(&text, direction, cmdline.count.unwrap_or(1));
                                 Vec::new()
                             }
+                            Purpose::Passphrase => vec![Effect::Unlock(text)],
                         }
                     }
                 }
@@ -487,7 +510,7 @@ impl App {
                 None => self.error("E35: No previous regular expression"),
             },
             Action::Cmdline(kind) => {
-                self.mode = AppMode::Cmdline(Cmdline::new(kind, invocation.count))
+                self.mode = AppMode::Cmdline(Cmdline::new(kind.into(), invocation.count))
             }
             Action::Keys { keys, remap } => {
                 return keys
@@ -584,6 +607,15 @@ impl App {
             Command::Colorscheme(None) => self.info(self.theme.name().to_owned()),
             Command::Colorscheme(Some(name)) => self.theme = Theme::named(&name)?,
             Command::Source(path) => return Ok(vec![Effect::Source(path)]),
+            Command::Connect(link) => return self.connect(link),
+            Command::Agree => match &self.connection {
+                Connection::Terms(me) => {
+                    return Ok(vec![Effect::AcceptTerms(
+                        me.terms_version.clone().unwrap_or_default(),
+                    )]);
+                }
+                _ => return Err("No terms to agree to".to_owned()),
+            },
         }
         Ok(Vec::new())
     }
@@ -722,6 +754,81 @@ impl App {
             height: usize::from(self.window_area().height),
             scrolloff: self.options.scrolloff,
         }
+    }
+
+    /// The effects to start with, once the runtime is ready: connecting.
+    pub fn start(&mut self) -> Vec<Effect> {
+        vec![Effect::Connect]
+    }
+
+    fn net(&mut self, event: NetEvent) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        self.connection = match event {
+            NetEvent::Error(text) => {
+                self.error(text);
+                return effects;
+            }
+            NetEvent::Connected(me) if !me.terms_accepted => Connection::Terms(me),
+            NetEvent::Connected(me) => Connection::Connected(me),
+            NetEvent::NoKey => Connection::NoKey,
+            NetEvent::NotApproved => Connection::NotApproved,
+            NetEvent::Failed(reason) => Connection::Failed(reason),
+            NetEvent::NeedsPassphrase { wrong } => {
+                self.mode = AppMode::Cmdline(Cmdline::new(Purpose::Passphrase, None));
+                Connection::NeedsPassphrase { wrong }
+            }
+            NetEvent::Enrolling { url, fingerprint } => {
+                effects.push(Effect::OpenUrl(url.clone()));
+                Connection::Enrolling { url, fingerprint }
+            }
+        };
+        self.show_connection();
+        effects
+    }
+
+    /// Shows the `connect` buffer while not connected, and the log once connected.
+    fn show_connection(&mut self) {
+        let (name, doc) = match self.connection.document() {
+            Some(doc) => ("connect", Some(doc)),
+            None => ("log/following", None),
+        };
+        let index = match self.buffers.iter().position(|buffer| buffer.name == name) {
+            Some(index) => index,
+            None => {
+                self.buffers.push(Buffer {
+                    name: name.to_owned(),
+                    doc: Document::new(),
+                });
+                self.buffers.len() - 1
+            }
+        };
+        match doc {
+            Some(doc) => self.buffers[index].doc = doc,
+            // Made up until the real log arrives in M2.5.
+            None if self.buffers[index].doc.is_empty() => {
+                self.buffers[index].doc = crate::fake::following()
+            }
+            None => {}
+        }
+        if self.windows.current().buffer != index {
+            *self.windows.current_mut() = Window::new(index);
+        }
+    }
+
+    /// `:connect`, whose meaning depends on where connecting stands.
+    fn connect(&mut self, link: Option<String>) -> Result<Vec<Effect>, String> {
+        Ok(match (&self.connection, link) {
+            (Connection::Enrolling { .. }, Some(link)) => vec![Effect::EnrollPasted(link)],
+            (_, Some(_)) => return Err("No approval in progress: :connect first".to_owned()),
+            (Connection::NoKey | Connection::NotApproved | Connection::Enrolling { .. }, None) => {
+                vec![Effect::Enroll]
+            }
+            (Connection::Connected(me), None) => {
+                self.info(format!("Connected as @{}", me.handle));
+                Vec::new()
+            }
+            (_, None) => vec![Effect::Connect],
+        })
     }
 
     /// How `group` is drawn now.

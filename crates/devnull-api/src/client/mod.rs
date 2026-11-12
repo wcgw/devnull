@@ -221,6 +221,33 @@ impl Client {
         Ok(envelope.data)
     }
 
+    /// `PUT /api/v1/me/terms`: accepts the terms of `version`, as shown to the user.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::Invalid`] when the server does not confirm that version as accepted.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Not cancel safe: the server may record the acceptance even when the response is lost.
+    pub async fn accept_terms(&self, version: &str) -> Result<Me, ApiError> {
+        let url = self
+            .origin
+            .join("/api/v1/me/terms")
+            .map_err(|error| ApiError::Invalid(error.to_string()))?;
+        let body = serde_json::json!({ "version": version }).to_string();
+        let bytes = self.send(Method::PUT, url, body.into_bytes()).await?;
+        let envelope: Envelope<Me> =
+            serde_json::from_slice(&bytes).map_err(|error| ApiError::Invalid(error.to_string()))?;
+        if !envelope.data.terms_accepted || envelope.data.terms_version.as_deref() != Some(version)
+        {
+            return Err(ApiError::Invalid(
+                "the server did not confirm the terms as accepted".to_owned(),
+            ));
+        }
+        Ok(envelope.data)
+    }
+
     async fn get<T: DeserializeOwned>(
         &self,
         path: &str,

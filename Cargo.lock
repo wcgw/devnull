@@ -620,10 +620,12 @@ name = "devnull"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "devnull-api",
  "futures-util",
  "insta",
  "ratatui",
  "regex",
+ "serde_json",
  "tokio",
  "unicode-segmentation",
  "unicode-width",

@@ -55,9 +55,9 @@ impl App {
         let cmdline_area = Rect::new(0, last, width, 1);
         match &self.mode {
             AppMode::Cmdline(cmdline) => {
-                let text = format!("{}{}", cmdline.prompt(), cmdline.text());
+                let text = format!("{}{}", cmdline.prompt(), cmdline.shown());
                 frame.render_widget(Paragraph::new(text), cmdline_area);
-                let x = 1 + cmdline.cursor_cells();
+                let x = cmdline.prompt().width() + cmdline.cursor_cells();
                 frame.set_cursor_position(Position::new(
                     to_u16(x).min(width.saturating_sub(1)),
                     last,
@@ -143,6 +143,7 @@ impl App {
         let status = statusline(
             is_current.then_some(mode),
             &buffer.name,
+            self.connection.handle(),
             &format!("{},{}", cursor.row + 1, cursor.col + 1),
             &position(top, viewport.height, layout.row_count()),
             rect.width,
@@ -327,6 +328,7 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
 fn statusline(
     mode: Option<&str>,
     name: &str,
+    handle: Option<&str>,
     ruler: &str,
     position: &str,
     width: u16,
@@ -335,7 +337,10 @@ fn statusline(
         Some(mode) => format!(" {mode}  {name}"),
         None => format!(" {name}"),
     };
-    let right = format!("{ruler}  {position} ");
+    let account = handle
+        .map(|handle| format!("@{handle}  "))
+        .unwrap_or_default();
+    let right = format!("{account}{ruler}  {position} ");
     let gap = usize::from(width)
         .saturating_sub(left.width() + right.width())
         .max(1);

@@ -1,6 +1,6 @@
 ---
 source: crates/devnull/src/app/tests.rs
-assertion_line: 903
+assertion_line: 902
 expression: "screen(&app).rows.join(\"\\n\")"
 ---
  log/following
@@ -25,4 +25,4 @@ Does anyone else use jj for everything now? Asking for @adaq.
 Lin Hara @lhara · 2h · a8c40b9
 Released v0.4 of my little TUI toolkit 🦀  https://example.org/tui-kit
 ★ 18  ↩ 2
- NORMAL  log/following                                                 1,1  Top
+ NORMAL  log/following                                           @ada  1,1  Top

@@ -64,6 +64,11 @@ pub enum Command {
     Only,
     /// `:wincmd {char}`: what `<C-w>{char}` does.
     Wincmd(char),
+    /// `:connect`: connect this device, or with a link, finish connecting with the callback link the browser ended
+    /// on.
+    Connect(Option<String>),
+    /// `:agree`: accept dev-null.sh's current terms.
+    Agree,
 }
 
 /// One `:set` argument.
@@ -131,6 +136,8 @@ enum Name {
     Close,
     Only,
     Wincmd,
+    Connect,
+    Agree,
 }
 
 const NORMAL: &[Mode] = &[Mode::Normal];
@@ -164,6 +171,8 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("close", 3, Name::Close),
     ("only", 2, Name::Only),
     ("wincmd", 4, Name::Wincmd),
+    ("connect", 4, Name::Connect),
+    ("agree", 5, Name::Agree),
 ];
 
 /// Parses one command line, as typed after `:` or written in `init.vim`. Blank lines and `"` comments are
@@ -220,6 +229,8 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Split(vertical) => Command::Split { vertical },
         Name::Close => Command::Close,
         Name::Only => Command::Only,
+        Name::Connect => Command::Connect((!args.is_empty()).then(|| args.to_owned())),
+        Name::Agree => Command::Agree,
         Name::Wincmd => {
             let mut chars = required(args)?.chars();
             match (chars.next(), chars.next()) {

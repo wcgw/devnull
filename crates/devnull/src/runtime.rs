@@ -19,8 +19,9 @@ use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
-use crate::app::{App, Effect, Msg};
+use crate::app::{App, Effect, Msg, NetEvent};
 use crate::key::Key;
+use crate::net::{Net, open_url};
 
 /// Runs `dn` until it quits, restoring the terminal however it ends.
 ///
@@ -39,7 +40,13 @@ pub async fn run() -> io::Result<()> {
     // Messages that effects send back later, such as wake-ups and files read.
     let (later, mut arrived) = mpsc::unbounded_channel();
     let env = |name| std::env::var_os(name).map(PathBuf::from);
-    if let Some(init) = init_file(env("XDG_CONFIG_HOME"), env("HOME")) {
+    let config = config_dir(env("XDG_CONFIG_HOME"), env("HOME"));
+    let mut net = Net::new(
+        config.as_ref().map(|dir| dir.join("device_ed25519")),
+        env("SSH_AUTH_SOCK"),
+        later.clone(),
+    );
+    if let Some(init) = config.map(|dir| dir.join("init.vim")) {
         match tokio::fs::read_to_string(&init).await {
             Ok(contents) => {
                 let path = shown_path(&init, env("HOME"));
@@ -59,6 +66,11 @@ pub async fn run() -> io::Result<()> {
             }
         }
     }
+    for effect in app.start() {
+        if perform(effect, &later, &mut net)?.is_break() {
+            return Ok(());
+        }
+    }
     loop {
         terminal.draw(|frame| app.render(frame))?;
         // Both branches are cancel-safe: an event or message not taken now stays queued.
@@ -75,7 +87,7 @@ pub async fn run() -> io::Result<()> {
             Some(msg) = arrived.recv() => msg,
         };
         for effect in app.update(msg) {
-            if perform(effect, &later)?.is_break() {
+            if perform(effect, &later, &mut net)?.is_break() {
                 return Ok(());
             }
         }
@@ -83,7 +95,11 @@ pub async fn run() -> io::Result<()> {
 }
 
 /// Carries out one effect; `Break` means quit. Effects that finish later send their result through `later`.
-fn perform(effect: Effect, later: &mpsc::UnboundedSender<Msg>) -> io::Result<ControlFlow<()>> {
+fn perform(
+    effect: Effect,
+    later: &mpsc::UnboundedSender<Msg>,
+    net: &mut Net,
+) -> io::Result<ControlFlow<()>> {
     match effect {
         Effect::Quit => return Ok(ControlFlow::Break(())),
         Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
@@ -94,6 +110,18 @@ fn perform(effect: Effect, later: &mpsc::UnboundedSender<Msg>) -> io::Result<Con
                 tokio::time::sleep(after).await;
                 let _ = later.send(Msg::Wake(token));
             });
+        }
+        Effect::Connect => net.connect(),
+        Effect::Unlock(passphrase) => net.unlock(passphrase),
+        Effect::Enroll => net.enroll(),
+        Effect::EnrollPasted(link) => net.paste(link),
+        Effect::AcceptTerms(version) => net.accept_terms(version),
+        Effect::OpenUrl(url) => {
+            if let Err(error) = open_url(&url) {
+                let _ = later.send(Msg::Net(NetEvent::Error(format!(
+                    "Cannot open the browser: {error}"
+                ))));
+            }
         }
         Effect::Source(path) => {
             let later = later.clone();
@@ -127,12 +155,13 @@ fn shown_path(path: &Path, home: Option<PathBuf>) -> String {
     }
 }
 
-/// Where `init.vim` lives (D6): under `$XDG_CONFIG_HOME`, else `~/.config`.
-fn init_file(config_home: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+/// `dn`'s configuration directory (D6), holding `init.vim` and the device key: `devnull` under
+/// `$XDG_CONFIG_HOME`, else under `~/.config`.
+fn config_dir(config_home: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
     let config = config_home
         .filter(|dir| dir.is_absolute())
         .or_else(|| home.map(|home| home.join(".config")))?;
-    Some(config.join("devnull").join("init.vim"))
+    Some(config.join("devnull"))
 }
 
 /// The message for a terminal event, if `App` cares.
@@ -261,22 +290,22 @@ mod tests {
     }
 
     #[test]
-    fn init_vim_lives_under_the_xdg_config_home_or_dot_config() {
+    fn the_config_dir_is_under_the_xdg_config_home_or_dot_config() {
         let home = Some(PathBuf::from("/home/u"));
 
         assert_eq!(
-            init_file(Some("/xdg".into()), home.clone()),
-            Some(PathBuf::from("/xdg/devnull/init.vim"))
+            config_dir(Some("/xdg".into()), home.clone()),
+            Some(PathBuf::from("/xdg/devnull"))
         );
         assert_eq!(
-            init_file(None, home.clone()),
-            Some(PathBuf::from("/home/u/.config/devnull/init.vim"))
+            config_dir(None, home.clone()),
+            Some(PathBuf::from("/home/u/.config/devnull"))
         );
         assert_eq!(
-            init_file(Some("relative".into()), home),
-            Some(PathBuf::from("/home/u/.config/devnull/init.vim"))
+            config_dir(Some("relative".into()), home),
+            Some(PathBuf::from("/home/u/.config/devnull"))
         );
-        assert_eq!(init_file(None, None), None);
+        assert_eq!(config_dir(None, None), None);
     }
 
     #[test]

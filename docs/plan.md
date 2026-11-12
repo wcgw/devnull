@@ -369,7 +369,11 @@ from M1 even though graphics land in M6.
   page) and against all 89 commits captured in M0.4.
 - [x] **M2.3** `devnull-api` enrollment: the M0.3 loopback flow as a library (`start`, `wait`, `code_from_url` for
   SSH, `redeem` with the identity check), tested with a mock server and the browser played by plain requests.
-- [ ] **M2.4** `dn` connection: load the key, verify with `/me`, a `connect` buffer when there is none, terms consent.
+- [x] **M2.4** `dn` connection: the key from `~/.config/devnull/device_ed25519` (ssh-agent first), verified with
+  `/me`; a `connect` buffer per state; `:connect` (retry, approve, or a pasted callback link), a masked
+  `Passphrase:` prompt, terms with `:agree`; `@handle` in the statusline. Runtime `net` module holds the client.
+  Verified in a pty: the stored key connects; without a key the `connect` buffer shows. Not verified end to end
+  through `dn`: approving a new device (needs a browser; the library flow is mock-tested, and M0.3 did it live).
 - [ ] **M2.5** `dn` log buffers rendered from real commits (segments, mentions, quotes, link cards, counts), through
   request/response messages. ⏸ try against dev-null.sh.
 - [ ] **M2.6** Paging near the end, `:e!`, polling with new commits arriving above.

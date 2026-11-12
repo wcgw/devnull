@@ -2,13 +2,34 @@
 
 use unicode_width::UnicodeWidthStr;
 
+use crate::doc::Direction;
 use crate::key::{Code, Key, Mods};
 use crate::keymap::CmdlineKind;
+
+/// What a command line is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Purpose {
+    /// `:`.
+    Ex,
+    /// `/` and `?`.
+    Search(Direction),
+    /// The device key's passphrase: shown masked, never remembered.
+    Passphrase,
+}
+
+impl From<CmdlineKind> for Purpose {
+    fn from(kind: CmdlineKind) -> Self {
+        match kind {
+            CmdlineKind::Ex => Self::Ex,
+            CmdlineKind::Search(direction) => Self::Search(direction),
+        }
+    }
+}
 
 /// A command line being edited.
 #[derive(Debug)]
 pub(super) struct Cmdline {
-    pub(super) kind: CmdlineKind,
+    pub(super) purpose: Purpose,
     /// The count typed before `/` or `?`, for the search.
     pub(super) count: Option<usize>,
     text: Vec<char>,
@@ -31,9 +52,9 @@ pub(super) enum Edit {
 }
 
 impl Cmdline {
-    pub(super) fn new(kind: CmdlineKind, count: Option<usize>) -> Self {
+    pub(super) fn new(purpose: Purpose, count: Option<usize>) -> Self {
         Self {
-            kind,
+            purpose,
             count,
             text: Vec::new(),
             cursor: 0,
@@ -41,12 +62,21 @@ impl Cmdline {
         }
     }
 
-    /// The prompt character: `:`, `/` or `?`.
-    pub(super) fn prompt(&self) -> char {
-        match self.kind {
-            CmdlineKind::Ex => ':',
-            CmdlineKind::Search(crate::doc::Direction::Forward) => '/',
-            CmdlineKind::Search(crate::doc::Direction::Backward) => '?',
+    /// The prompt: `:`, `/`, `?` or `Passphrase: `.
+    pub(super) fn prompt(&self) -> &'static str {
+        match self.purpose {
+            Purpose::Ex => ":",
+            Purpose::Search(Direction::Forward) => "/",
+            Purpose::Search(Direction::Backward) => "?",
+            Purpose::Passphrase => "Passphrase: ",
+        }
+    }
+
+    /// The text as shown: masked for a passphrase.
+    pub(super) fn shown(&self) -> String {
+        match self.purpose {
+            Purpose::Passphrase => "*".repeat(self.text.len()),
+            _ => self.text(),
         }
     }
 
@@ -56,6 +86,9 @@ impl Cmdline {
 
     /// Where the cursor is drawn, in cells after the prompt.
     pub(super) fn cursor_cells(&self) -> usize {
+        if self.purpose == Purpose::Passphrase {
+            return self.cursor;
+        }
         self.text[..self.cursor].iter().collect::<String>().width()
     }
 

@@ -248,3 +248,38 @@ fn only_https_origins_are_accepted_except_on_loopback() {
     assert!(Client::new("http://dev-null.sh", signer()).is_err());
     assert!(Client::new("https://dev-null.sh/some/path", signer()).is_err());
 }
+
+#[tokio::test]
+async fn accepting_terms_is_a_signed_put_that_must_be_confirmed() {
+    let (server, client, signed) = server_and_client().await;
+    let accepted =
+        r#"{"data":{"id":"u1","handle":"ada","terms_accepted":true,"terms_version":"v2"}}"#;
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/me/terms"))
+        .and(wiremock::matchers::body_json(
+            serde_json::json!({ "version": "v2" }),
+        ))
+        .and(signed)
+        .respond_with(json(accepted))
+        .expect(1)
+        .mount(&server)
+        .await;
+    // Any other acceptance gets the same answer, confirming v2 rather than what was asked.
+    Mock::given(method("PUT"))
+        .and(path("/api/v1/me/terms"))
+        .respond_with(json(accepted))
+        .mount(&server)
+        .await;
+
+    assert!(
+        client
+            .accept_terms("v2")
+            .await
+            .expect("accepted")
+            .terms_accepted
+    );
+    assert!(matches!(
+        client.accept_terms("v3").await,
+        Err(ApiError::Invalid(_))
+    ));
+}
