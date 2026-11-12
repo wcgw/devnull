@@ -2,6 +2,7 @@
 
 use unicode_width::UnicodeWidthStr;
 
+use super::complete::Completions;
 use crate::doc::Direction;
 use crate::key::{Code, Key, Mods};
 use crate::keymap::CmdlineKind;
@@ -38,6 +39,31 @@ pub(super) struct Cmdline {
     /// While browsing history: the entry shown, counted back from the newest (0 is the newest), and what was typed
     /// before browsing started.
     browsing: Option<(usize, Vec<char>)>,
+    /// While `<Tab>` cycles through completions.
+    completing: Option<Completing>,
+}
+
+/// Completions `<Tab>` and `<S-Tab>` cycle through, as Vim's 'wildmenu' does.
+#[derive(Debug)]
+struct Completing {
+    /// Where the completed word starts, in chars.
+    start: usize,
+    /// The word as typed, which cycling comes back to.
+    typed: Vec<char>,
+    /// More than one.
+    candidates: Vec<String>,
+    /// The one in place, if any; else what was typed is.
+    chosen: Option<usize>,
+}
+
+/// The completions shown while `<Tab>` cycles through them.
+#[derive(Debug)]
+pub(super) struct Shown<'c> {
+    /// Where the completed word starts, in cells after the prompt.
+    pub(super) cells: usize,
+    pub(super) candidates: &'c [String],
+    /// The one in place, if any.
+    pub(super) chosen: Option<usize>,
 }
 
 /// What a key did to the command line.
@@ -59,6 +85,7 @@ impl Cmdline {
             text: Vec::new(),
             cursor: 0,
             browsing: None,
+            completing: None,
         }
     }
 
@@ -92,8 +119,72 @@ impl Cmdline {
         self.text[..self.cursor].iter().collect::<String>().width()
     }
 
-    /// Applies one key, with `history` (oldest first) for `<Up>` and `<Down>`.
+    /// `<Tab>` (`forward`) and `<S-Tab>`: puts the next or previous of the completions `complete` gives for the text
+    /// before the cursor in place of the word they complete; past either end, the word as typed. A lone completion
+    /// is put in place at once, with nothing to cycle through.
+    pub(super) fn complete(&mut self, forward: bool, complete: impl FnOnce(&str) -> Completions) {
+        if self.completing.is_none() {
+            let before: String = self.text[..self.cursor].iter().collect();
+            let Completions { start, candidates } = complete(&before);
+            let start = start.min(self.cursor);
+            match &candidates[..] {
+                [] => return,
+                [lone] => {
+                    let lone: Vec<char> = lone.chars().collect();
+                    self.replace(start, &lone);
+                    return;
+                }
+                _ => {}
+            }
+            self.completing = Some(Completing {
+                start,
+                typed: self.text[start..self.cursor].to_vec(),
+                candidates,
+                chosen: None,
+            });
+        }
+        let Some(completing) = &mut self.completing else {
+            return;
+        };
+        let last = completing.candidates.len() - 1;
+        completing.chosen = match (completing.chosen, forward) {
+            (None, true) => Some(0),
+            (None, false) => Some(last),
+            (Some(at), true) if at < last => Some(at + 1),
+            (Some(at), false) if at > 0 => Some(at - 1),
+            _ => None,
+        };
+        let replacement: Vec<char> = match completing.chosen {
+            Some(at) => completing.candidates[at].chars().collect(),
+            None => completing.typed.clone(),
+        };
+        let start = completing.start;
+        self.replace(start, &replacement);
+    }
+
+    /// The completions `<Tab>` cycles through, while it does.
+    pub(super) fn completions(&self) -> Option<Shown<'_>> {
+        let completing = self.completing.as_ref()?;
+        Some(Shown {
+            cells: self.text[..completing.start]
+                .iter()
+                .collect::<String>()
+                .width(),
+            candidates: &completing.candidates,
+            chosen: completing.chosen,
+        })
+    }
+
+    /// Puts `chars` in place of the text from `start` to the cursor, the cursor after them.
+    fn replace(&mut self, start: usize, chars: &[char]) {
+        self.text.splice(start..self.cursor, chars.iter().copied());
+        self.cursor = start + chars.len();
+    }
+
+    /// Applies one key, with `history` (oldest first) for `<Up>` and `<Down>`. Any key keeps the completion in
+    /// place.
     pub(super) fn key(&mut self, key: Key, history: &[String]) -> Edit {
+        self.completing = None;
         let ctrl = |ch| Key {
             code: Code::Char(ch),
             mods: Mods::CTRL,
@@ -177,6 +268,7 @@ impl Cmdline {
 
     /// Inserts pasted text at the cursor, up to its first line break: a command line is one line.
     pub(super) fn paste(&mut self, text: &str) {
+        self.completing = None;
         let line: Vec<char> = text
             .chars()
             .take_while(|&c| c != '\n' && c != '\r')

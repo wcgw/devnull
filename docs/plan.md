@@ -355,6 +355,10 @@ from M1 even though graphics land in M6.
     editing keys, history, paste), and the `:messages` "Press ENTER" prompt.
   - Ex: `:q :qa :set :map … :unmap :messages :split :vsplit :close :only :wincmd`; options `ignorecase`,
     `smartcase`, `scrolloff`, `timeoutlen`, `leader`. `:hi :colorscheme :source` answer E319 until M1.7.
+  - Since: `<Tab>` and `<S-Tab>` on the `:` line complete as Neovim's `wildmenu` with its popup menu (`Pmenu`,
+    `PmenuSel`): command names, then what each command takes (`:set` options, `no` flags and `graphics=` values,
+    colorschemes, buffer and feed names for `:e` and `:b`, `:hi` groups, `:help` keys, `:pick` lists, `:browse link`),
+    sorted; past either end, back to what was typed; any other key keeps the match.
   - Search: `/ ? n N * #` with Vim's wrap and not-found messages; a match in a closed fold opens it.
   - Yank: `y`, `yy` to the system clipboard over OSC 52; "N lines yanked" above `'report'`.
   - Windows: split tree, `<C-w>hjklwsvco`, `q` closes a window and quits with the last; a statusline per window

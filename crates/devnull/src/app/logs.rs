@@ -15,11 +15,17 @@ pub(super) fn buffer_name(log: Log) -> String {
     format!("log/{}", log.name())
 }
 
+/// The logs there are.
+const LOGS: [Log; 3] = [Log::Following, Log::Latest, Log::Trending];
+
 /// The log a buffer name names.
 pub(super) fn named(name: &str) -> Option<Log> {
-    [Log::Following, Log::Latest, Log::Trending]
-        .into_iter()
-        .find(|log| buffer_name(*log) == name)
+    LOGS.into_iter().find(|log| buffer_name(*log) == name)
+}
+
+/// The buffer names of the logs.
+pub(super) fn names() -> impl Iterator<Item = String> {
+    LOGS.into_iter().map(buffer_name)
 }
 
 impl App {

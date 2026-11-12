@@ -968,6 +968,139 @@ fn the_background_is_the_terminal_s_until_hi_normal_gives_one() {
     assert_eq!(style_at(&app, 20, 3).bg, Some(Color::Rgb(0x1a, 0x1b, 0x26)));
 }
 
+/// What `<Tab>` may complete the ex command line `line` to, the cursor at its end.
+fn completed(app: &App, line: &str) -> Vec<String> {
+    app.ex_completions(line).candidates
+}
+
+#[test]
+fn tab_completes_command_names() {
+    let app = app_with(&["one"], 40, 6);
+
+    assert_eq!(completed(&app, "col"), ["colorscheme"]);
+    assert!(completed(&app, "se").contains(&"set".to_owned()));
+    assert!(completed(&app, "").len() > 30, "every command");
+    assert_eq!(completed(&app, "q!"), Vec::<String>::new());
+}
+
+#[test]
+fn tab_completes_the_arguments_each_command_takes() {
+    let app = app_with(&["one"], 40, 6);
+
+    assert_eq!(completed(&app, "set gr"), ["graphics"]);
+    assert_eq!(
+        completed(&app, "set no"),
+        ["nohlsearch", "noignorecase", "noincsearch", "nosmartcase"],
+        "the flags that turn off"
+    );
+    assert_eq!(completed(&app, "se hls graphics="), ["halfblocks", "kitty"]);
+    assert_eq!(app.ex_completions("set graphics=k").start, 13);
+    assert_eq!(
+        completed(&app, "colo tokyonight-"),
+        [
+            "tokyonight-day",
+            "tokyonight-moon",
+            "tokyonight-night",
+            "tokyonight-storm"
+        ]
+    );
+    assert_eq!(
+        completed(&app, "e log/"),
+        ["log/following", "log/latest", "log/trending"]
+    );
+    assert_eq!(
+        completed(&app, "e! log/l"),
+        ["log/latest"],
+        "after a bang too"
+    );
+    assert!(completed(&app, "e notifications/").contains(&"notifications/mentions".to_owned()));
+    assert_eq!(completed(&app, "b "), ["test"], "the listed buffers");
+    assert_eq!(completed(&app, "hi Norm"), ["Normal", "NormalFloat"]);
+    assert!(completed(&app, "hi ").contains(&"link".to_owned()));
+    assert_eq!(
+        completed(&app, "hi link DevnullHandle ErrorM"),
+        ["ErrorMsg"]
+    );
+    assert!(completed(&app, "help z").contains(&"zO".to_owned()));
+    assert_eq!(completed(&app, "pick u"), ["users"]);
+    assert_eq!(
+        completed(&app, "star "),
+        Vec::<String>::new(),
+        "it takes nothing"
+    );
+}
+
+#[test]
+fn tab_and_shift_tab_cycle_through_the_matches_and_back_to_what_was_typed() {
+    let mut app = app_with(&["one"], 60, 12);
+
+    let _ = press(&mut app, ":colo tokyonight-<Tab>");
+    assert_eq!(cmdline(&app), ":colo tokyonight-day");
+    let _ = press(&mut app, "<Tab>");
+    assert_eq!(cmdline(&app), ":colo tokyonight-moon");
+    let _ = press(&mut app, "<S-Tab><S-Tab>");
+    assert_eq!(cmdline(&app), ":colo tokyonight-", "what was typed");
+    let _ = press(&mut app, "<S-Tab>");
+    assert_eq!(cmdline(&app), ":colo tokyonight-storm", "round to the last");
+    let _ = press(&mut app, "<CR>");
+    let _ = press(&mut app, ":colorscheme<CR>");
+    assert_eq!(cmdline(&app), "tokyonight-storm");
+}
+
+#[test]
+fn a_key_other_than_tab_keeps_the_match_and_a_lone_match_stays() {
+    let mut app = app_with(&["one"], 60, 12);
+
+    let _ = press(&mut app, ":col<Tab><Tab>");
+    assert_eq!(cmdline(&app), ":colorscheme", "the only match");
+    let _ = press(&mut app, " tokyonight-d<Tab><CR>:colo<CR>");
+    assert_eq!(cmdline(&app), "tokyonight-day");
+    let _ = press(&mut app, ":zzz<Tab>");
+    assert_eq!(cmdline(&app), ":zzz", "nothing to complete");
+}
+
+#[test]
+fn the_matches_show_in_a_menu_above_the_command_line_the_chosen_one_marked() {
+    use crate::hl::Group;
+    let mut app = app_with(&["one"], 60, 12);
+
+    let _ = press(&mut app, ":colo tokyonight-<Tab><Tab>");
+
+    let rows = screen(&app).rows;
+    let at = |text: &str| {
+        rows.iter()
+            .position(|row| row.contains(text))
+            .unwrap_or_else(|| panic!("{text}: {rows:#?}"))
+    };
+    let (day, moon, night, storm) = (
+        at(" tokyonight-day"),
+        at(" tokyonight-moon"),
+        at(" tokyonight-night"),
+        at(" tokyonight-storm"),
+    );
+    assert!(day < moon && moon < night && night < storm && storm == rows.len() - 2);
+    let column = rows[moon].find("tokyonight-moon").expect("moon") - 1;
+    assert_eq!(column, ":colo ".len() - 1, "under the word it completes");
+    let cell = |row: usize| {
+        style_at(
+            &app,
+            u16::try_from(column).unwrap_or(0) + 1,
+            u16::try_from(row).unwrap_or(0),
+        )
+        .bg
+    };
+    assert_eq!(cell(moon), app.style(Group::PmenuSel).bg);
+    assert_eq!(cell(day), app.style(Group::Pmenu).bg);
+    let _ = press(&mut app, "x");
+    assert!(
+        !screen(&app)
+            .rows
+            .iter()
+            .any(|row| row.contains(" tokyonight-day")),
+        "gone"
+    );
+}
+
 #[test]
 fn colorscheme_shows_and_switches_the_colorscheme() {
     let mut app = app_with(&["one"], 40, 6);

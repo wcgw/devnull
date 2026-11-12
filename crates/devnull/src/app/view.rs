@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use super::cmdline::Shown;
 use super::window::{Viewport, Window};
 use super::windows::Separator;
 use super::{App, AppMode, Kind, Message, MessageKind, text_area};
@@ -88,6 +89,10 @@ impl App {
             AppMode::Cmdline(cmdline) => {
                 let text = format!("{}{}", cmdline.prompt(), cmdline.shown());
                 frame.render_widget(Paragraph::new(text), cmdline_area);
+                if let Some(shown) = cmdline.completions() {
+                    let column = cmdline.prompt().width() + shown.cells;
+                    self.render_completions(frame, &shown, column, last);
+                }
                 let x = cmdline.prompt().width() + cmdline.cursor_cells();
                 frame.set_cursor_position(Position::new(
                     to_u16(x).min(width.saturating_sub(1)),
@@ -439,6 +444,59 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
         used += cells;
     }
     rows
+}
+
+/// The most completions the menu shows at once; it scrolls to the chosen one.
+const MENU_ROWS: usize = 10;
+
+impl App {
+    /// The completions `<Tab>` cycles through, in a menu just above the command line (row `cmdline`), each lined up
+    /// with the word it completes at `column`, as Neovim's popup menu: the chosen one in `PmenuSel`.
+    fn render_completions(
+        &self,
+        frame: &mut Frame<'_>,
+        shown: &Shown<'_>,
+        column: usize,
+        cmdline: u16,
+    ) {
+        let (width, _) = self.size;
+        let rows = shown
+            .candidates
+            .len()
+            .min(MENU_ROWS)
+            .min(usize::from(cmdline.saturating_sub(1)));
+        if rows == 0 {
+            return;
+        }
+        let first = shown
+            .chosen
+            .map_or(0, |chosen| chosen.saturating_sub(rows - 1));
+        let inner = shown
+            .candidates
+            .iter()
+            .map(|candidate| candidate.width())
+            .max()
+            .unwrap_or(0);
+        // A cell of room on either side, the left one before the word's column.
+        let menu_width = to_u16(inner + 2).min(width);
+        let x = to_u16(column.saturating_sub(1)).min(width.saturating_sub(menu_width));
+        let top = cmdline - to_u16(rows);
+        for (row, at) in (first..first + rows).enumerate() {
+            let group = if shown.chosen == Some(at) {
+                Group::PmenuSel
+            } else {
+                Group::Pmenu
+            };
+            let style = self
+                .theme
+                .style(Group::Pmenu)
+                .patch(self.theme.style(group));
+            let text = format!(" {:<inner$} ", shown.candidates[at]);
+            let area = Rect::new(x, top + to_u16(row), menu_width, 1);
+            frame.render_widget(Clear, area);
+            frame.render_widget(Paragraph::new(text).style(style), area);
+        }
+    }
 }
 
 /// How a window's statusline looks: whether it is the current window's.

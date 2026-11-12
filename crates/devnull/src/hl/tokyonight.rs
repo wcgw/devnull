@@ -217,6 +217,24 @@ pub(super) const NIGHT: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::Pmenu,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: Some(Color::Rgb(0x16, 0x16, 0x1e)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuSel,
+        Spec {
+            fg: None,
+            bg: Some(Color::Rgb(0x34, 0x3a, 0x55)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::PmenuMatch,
         Spec {
             fg: Some(Color::Rgb(0x2a, 0xc3, 0xde)),
@@ -522,6 +540,24 @@ pub(super) const STORM: &[(Group, Spec)] = &[
         Spec {
             fg: Some(Color::Rgb(0x1d, 0x20, 0x2f)),
             bg: Some(Color::Rgb(0xff, 0x9e, 0x64)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Pmenu,
+        Spec {
+            fg: Some(Color::Rgb(0xc0, 0xca, 0xf5)),
+            bg: Some(Color::Rgb(0x1f, 0x23, 0x35)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuSel,
+        Spec {
+            fg: None,
+            bg: Some(Color::Rgb(0x36, 0x3d, 0x59)),
             sp: None,
             attrs: Attrs::NONE,
         },
@@ -837,6 +873,24 @@ pub(super) const MOON: &[(Group, Spec)] = &[
         },
     ),
     (
+        Group::Pmenu,
+        Spec {
+            fg: Some(Color::Rgb(0xc8, 0xd3, 0xf5)),
+            bg: Some(Color::Rgb(0x1e, 0x20, 0x30)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuSel,
+        Spec {
+            fg: None,
+            bg: Some(Color::Rgb(0x36, 0x3c, 0x58)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
         Group::PmenuMatch,
         Spec {
             fg: Some(Color::Rgb(0x65, 0xbc, 0xff)),
@@ -1142,6 +1196,24 @@ pub(super) const DAY: &[(Group, Spec)] = &[
         Spec {
             fg: Some(Color::Rgb(0xb4, 0xb5, 0xb9)),
             bg: Some(Color::Rgb(0xb1, 0x5c, 0x00)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::Pmenu,
+        Spec {
+            fg: Some(Color::Rgb(0x37, 0x60, 0xbf)),
+            bg: Some(Color::Rgb(0xd0, 0xd5, 0xe3)),
+            sp: None,
+            attrs: Attrs::NONE,
+        },
+    ),
+    (
+        Group::PmenuSel,
+        Spec {
+            fg: None,
+            bg: Some(Color::Rgb(0xb3, 0xb8, 0xd1)),
             sp: None,
             attrs: Attrs::NONE,
         },

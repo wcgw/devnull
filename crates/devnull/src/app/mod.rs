@@ -2,6 +2,7 @@
 
 mod actions;
 mod cmdline;
+mod complete;
 mod composer;
 mod connection;
 mod feed;
@@ -32,7 +33,7 @@ use crate::doc::{
 };
 use crate::ex::{self, Command};
 use crate::hl::Theme;
-use crate::key::Key;
+use crate::key::{Code, Key, Mods};
 use crate::keymap::{Action, Invocation, Keymap, Mode};
 
 use actions::Confirm;
@@ -444,6 +445,13 @@ impl App {
     }
 
     fn key(&mut self, key: Key) -> Vec<Effect> {
+        if let AppMode::Cmdline(cmdline) = &self.mode
+            && cmdline.purpose == Purpose::Ex
+            && key.code == Code::Tab
+        {
+            self.complete_command_line(!key.mods.contains(Mods::SHIFT));
+            return Vec::new();
+        }
         match &mut self.mode {
             AppMode::Normal | AppMode::Visual(_) => {
                 self.message = None;

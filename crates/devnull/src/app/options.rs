@@ -189,6 +189,37 @@ impl Options {
     }
 }
 
+/// What `<Tab>` may complete `word`, an argument of `:set`, to: from that many chars into `word` on, one of the
+/// candidates. An option's name, or for a flag `no` and its name; after `graphics=`, how pictures may be drawn.
+pub(super) fn completions(word: &str) -> (usize, Vec<String>) {
+    if let Some((name, value)) = word.split_once('=') {
+        let graphics = OPTIONS.iter().any(|&(full, short, opt)| {
+            matches!(opt, Opt::Graphics) && (name == full || (!short.is_empty() && name == short))
+        });
+        let values = if graphics {
+            Graphics::ALL
+                .iter()
+                .map(|graphics| graphics.name())
+                .filter(|candidate| candidate.starts_with(value))
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        return (name.chars().count() + 1, values);
+    }
+    let names = OPTIONS.iter().map(|&(full, _, _)| full.to_owned());
+    let negated = OPTIONS
+        .iter()
+        .filter(|(_, _, opt)| matches!(opt, Opt::Flag(_)))
+        .map(|&(full, _, _)| format!("no{full}"));
+    let candidates = names
+        .chain(negated)
+        .filter(|candidate| candidate.starts_with(word))
+        .collect();
+    (0, candidates)
+}
+
 fn number(name: &str, value: &str) -> Result<u64, String> {
     value
         .parse()

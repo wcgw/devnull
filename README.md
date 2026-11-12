@@ -17,7 +17,8 @@ A terminal client for [dev-null.sh](https://dev-null.sh) that looks and feels li
 - **Pictures**: commit pictures, avatars and link-card pictures, animated ones too. They are drawn with the kitty
   graphics protocol in Ghostty and kitty, and with half blocks elsewhere.
 - **Vim all the way**: motions and counts, `/ ? n N * #`, Visual mode and yanks, nested folds, splits, buffers and
-  pickers, the jumplist and tag stack, `:map`, `:set`, `:hi`, `:colorscheme`, and an `init.vim`.
+  pickers, the jumplist and tag stack, `<Tab>` completion on the command line, `:map`, `:set`, `:hi`, `:colorscheme`,
+  and an `init.vim`.
 
 ## Building
 

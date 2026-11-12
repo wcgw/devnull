@@ -90,6 +90,10 @@ groups! {
     IncSearch => "IncSearch",
     /// The match of the last search under the cursor.
     CurSearch => "CurSearch",
+    /// A popup menu, such as the completions of the command line.
+    Pmenu => "Pmenu",
+    /// The chosen item of a popup menu.
+    PmenuSel => "PmenuSel",
     /// What matched the query in a picker's list.
     PmenuMatch => "PmenuMatch",
     /// A user or organization handle.
@@ -220,6 +224,11 @@ impl Spec {
     }
 }
 
+/// The names of the colorschemes `:colorscheme` knows.
+pub fn colorscheme_names() -> impl Iterator<Item = &'static str> {
+    COLORSCHEMES.iter().map(|&(name, _)| name)
+}
+
 /// The colorschemes `:colorscheme` knows, by name.
 const COLORSCHEMES: &[(&str, &[(Group, Spec)])] = &[
     ("tokyonight-night", tokyonight::NIGHT),
@@ -257,6 +266,8 @@ const DEFAULT: &[(Group, Spec)] = &[
     (Group::Search, attrs(Attrs::REVERSE)),
     (Group::IncSearch, attrs(Attrs::REVERSE)),
     (Group::CurSearch, attrs(Attrs::REVERSE)),
+    (Group::Pmenu, bg(Color::DarkGray)),
+    (Group::PmenuSel, attrs(Attrs::REVERSE)),
     (Group::PmenuMatch, attrs(Attrs::BOLD)),
     (Group::Folded, fg(Color::Cyan)),
     (Group::FloatBorder, fg(Color::DarkGray)),
@@ -288,6 +299,13 @@ const EMPTY: Spec = Spec {
 const fn fg(color: Color) -> Spec {
     Spec {
         fg: Some(color),
+        ..EMPTY
+    }
+}
+
+const fn bg(color: Color) -> Spec {
+    Spec {
+        bg: Some(color),
         ..EMPTY
     }
 }

@@ -304,6 +304,25 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("agree", 5, Name::Agree),
 ];
 
+/// The command `typed` names, in full or abbreviated as Vim allows, with its full name.
+fn lookup(typed: &str) -> Option<(&'static str, Name)> {
+    COMMANDS
+        .iter()
+        .find(|(full, min, _)| typed.len() >= *min && full.starts_with(typed))
+        .map(|&(full, _, name)| (full, name))
+}
+
+/// The full name of the command `typed` names, as [`parse`] reads it: `colorscheme` for `colo`.
+#[must_use]
+pub fn full_name(typed: &str) -> Option<&'static str> {
+    lookup(typed).map(|(full, _)| full)
+}
+
+/// The full names of the commands `dn` knows.
+pub fn command_names() -> impl Iterator<Item = &'static str> {
+    COMMANDS.iter().map(|&(full, _, _)| full)
+}
+
 /// Parses one command line, as typed after `:` or written in `init.vim`. Blank lines and `"` comments are
 /// `Ok(None)`; leading `:` and whitespace are ignored.
 ///
@@ -320,11 +339,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         .unwrap_or(trimmed.len());
     let (typed, rest) = trimmed.split_at(name_len);
     let not_a_command = || ExError::NotACommand(trimmed.trim_end().to_owned());
-    let name = COMMANDS
-        .iter()
-        .find(|(full, min, _)| typed.len() >= *min && full.starts_with(typed))
-        .map(|&(_, _, name)| name)
-        .ok_or_else(not_a_command)?;
+    let (_, name) = lookup(typed).ok_or_else(not_a_command)?;
     let (bang, args) = match rest.strip_prefix('!') {
         Some(args) => (true, args.trim()),
         None => (false, rest.trim()),

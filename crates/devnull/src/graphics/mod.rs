@@ -62,6 +62,9 @@ pub enum Graphics {
 }
 
 impl Graphics {
+    /// Every way pictures are drawn.
+    pub const ALL: [Self; 2] = [Self::Kitty, Self::HalfBlocks];
+
     /// What the terminal likely speaks, from `$TERM` and `$TERM_PROGRAM`: the kitty protocol in kitty and Ghostty,
     /// but not inside tmux (`tmux`), where placeholders would need passing through; half blocks elsewhere.
     #[must_use]

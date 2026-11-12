@@ -72,6 +72,16 @@ enum Order {
 }
 
 impl Source {
+    /// The names of the feeds `:e` takes that name no account: the logs, `starred`, `notifications` and its
+    /// categories (`notifications/mentions`).
+    pub(super) fn names() -> Vec<String> {
+        let categories = Category::ALL.map(|category| format!("notifications/{}", category.name()));
+        super::logs::names()
+            .chain(["starred".to_owned(), "notifications".to_owned()])
+            .chain(categories)
+            .collect()
+    }
+
     /// The feed a buffer name names, as `:e` takes it: a log's (`log/latest`), a profile (`@ada`), or a list of a
     /// profile's (`@ada/followers`, `@ada/following`, `@acme/mentions`).
     pub(super) fn named(name: &str) -> Option<Self> {
