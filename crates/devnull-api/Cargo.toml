@@ -3,6 +3,7 @@ name = "devnull-api"
 description = "Typed client for the dev-null.sh API: models, endpoints, enrollment and SSHSIG request signing"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [lints]

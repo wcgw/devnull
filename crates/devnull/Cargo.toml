@@ -3,6 +3,7 @@ name = "devnull"
 description = "A Neovim-flavoured terminal client for dev-null.sh"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [[bin]]
