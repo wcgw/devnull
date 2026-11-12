@@ -312,7 +312,7 @@ impl Cursor {
     }
 
     /// Moves to `pos`, forgetting the column vertical moves aimed for.
-    fn set(&mut self, doc: &Document, pos: Pos) {
+    pub(super) fn set(&mut self, doc: &Document, pos: Pos) {
         self.anchor = Some(doc.anchor(pos));
         self.want = None;
     }

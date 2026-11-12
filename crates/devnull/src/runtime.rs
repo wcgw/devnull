@@ -5,6 +5,7 @@ use std::io::{self, Stdout, stdout};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crossterm::clipboard::CopyToClipboard;
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event,
     EventStream, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
@@ -40,9 +41,11 @@ pub async fn run() -> io::Result<()> {
         let Some(msg) = to_msg(event?) else {
             continue;
         };
-        // `Quit` is the only effect so far; requests, timers and the rest are dispatched here as they arrive.
-        if app.update(msg).contains(&Effect::Quit) {
-            return Ok(());
+        for effect in app.update(msg) {
+            match effect {
+                Effect::Quit => return Ok(()),
+                Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
+            }
         }
     }
 }

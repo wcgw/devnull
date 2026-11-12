@@ -39,6 +39,29 @@ impl Selection {
         Self { anchor, kind }
     }
 
+    /// What the selection covers.
+    #[must_use]
+    pub fn kind(&self) -> SelectionKind {
+        self.kind
+    }
+
+    /// The same selection covering `kind` instead, as `V` in charwise Visual mode does.
+    #[must_use]
+    pub fn with_kind(self, kind: SelectionKind) -> Self {
+        Self { kind, ..self }
+    }
+
+    /// A cursor at the first selected position, where `y` leaves the cursor in Vim.
+    #[must_use]
+    pub fn start_cursor(&self, cursor: &Cursor, layout: &Layout<'_>) -> Cursor {
+        let mut start = Cursor::new();
+        if layout.row_count() > 0 {
+            let (first, _) = self.ends(cursor, layout.doc());
+            start.set(layout.doc(), first);
+        }
+        start
+    }
+
     /// The text `y` yanks: rows of one wrapped line join without a break, lines are separated by `\n`, and a
     /// rowwise selection ends with `\n`, as a linewise register does in Vim.
     #[must_use]

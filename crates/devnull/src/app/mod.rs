@@ -10,7 +10,9 @@ mod tests;
 
 use ratatui::layout::Rect;
 
-use crate::doc::{Direction, Document, Layout, Line, Pattern, SearchOutcome};
+use crate::doc::{
+    Direction, Document, FoldOp, Layout, Line, Pattern, SearchOutcome, Selection, SelectionKind,
+};
 use crate::ex::{self, Command};
 use crate::key::Key;
 use crate::keymap::{Action, CmdlineKind, Invocation, Keymap, Mode};
@@ -66,6 +68,8 @@ pub enum Msg {
 pub enum Effect {
     /// Restore the terminal and exit.
     Quit,
+    /// Put this text on the system clipboard (OSC 52).
+    Copy(String),
 }
 
 /// A named document, such as a log or a thread.
@@ -79,6 +83,8 @@ struct Buffer {
 #[derive(Debug)]
 enum AppMode {
     Normal,
+    /// Selecting, from the selection's fixed end to the cursor.
+    Visual(Selection),
     /// Typing after `:`, `/` or `?`.
     Cmdline(Cmdline),
     /// `:messages`, waiting for a key to continue.
@@ -180,9 +186,9 @@ impl App {
 
     fn key(&mut self, key: Key) -> Vec<Effect> {
         match &mut self.mode {
-            AppMode::Normal => {
+            AppMode::Normal | AppMode::Visual(_) => {
                 self.message = None;
-                let ran = self.keymap.feed(Mode::Normal, key);
+                let ran = self.keymap.feed(self.keymap_mode(), key);
                 self.run_all(ran)
             }
             AppMode::MorePrompt => {
@@ -239,7 +245,86 @@ impl App {
             .collect()
     }
 
+    /// The keymap table for the current mode.
+    fn keymap_mode(&self) -> Mode {
+        match self.mode {
+            AppMode::Visual(_) => Mode::Visual,
+            _ => Mode::Normal,
+        }
+    }
+
     fn run(&mut self, invocation: Invocation) -> Vec<Effect> {
+        match invocation.action {
+            Action::Visual(kind) => {
+                self.visual(kind);
+                return Vec::new();
+            }
+            Action::Yank => return self.yank(),
+            Action::Escape => {
+                self.mode = AppMode::Normal;
+                return Vec::new();
+            }
+            Action::Fold(op) => {
+                let doc = &mut self.buffers[self.window.buffer].doc;
+                doc.fold(&self.window.cursor, op);
+            }
+            Action::FoldAll { open } => self.buffers[self.window.buffer].doc.fold_all(open),
+            _ => return self.run_in_window(invocation),
+        }
+        self.follow_cursor();
+        Vec::new()
+    }
+
+    /// `v` and `V`: start Visual mode, switch its kind, or leave it when it already is that kind.
+    fn visual(&mut self, kind: SelectionKind) {
+        self.mode = match std::mem::replace(&mut self.mode, AppMode::Normal) {
+            AppMode::Visual(selection) if selection.kind() == kind => AppMode::Normal,
+            AppMode::Visual(selection) => AppMode::Visual(selection.with_kind(kind)),
+            _ => {
+                let area = self.window_area();
+                let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
+                AppMode::Visual(Selection::start(&self.window.cursor, &layout, kind))
+            }
+        };
+    }
+
+    /// `y` in Visual mode and `yy` in Normal mode: copies the text and, as Vim does, leaves the cursor at its start.
+    fn yank(&mut self) -> Vec<Effect> {
+        let area = self.window_area();
+        let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
+        let cursor = &mut self.window.cursor;
+        let selection = match std::mem::replace(&mut self.mode, AppMode::Normal) {
+            AppMode::Visual(selection) => selection,
+            _ => Selection::start(cursor, &layout, SelectionKind::Rowwise),
+        };
+        let text = selection.text(cursor, &layout);
+        *cursor = selection.start_cursor(cursor, &layout);
+        let lines = text.trim_end_matches('\n').matches('\n').count() + 1;
+        // Vim reports yanks of more lines than 'report', which is 2 by default.
+        if lines > 2 {
+            self.info(format!("{lines} lines yanked"));
+        }
+        self.follow_cursor();
+        vec![Effect::Copy(text)]
+    }
+
+    /// Keeps the cursor of the current window in view.
+    fn follow_cursor(&mut self) {
+        let viewport = self.viewport();
+        let area = self.window_area();
+        let layout = Layout::new(&self.buffers[self.window.buffer].doc, area.width);
+        self.window.follow_cursor(&layout, viewport);
+    }
+
+    /// Opens the fold hiding the cursor, as Vim's `'foldopen'` does after a search.
+    fn open_fold_at_cursor(&mut self) {
+        self.buffers[self.window.buffer]
+            .doc
+            .fold(&self.window.cursor, FoldOp::Open);
+        self.follow_cursor();
+    }
+
+    fn run_in_window(&mut self, invocation: Invocation) -> Vec<Effect> {
         let count = invocation.count.unwrap_or(1);
         let viewport = self.viewport();
         let area = self.window_area();
@@ -258,8 +343,8 @@ impl App {
                 if let Some((pattern, outcome)) =
                     window.cursor.search_word(&layout, direction, count, case)
                 {
-                    window.follow_cursor(&layout, viewport);
                     self.last_search = Some(LastSearch { pattern, direction });
+                    self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
                 } else {
                     self.error("E348: No string under cursor");
@@ -273,7 +358,7 @@ impl App {
                         direction
                     };
                     let outcome = window.cursor.search(&layout, &pattern, direction, count);
-                    window.follow_cursor(&layout, viewport);
+                    self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
                 }
                 None => self.error("E35: No previous regular expression"),
@@ -297,8 +382,8 @@ impl App {
     /// Feeds one key of an [`Action::Keys`] to whatever mode is current now.
     fn replay(&mut self, key: Key, remap: bool) -> Vec<Effect> {
         match self.mode {
-            AppMode::Normal => {
-                let ran = self.keymap.replay(Mode::Normal, &[key], remap);
+            AppMode::Normal | AppMode::Visual(_) => {
+                let ran = self.keymap.replay(self.keymap_mode(), &[key], remap);
                 self.run_all(ran)
             }
             AppMode::Cmdline(_) | AppMode::MorePrompt => self.key(key),
@@ -373,13 +458,12 @@ impl App {
                 Err(error) => return self.error(error.to_string()),
             }
         };
-        let viewport = self.viewport();
         let area = self.window_area();
         let window = &mut self.window;
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
         let outcome = window.cursor.search(&layout, &pattern, direction, count);
-        window.follow_cursor(&layout, viewport);
         self.last_search = Some(LastSearch { pattern, direction });
+        self.open_fold_at_cursor();
         self.report_search(outcome, direction, text);
     }
 

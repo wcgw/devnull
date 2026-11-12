@@ -4,7 +4,8 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
 use super::*;
-use crate::doc::{Document, Line};
+use crate::doc::{Content, Document, Fold, Line};
+use crate::hl::Group;
 use crate::key::{Key, parse_keys};
 
 /// An app showing one buffer of `lines`, in a `width` × `height` terminal.
@@ -402,4 +403,120 @@ fn pending_keys_show_at_the_right_of_the_command_line() {
     let _ = press(&mut app, "3g");
 
     assert!(cmdline(&app).ends_with("3g"), "{:?}", cmdline(&app));
+}
+
+/// The style of the cell at (`x`, `y`).
+fn style_at(app: &App, x: u16, y: u16) -> ratatui::style::Style {
+    let (width, height) = app.size();
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test backend");
+    terminal.draw(|frame| app.render(frame)).expect("draw");
+    terminal.backend().buffer()[(x, y)].style()
+}
+
+#[test]
+fn v_selects_what_motions_cover_and_y_yanks_it_to_the_clipboard() {
+    let mut app = app_with(&["one two", "three"], 30, 7);
+
+    let _ = press(&mut app, "wv");
+    assert!(statusline(&app).contains("VISUAL"));
+    let effects = press(&mut app, "jy");
+
+    assert_eq!(effects, [Effect::Copy("two\nthree".into())]);
+    assert!(statusline(&app).contains("NORMAL"));
+    assert_eq!(screen(&app).cursor, (4, 1));
+}
+
+#[test]
+fn the_selection_is_highlighted() {
+    let mut app = app_with(&["one two"], 30, 7);
+    let _ = press(&mut app, "vl");
+
+    // A cell is highlighted when patching it with the Visual style changes nothing.
+    let highlighted = |x| {
+        let style = style_at(&app, x, 1);
+        style.patch(Group::Visual.style()) == style
+    };
+    assert!(highlighted(0));
+    assert!(highlighted(1));
+    assert!(!highlighted(2));
+}
+
+#[test]
+fn big_v_yanks_rows_and_reports_more_than_two_lines() {
+    let mut app = app_with(&["one", "two", "three", "four"], 30, 8);
+
+    assert_eq!(press(&mut app, "Vjy"), [Effect::Copy("one\ntwo\n".into())]);
+    assert_eq!(cmdline(&app), "");
+    assert_eq!(
+        press(&mut app, "V2jy"),
+        [Effect::Copy("one\ntwo\nthree\n".into())]
+    );
+    assert_eq!(cmdline(&app), "3 lines yanked");
+    assert!(statusline(&app).contains("NORMAL"));
+}
+
+#[test]
+fn yy_yanks_the_cursor_row() {
+    let mut app = app_with(&["one two", "three"], 30, 7);
+
+    assert_eq!(press(&mut app, "jyy"), [Effect::Copy("three\n".into())]);
+}
+
+#[test]
+fn visual_kinds_switch_and_leave_like_vim() {
+    let mut app = app_with(&["one two"], 30, 7);
+
+    let _ = press(&mut app, "vV");
+    assert!(statusline(&app).contains("V-LINE"));
+    let _ = press(&mut app, "V");
+    assert!(statusline(&app).contains("NORMAL"));
+    let _ = press(&mut app, "vw<Esc>");
+    assert!(statusline(&app).contains("NORMAL"));
+    assert_eq!(screen(&app).cursor, (4, 1));
+}
+
+/// An app whose buffer has `head`, a closed fold over three lines summarised as `+ 3 more`, and `tail`.
+fn folded_app() -> App {
+    let mut app = app_with(&[], 30, 9);
+    let lines = ["head", "one", "fish", "three", "tail"]
+        .map(Line::text)
+        .to_vec();
+    let fold = Fold {
+        lines: 1..4,
+        summary: Line::text("+ 3 more"),
+        closed: true,
+    };
+    app.doc_mut().push_back(
+        "folded",
+        Content {
+            lines,
+            folds: vec![fold],
+        },
+    );
+    app
+}
+
+#[test]
+fn fold_keys_open_and_close_folds() {
+    let mut app = folded_app();
+    assert_eq!(screen(&app).rows[1..5], ["head", "+ 3 more", "tail", "~"]);
+
+    let _ = press(&mut app, "jzo");
+    assert_eq!(screen(&app).rows[1..5], ["head", "one", "fish", "three"]);
+    let _ = press(&mut app, "zc");
+    assert_eq!(screen(&app).rows[2], "+ 3 more");
+    let _ = press(&mut app, "zR");
+    assert_eq!(screen(&app).rows[2], "one");
+    let _ = press(&mut app, "zM");
+    assert_eq!(screen(&app).rows[2], "+ 3 more");
+}
+
+#[test]
+fn a_search_landing_in_a_closed_fold_opens_it() {
+    let mut app = folded_app();
+
+    let _ = press(&mut app, "/fish<CR>");
+
+    assert_eq!(screen(&app).rows[1..5], ["head", "one", "fish", "three"]);
+    assert_eq!(screen(&app).cursor, (0, 3));
 }

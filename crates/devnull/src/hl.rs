@@ -25,6 +25,8 @@ pub enum Group {
     WarningMsg,
     /// "Press ENTER" prompts.
     MoreMsg,
+    /// The Visual mode selection.
+    Visual,
 }
 
 impl Group {
@@ -42,6 +44,7 @@ impl Group {
             Self::ErrorMsg => Style::new().fg(Color::Red),
             Self::WarningMsg => Style::new().fg(Color::Yellow),
             Self::MoreMsg => Style::new().fg(Color::Green),
+            Self::Visual => Style::new().add_modifier(Modifier::REVERSED),
         }
     }
 }

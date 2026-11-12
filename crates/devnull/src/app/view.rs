@@ -7,7 +7,7 @@ use ratatui::widgets::{Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::{App, AppMode, MessageKind};
-use crate::doc::Layout;
+use crate::doc::{Layout, SelectionKind};
 use crate::hl::Group;
 
 /// The width of the area showing pending keys, at the right of the command line, as Vim's `'showcmd'`.
@@ -44,6 +44,17 @@ impl App {
             })
             .collect();
         frame.render_widget(Paragraph::new(rows), area);
+        if let AppMode::Visual(selection) = &self.mode {
+            for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+                if let Some(cells) = selection.cells(&self.window.cursor, &layout, row) {
+                    let x = area.x.saturating_add(to_u16(cells.start));
+                    let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
+                    frame
+                        .buffer_mut()
+                        .set_style(Rect::new(x, y, width, 1), Group::Visual.style());
+                }
+            }
+        }
 
         let cursor = self.window.cursor.screen(&layout);
         let status = statusline(
@@ -75,7 +86,7 @@ impl App {
                 self.render_messages(frame);
                 return;
             }
-            AppMode::Normal => {}
+            AppMode::Normal | AppMode::Visual(_) => {}
         }
         if let Some(message) = &self.message {
             let group = match message.kind {
@@ -97,8 +108,12 @@ impl App {
 
     /// The mode as the statusline names it.
     fn mode_name(&self) -> &'static str {
-        match self.mode {
+        match &self.mode {
             AppMode::Normal | AppMode::MorePrompt => "NORMAL",
+            AppMode::Visual(selection) => match selection.kind() {
+                SelectionKind::Charwise => "VISUAL",
+                SelectionKind::Rowwise => "V-LINE",
+            },
             AppMode::Cmdline(_) => "COMMAND",
         }
     }
