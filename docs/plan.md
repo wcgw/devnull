@@ -338,7 +338,16 @@ from M1 even though graphics land in M6.
   - Jumplist per window: searches, `gg G { } ]] [[ H M L` are jumps; `<C-o>`/`<C-i>`, one entry per row.
   - Known gaps: no `'incsearch'`/`'hlsearch'` yet; a statusline narrower than its content loses the ruler; the
     separator column also crosses statusline rows; the jumplist does not span buffers yet (M3).
-- [ ] **M1.7** `hl` groups, tokyonight night/storm/moon/day, `~/.config/devnull/init.vim` sourcing.
+- [x] **M1.7** Highlight groups (`:hi` names, including `DevnullHandle` and `StatusLineMode*`); colorschemes
+  `tokyonight` (= night), `tokyonight-night|storm|moon|day` and `default` (terminal colours); `:hi` (set, show, Vim's
+  E411/E423/E254/E418), `:hi clear`, `:colorscheme`; `init.vim` from `$XDG_CONFIG_HOME/devnull/` or
+  `~/.config/devnull/` at startup and `:source`, with Vim's per-line error report. 148 tests; pty smoke test of
+  `init.vim` (error report, colorscheme applied).
+  - The tokyonight table is generated from the plugin's resolved highlight groups (`extras/lua`, commit `cdc07ac`);
+    its Apache-2.0 license is in `LICENSES/`.
+  - `:set nofoo`/`invfoo` prefixes are resolved by the options, so unknown names report as typed.
+  - Known gaps: no `:hi link`; `:colorscheme` drops `:hi` changes (as Vim's `:hi clear` does) with no `ColorScheme`
+    autocommand to reapply them.
 - [ ] **M1.8** Fake log buffer wired end to end; `insta` screen snapshots. ⏸ try it in Ghostty.
 
 ### M2 Auth & logs

@@ -2,6 +2,7 @@
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::style::Color;
 
 use super::*;
 use crate::doc::{Content, Document, Fold, Line};
@@ -434,7 +435,7 @@ fn the_selection_is_highlighted() {
     // A cell is highlighted when patching it with the Visual style changes nothing.
     let highlighted = |x| {
         let style = style_at(&app, x, 1);
-        style.patch(Group::Visual.style()) == style
+        style.patch(app.style(Group::Visual)) == style
     };
     assert!(highlighted(0));
     assert!(highlighted(1));
@@ -752,4 +753,135 @@ fn the_jumplist_keeps_one_entry_per_row() {
     let _ = press(&mut app, "GggGgg<C-o><C-o>");
 
     assert_eq!(screen(&app).cursor, (0, 5));
+}
+
+#[test]
+fn colorscheme_shows_and_switches_the_colorscheme() {
+    let mut app = app_with(&["one"], 40, 6);
+
+    let _ = press(&mut app, ":colorscheme<CR>");
+    assert_eq!(cmdline(&app), "tokyonight-night");
+    let night = style_at(&app, 0, 1).bg;
+    let _ = press(&mut app, ":colo tokyonight-day<CR>");
+    assert_ne!(style_at(&app, 0, 1).bg, night);
+    let _ = press(&mut app, ":colo nope<CR>");
+    assert_eq!(cmdline(&app), "E185: Cannot find color scheme 'nope'");
+}
+
+#[test]
+fn hi_restyles_a_group_on_screen_and_hi_clear_restores_it() {
+    let mut app = app_with(&["one"], 60, 6);
+    let original = style_at(&app, 10, 1).bg;
+
+    let _ = press(&mut app, ":hi Normal guibg=#000000<CR>");
+    assert_eq!(style_at(&app, 10, 1).bg, Some(Color::Rgb(0, 0, 0)));
+    let _ = press(&mut app, ":hi Normal<CR>");
+    assert!(
+        cmdline(&app).starts_with("Normal         xxx guifg=#c0caf5 guibg=#000000"),
+        "{:?}",
+        cmdline(&app)
+    );
+    let _ = press(&mut app, ":hi clear<CR>");
+    assert_eq!(style_at(&app, 10, 1).bg, original);
+}
+
+#[test]
+fn the_statusline_mode_has_its_own_colours() {
+    let mut app = app_with(&["one"], 40, 6);
+
+    let normal = style_at(&app, 1, 4);
+    let _ = press(&mut app, "v");
+    let visual = style_at(&app, 1, 4);
+
+    assert_eq!(normal.bg, app.style(Group::StatusLineModeNormal).bg);
+    assert_eq!(visual.bg, app.style(Group::StatusLineModeVisual).bg);
+}
+
+#[test]
+fn source_asks_for_the_file_and_runs_its_lines() {
+    let mut app = app_with(&["one", "two", "three"], 40, 8);
+
+    assert_eq!(
+        press(&mut app, ":so ~/x.vim<CR>"),
+        [Effect::Source("~/x.vim".into())]
+    );
+    let contents = "\" settings\nset scrolloff=1\nnnoremap x jj\n";
+    let _ = app.update(Msg::Sourced {
+        path: "~/x.vim".into(),
+        contents: Ok(contents.into()),
+    });
+
+    assert_eq!(cmdline(&app), "");
+    let _ = press(&mut app, "x");
+    assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+#[test]
+fn errors_while_sourcing_name_the_file_and_line() {
+    let mut app = app_with(&["one"], 50, 10);
+
+    let contents = "set ic\nfrob\nset nope\n";
+    let _ = app.update(Msg::Sourced {
+        path: "init.vim".into(),
+        contents: Ok(contents.into()),
+    });
+
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[rows.len() - 6..],
+        [
+            "Error detected while processing init.vim:",
+            "line 2:",
+            "E492: Not an editor command: frob",
+            "line 3:",
+            "E518: Unknown option: nope",
+            "Press ENTER or type command to continue",
+        ]
+    );
+}
+
+#[test]
+fn a_file_that_cannot_be_read_is_reported() {
+    let mut app = app_with(&["one"], 50, 6);
+
+    let _ = app.update(Msg::Sourced {
+        path: "nope.vim".into(),
+        contents: Err("No such file".into()),
+    });
+
+    assert_eq!(cmdline(&app), "E484: Can't open file nope.vim");
+}
+
+#[test]
+fn no_and_inv_prefixes_turn_flags_off_and_flip_them() {
+    let mut app = app_with(&["one"], 50, 6);
+
+    let _ = press(&mut app, ":set ic<CR>:set noic<CR>:set ic?<CR>");
+    assert_eq!(cmdline(&app), "noignorecase");
+    let _ = press(&mut app, ":set invignorecase<CR>:set ic?<CR>");
+    assert_eq!(cmdline(&app), "ignorecase");
+    let _ = press(&mut app, ":set noscrolloff<CR>");
+    assert_eq!(cmdline(&app), "E474: Invalid argument: noscrolloff");
+    let _ = press(&mut app, ":set nope<CR>");
+    assert_eq!(cmdline(&app), "E518: Unknown option: nope");
+}
+
+#[test]
+fn long_messages_wrap_in_the_message_view() {
+    let mut app = app_with(&["one"], 20, 8);
+
+    let _ = app.update(Msg::Sourced {
+        path: "a/long/path/to/init.vim".into(),
+        contents: Ok("frob".into()),
+    });
+
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[rows.len() - 7..rows.len() - 4],
+        [
+            "Error detected while",
+            " processing a/long/p",
+            "ath/to/init.vim:"
+        ]
+    );
 }

@@ -18,19 +18,23 @@ impl App {
     /// Draws the whole screen.
     pub fn render(&self, frame: &mut Frame<'_>) {
         let (width, height) = self.size;
+        let screen = frame.area();
+        frame
+            .buffer_mut()
+            .set_style(screen, self.theme.style(Group::Normal));
         let current = self.windows.current();
         let bufferline = Line::from(Span::styled(
             format!(" {} ", self.buffers[current.buffer].name),
-            Group::TabLineSel.style(),
+            self.theme.style(Group::TabLineSel),
         ))
-        .style(Group::TabLineFill.style());
+        .style(self.theme.style(Group::TabLineFill));
         frame.render_widget(Paragraph::new(bufferline), Rect::new(0, 0, width, 1));
 
         let arrangement = self.windows.arrange(self.windows_area());
         for separator in &arrangement.separators {
             let bar: Vec<Line<'_>> = (0..separator.height).map(|_| Line::from("│")).collect();
             frame.render_widget(
-                Paragraph::new(bar).style(Group::WinSeparator.style()),
+                Paragraph::new(bar).style(self.theme.style(Group::WinSeparator)),
                 *separator,
             );
         }
@@ -60,8 +64,8 @@ impl App {
                 ));
                 return;
             }
-            AppMode::MorePrompt => {
-                self.render_messages(frame);
+            AppMode::MorePrompt { from } => {
+                self.render_messages(frame, *from);
                 return;
             }
             AppMode::Normal | AppMode::Visual(_) => {}
@@ -73,7 +77,7 @@ impl App {
                 MessageKind::Error => Group::ErrorMsg,
             };
             frame.render_widget(
-                Paragraph::new(Span::styled(message.text.as_str(), group.style())),
+                Paragraph::new(Span::styled(message.text.as_str(), self.theme.style(group))),
                 cmdline_area,
             );
         }
@@ -105,15 +109,23 @@ impl App {
                     Line::from(
                         layout
                             .segments(row)
-                            .map(|(text, group)| Span::styled(text, group.style()))
+                            .map(|(text, group)| Span::styled(text, self.theme.style(group)))
                             .collect::<Vec<_>>(),
                     )
                 } else {
-                    Line::from(Span::styled("~", Group::NonText.style()))
+                    Line::from(Span::styled("~", self.theme.style(Group::EndOfBuffer)))
                 }
             })
             .collect();
         frame.render_widget(Paragraph::new(rows), area);
+        for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+            if layout.is_folded(row) {
+                frame.buffer_mut().set_style(
+                    Rect::new(area.x, y, area.width, 1),
+                    self.theme.style(Group::Folded),
+                );
+            }
+        }
         if let (true, AppMode::Visual(selection)) = (is_current, &self.mode) {
             for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
                 if let Some(cells) = selection.cells(&window.cursor, &layout, row) {
@@ -121,14 +133,15 @@ impl App {
                     let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
                     frame
                         .buffer_mut()
-                        .set_style(Rect::new(x, y, width, 1), Group::Visual.style());
+                        .set_style(Rect::new(x, y, width, 1), self.theme.style(Group::Visual));
                 }
             }
         }
 
         let cursor = window.cursor.screen(&layout);
+        let (mode, mode_group) = self.mode_label();
         let status = statusline(
-            is_current.then(|| self.mode_name()),
+            is_current.then_some(mode),
             &buffer.name,
             &format!("{},{}", cursor.row + 1, cursor.col + 1),
             &position(top, viewport.height, layout.row_count()),
@@ -139,10 +152,21 @@ impl App {
         } else {
             Group::StatusLineNC
         };
+        let status_area = Rect::new(rect.x, area.bottom(), rect.width, 1);
         frame.render_widget(
-            Paragraph::new(status).style(group.style()),
-            Rect::new(rect.x, area.bottom(), rect.width, 1),
+            Paragraph::new(status).style(self.theme.style(group)),
+            status_area,
         );
+        if is_current {
+            // " NORMAL ": the mode and the space on either side of it.
+            let label = Rect {
+                width: to_u16(mode.width() + 2).min(rect.width),
+                ..status_area
+            };
+            frame
+                .buffer_mut()
+                .set_style(label, self.theme.style(mode_group));
+        }
 
         let x = area.x.saturating_add(to_u16(cursor.col));
         let y = area
@@ -151,15 +175,15 @@ impl App {
         Position::new(x.min(area.right().saturating_sub(1)), y)
     }
 
-    /// The mode as the statusline names it.
-    fn mode_name(&self) -> &'static str {
+    /// The mode as the statusline names and colours it.
+    fn mode_label(&self) -> (&'static str, Group) {
         match &self.mode {
-            AppMode::Normal | AppMode::MorePrompt => "NORMAL",
+            AppMode::Normal | AppMode::MorePrompt { .. } => ("NORMAL", Group::StatusLineModeNormal),
             AppMode::Visual(selection) => match selection.kind() {
-                SelectionKind::Charwise => "VISUAL",
-                SelectionKind::Rowwise => "V-LINE",
+                SelectionKind::Charwise => ("VISUAL", Group::StatusLineModeVisual),
+                SelectionKind::Rowwise => ("V-LINE", Group::StatusLineModeVisual),
             },
-            AppMode::Cmdline(_) => "COMMAND",
+            AppMode::Cmdline(_) => ("COMMAND", Group::StatusLineModeCommand),
         }
     }
 
@@ -220,8 +244,8 @@ impl App {
             .collect();
         let block = Block::bordered()
             .title(format!(" {title} "))
-            .border_style(Group::FloatBorder.style())
-            .style(Group::NormalFloat.style());
+            .border_style(self.theme.style(Group::FloatBorder))
+            .style(self.theme.style(Group::NormalFloat));
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
@@ -233,9 +257,9 @@ impl App {
                 Group::WhichKeyDesc
             };
             let line = Line::from(vec![
-                Span::styled(key.as_str(), Group::WhichKey.style()),
-                Span::styled(" → ", Group::WhichKeySeparator.style()),
-                Span::styled(description.as_str(), group.style()),
+                Span::styled(key.as_str(), self.theme.style(Group::WhichKey)),
+                Span::styled(" → ", self.theme.style(Group::WhichKeySeparator)),
+                Span::styled(description.as_str(), self.theme.style(group)),
             ]);
             let x = inner.x + to_u16(column * entry_width);
             let cell = Rect::new(
@@ -248,34 +272,55 @@ impl App {
         }
     }
 
-    /// `:messages`: the history over the bottom of the screen, then Vim's prompt to continue.
-    fn render_messages(&self, frame: &mut Frame<'_>) {
+    /// Messages from index `from` of the history over the bottom of the screen, as many as fit, then Vim's prompt
+    /// to continue.
+    fn render_messages(&self, frame: &mut Frame<'_>, from: usize) {
         let (width, height) = self.size;
-        let shown = self
-            .messages
-            .len()
-            .min(usize::from(height.saturating_sub(1)));
-        let first = self.messages.len() - shown;
-        let top = height.saturating_sub(1).saturating_sub(to_u16(shown));
-        let area = Rect::new(0, top, width, height - top);
-        frame.render_widget(Clear, area);
-        let mut lines: Vec<Line<'_>> = self.messages[first..]
+        // Long messages wrap onto further rows, as in Vim; the newest that fit are shown.
+        let mut rows: Vec<Line<'_>> = self.messages[from.min(self.messages.len())..]
             .iter()
-            .map(|message| {
+            .flat_map(|message| {
                 let group = if message.kind == MessageKind::Error {
                     Group::ErrorMsg
                 } else {
                     Group::Normal
                 };
-                Line::from(Span::styled(message.text.as_str(), group.style()))
+                let style = self.theme.style(group);
+                wrapped(&message.text, usize::from(width.max(1)))
+                    .into_iter()
+                    .map(move |row| Line::from(Span::styled(row, style)))
             })
             .collect();
+        let fit = usize::from(height.saturating_sub(1));
+        rows.drain(..rows.len().saturating_sub(fit));
+        let top = height.saturating_sub(1).saturating_sub(to_u16(rows.len()));
+        let area = Rect::new(0, top, width, height - top);
+        frame.render_widget(Clear, area);
         let prompt = "Press ENTER or type command to continue";
-        lines.push(Line::from(Span::styled(prompt, Group::MoreMsg.style())));
-        frame.render_widget(Paragraph::new(lines), area);
+        rows.push(Line::from(Span::styled(
+            prompt,
+            self.theme.style(Group::MoreMsg),
+        )));
+        frame.render_widget(Paragraph::new(rows), area);
         let x = to_u16(prompt.width()).min(width.saturating_sub(1));
         frame.set_cursor_position(Position::new(x, height.saturating_sub(1)));
     }
+}
+
+/// `text` cut into rows of at most `width` cells.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for ch in text.chars() {
+        let cells = ch.to_string().width();
+        if used + cells > width && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        rows.last_mut().expect("rows starts non-empty").push(ch);
+        used += cells;
+    }
+    rows
 }
 
 /// A statusline: the mode (on the current window only) and the buffer's name on the left, the ruler on the right.

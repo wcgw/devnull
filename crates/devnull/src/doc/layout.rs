@@ -77,6 +77,12 @@ impl<'d> Layout<'d> {
         self.doc
     }
 
+    /// Whether `row` is the summary of a closed fold.
+    #[must_use]
+    pub fn is_folded(&self, row: usize) -> bool {
+        self.rows[row].folded
+    }
+
     /// The number of screen rows.
     #[must_use]
     pub fn row_count(&self) -> usize {

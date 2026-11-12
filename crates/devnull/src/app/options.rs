@@ -27,6 +27,23 @@ impl Default for Options {
     }
 }
 
+/// What a `no` or `inv` prefix does to a flag.
+#[derive(Clone, Copy)]
+enum Flip {
+    Off,
+    Toggle,
+}
+
+impl Flip {
+    /// The equivalent operation. Turning off is written as assigning nothing, which only flags accept here.
+    fn op(self) -> SetOp {
+        match self {
+            Self::Off => SetOp::Assign(String::new()),
+            Self::Toggle => SetOp::Toggle,
+        }
+    }
+}
+
 /// An option's name, its short name, and what it holds.
 #[derive(Clone, Copy)]
 enum Opt {
@@ -46,6 +63,15 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
 ];
 
 impl Options {
+    /// Vim's E474 for `arg`.
+    fn invalid(&self, arg: &SetArg) -> String {
+        let value = match &arg.op {
+            SetOp::Assign(value) => format!("={value}"),
+            _ => String::new(),
+        };
+        format!("E474: Invalid argument: {}{value}", arg.name)
+    }
+
     /// How searches treat case, from `'ignorecase'` and `'smartcase'`.
     pub(super) fn case_mode(&self) -> CaseMode {
         match (self.ignorecase, self.smartcase) {
@@ -61,18 +87,38 @@ impl Options {
         arg: &SetArg,
         keymap: &mut Keymap,
     ) -> Result<Option<String>, String> {
-        let &(name, _, opt) = OPTIONS
-            .iter()
-            .find(|(name, short, _)| arg.name == *name || (!short.is_empty() && arg.name == *short))
-            .ok_or_else(|| format!("E518: Unknown option: {}", arg.name))?;
-        let invalid = || {
-            let value = match &arg.op {
-                SetOp::Assign(value) => format!("={value}"),
-                _ => String::new(),
-            };
-            format!("E474: Invalid argument: {}{value}", arg.name)
+        let find = |typed: &str| {
+            OPTIONS
+                .iter()
+                .copied()
+                .find(|(name, short, _)| typed == *name || (!short.is_empty() && typed == *short))
         };
-        match (opt, &arg.op) {
+        let unknown = || format!("E518: Unknown option: {}", arg.name);
+        // `noname` and `invname` turn a flag off or flip it, unless an option has that name itself.
+        let (found, op) = match (find(&arg.name), &arg.op) {
+            (Some(found), op) => (found, op.clone()),
+            (None, SetOp::On) => {
+                let off = arg
+                    .name
+                    .strip_prefix("no")
+                    .and_then(find)
+                    .map(|found| (found, Flip::Off));
+                let inv = arg
+                    .name
+                    .strip_prefix("inv")
+                    .and_then(find)
+                    .map(|found| (found, Flip::Toggle));
+                match off.or(inv) {
+                    Some((found @ (_, _, Opt::Flag(_)), flip)) => (found, flip.op()),
+                    Some(_) => return Err(self.invalid(arg)),
+                    None => return Err(unknown()),
+                }
+            }
+            (None, _) => return Err(unknown()),
+        };
+        let (name, _, opt) = found;
+        let invalid = || self.invalid(arg);
+        match (opt, &op) {
             (Opt::Flag(field), SetOp::Query) => {
                 let on = *field(self);
                 Ok(Some(format!("{}{name}", if on { "" } else { "no" })))
@@ -81,7 +127,7 @@ impl Options {
                 *field(self) = true;
                 Ok(None)
             }
-            (Opt::Flag(field), SetOp::Off) => {
+            (Opt::Flag(field), SetOp::Assign(off)) if off.is_empty() => {
                 *field(self) = false;
                 Ok(None)
             }

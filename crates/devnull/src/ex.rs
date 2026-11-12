@@ -69,7 +69,8 @@ pub enum Command {
 /// One `:set` argument.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetArg {
-    /// The option's name, without `no` or `inv` prefixes.
+    /// The option's name as typed, including any `no` or `inv` prefix: only the options know whether `nowrap` is
+    /// `wrap` turned off or an option of its own.
     pub name: String,
     /// What to do with it.
     pub op: SetOp,
@@ -78,11 +79,9 @@ pub struct SetArg {
 /// What a `:set` argument does to its option.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetOp {
-    /// `name`: turn a flag on.
+    /// `name`: turn a flag on (or off, or flip it, through a `no` or `inv` prefix), or show another option.
     On,
-    /// `noname`: turn a flag off.
-    Off,
-    /// `invname` or `name!`: flip a flag.
+    /// `name!`: flip a flag.
     Toggle,
     /// `name?`: show the value.
     Query,
@@ -269,12 +268,6 @@ fn set_arg(arg: &str) -> SetArg {
     if let Some(name) = arg.strip_suffix('!') {
         return named(name, SetOp::Toggle);
     }
-    if let Some(name) = arg.strip_prefix("inv") {
-        return named(name, SetOp::Toggle);
-    }
-    if let Some(name) = arg.strip_prefix("no") {
-        return named(name, SetOp::Off);
-    }
     named(arg, SetOp::On)
 }
 
@@ -414,12 +407,12 @@ mod tests {
                     op: SetOp::On
                 },
                 SetArg {
-                    name: "smartcase".into(),
-                    op: SetOp::Off
+                    name: "nosmartcase".into(),
+                    op: SetOp::On
                 },
                 SetArg {
-                    name: "wrap".into(),
-                    op: SetOp::Toggle
+                    name: "invwrap".into(),
+                    op: SetOp::On
                 },
                 SetArg {
                     name: "timeoutlen".into(),

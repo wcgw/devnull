@@ -18,6 +18,7 @@ use crate::doc::{
     SelectionKind,
 };
 use crate::ex::{self, Command};
+use crate::hl::Theme;
 use crate::key::Key;
 use crate::keymap::{Action, CmdlineKind, Invocation, Keymap, Mode};
 
@@ -34,6 +35,7 @@ pub struct App {
     focused: bool,
     keymap: Keymap,
     options: Options,
+    theme: Theme,
     buffers: Vec<Buffer>,
     windows: Windows,
     mode: AppMode,
@@ -85,6 +87,14 @@ pub enum Msg {
     FocusLost,
     /// The delay of an [`Effect::Wake`] has passed.
     Wake(Wake),
+    /// A file to run as ex commands, such as `init.vim` at startup or what `:source` asked for, or why it could not
+    /// be read.
+    Sourced {
+        /// The file, as named to the user.
+        path: String,
+        /// Its text, or the reason it could not be read.
+        contents: Result<String, String>,
+    },
     /// The terminal has this size, in cells; sent at startup and on every resize.
     Resize {
         /// Columns.
@@ -101,6 +111,8 @@ pub enum Effect {
     Quit,
     /// Put this text on the system clipboard (OSC 52).
     Copy(String),
+    /// Read this file (`~` is the home directory) and send its contents back as [`Msg::Sourced`].
+    Source(String),
     /// Send [`Msg::Wake`] with `token` once `after` has passed.
     Wake {
         /// How long to wait.
@@ -125,8 +137,10 @@ enum AppMode {
     Visual(Selection),
     /// Typing after `:`, `/` or `?`.
     Cmdline(Cmdline),
-    /// `:messages`, waiting for a key to continue.
-    MorePrompt,
+    /// Messages shown over the screen (from index `from` of the history) until a key continues.
+    MorePrompt {
+        from: usize,
+    },
 }
 
 /// A line for the command line area.
@@ -171,6 +185,7 @@ impl App {
             focused: true,
             keymap: Keymap::new(),
             options: Options::default(),
+            theme: Theme::default(),
             buffers: vec![Buffer {
                 name: name.into(),
                 doc,
@@ -227,6 +242,7 @@ impl App {
                 }
                 Vec::new()
             }
+            Msg::Sourced { path, contents } => self.source(&path, contents),
             Msg::FocusGained => {
                 self.focused = true;
                 Vec::new()
@@ -249,7 +265,7 @@ impl App {
                 let ran = self.keymap.feed(self.keymap_mode(), key);
                 self.run_all(ran)
             }
-            AppMode::MorePrompt => {
+            AppMode::MorePrompt { .. } => {
                 self.mode = AppMode::Normal;
                 // As in Vim, <CR>, <Space> and <Esc> only dismiss; any other key also does its usual job.
                 let dismiss_only = [
@@ -494,40 +510,47 @@ impl App {
                 let ran = self.keymap.replay(self.keymap_mode(), &[key], remap);
                 self.run_all(ran)
             }
-            AppMode::Cmdline(_) | AppMode::MorePrompt => self.key(key),
+            AppMode::Cmdline(_) | AppMode::MorePrompt { .. } => self.key(key),
         }
     }
 
+    /// Runs an ex command line, reporting its error in the message area.
     fn ex(&mut self, line: &str) -> Vec<Effect> {
-        let command = match ex::parse(line) {
-            Ok(Some(command)) => command,
-            Ok(None) => return Vec::new(),
+        match self.run_line(line) {
+            Ok(effects) => effects,
             Err(error) => {
-                self.error(error.to_string());
-                return Vec::new();
+                self.error(error);
+                Vec::new()
             }
-        };
+        }
+    }
+
+    /// Parses and runs one command line; blank lines and comments do nothing.
+    fn run_line(&mut self, line: &str) -> Result<Vec<Effect>, String> {
+        match ex::parse(line) {
+            Ok(Some(command)) => self.execute(command),
+            Ok(None) => Ok(Vec::new()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    fn execute(&mut self, command: Command) -> Result<Vec<Effect>, String> {
         match command {
             Command::Quit { all: false, .. } if self.windows.count() > 1 => {
                 self.windows.close();
             }
-            Command::Quit { .. } => return vec![Effect::Quit],
+            Command::Quit { .. } => return Ok(vec![Effect::Quit]),
             Command::Split { vertical } => {
                 self.windows
                     .split(if vertical { Axis::Columns } else { Axis::Rows })
             }
-            Command::Close => self.close_window(),
+            Command::Close => self.close_window()?,
             Command::Only => self.windows.only(),
             Command::Wincmd(ch) => return self.wincmd(ch),
             Command::Set(args) => {
                 for arg in &args {
-                    match self.options.set(arg, &mut self.keymap) {
-                        Ok(Some(shown)) => self.info(shown),
-                        Ok(None) => {}
-                        Err(error) => {
-                            self.error(error);
-                            break;
-                        }
+                    if let Some(shown) = self.options.set(arg, &mut self.keymap)? {
+                        self.info(shown);
                     }
                 }
             }
@@ -547,30 +570,61 @@ impl App {
                     removed |= self.keymap.unmap(mode, &lhs);
                 }
                 if !removed {
-                    self.error("E31: No such mapping");
+                    return Err("E31: No such mapping".to_owned());
                 }
             }
             // Like Vim, nothing to show means no prompt either.
             Command::Messages if self.messages.is_empty() => {}
-            Command::Messages => self.mode = AppMode::MorePrompt,
-            Command::Highlight { .. }
-            | Command::HighlightClear
-            | Command::Colorscheme(_)
-            | Command::Source(_) => {
-                self.error("E319: Sorry, the command is not available in this version");
+            Command::Messages => self.mode = AppMode::MorePrompt { from: 0 },
+            Command::Highlight { group, attrs } => {
+                if let Some(shown) = self.theme.highlight(&group, &attrs)? {
+                    self.info(shown);
+                }
             }
+            Command::HighlightClear => self.theme.clear(),
+            Command::Colorscheme(None) => self.info(self.theme.name().to_owned()),
+            Command::Colorscheme(Some(name)) => self.theme = Theme::named(&name)?,
+            Command::Source(path) => return Ok(vec![Effect::Source(path)]),
         }
-        Vec::new()
+        Ok(Vec::new())
     }
 
-    fn close_window(&mut self) {
-        if !self.windows.close() {
-            self.error("E444: Cannot close last window");
+    /// Runs the lines of a sourced file, carrying on after errors and then listing them as Vim does.
+    fn source(&mut self, path: &str, contents: Result<String, String>) -> Vec<Effect> {
+        let Ok(contents) = contents else {
+            self.error(format!("E484: Can't open file {path}"));
+            return Vec::new();
+        };
+        let mut effects = Vec::new();
+        let mut errors = Vec::new();
+        for (number, line) in (1..).zip(contents.lines()) {
+            match self.run_line(line) {
+                Ok(more) => effects.extend(more),
+                Err(error) => errors.push((number, error)),
+            }
+        }
+        if !errors.is_empty() {
+            let from = self.messages.len();
+            self.error(format!("Error detected while processing {path}:"));
+            for (number, error) in errors {
+                self.info(format!("line {number}:"));
+                self.error(error);
+            }
+            self.mode = AppMode::MorePrompt { from };
+        }
+        effects
+    }
+
+    fn close_window(&mut self) -> Result<(), String> {
+        if self.windows.close() {
+            Ok(())
+        } else {
+            Err("E444: Cannot close last window".to_owned())
         }
     }
 
     /// `:wincmd {ch}`, which `<C-w>{ch}` runs.
-    fn wincmd(&mut self, ch: char) -> Vec<Effect> {
+    fn wincmd(&mut self, ch: char) -> Result<Vec<Effect>, String> {
         let area = self.windows_area();
         match ch {
             'h' => self.windows.focus(area, Toward::Left),
@@ -581,12 +635,12 @@ impl App {
             'W' => self.windows.cycle(false),
             's' => self.windows.split(Axis::Rows),
             'v' => self.windows.split(Axis::Columns),
-            'c' => self.close_window(),
+            'c' => self.close_window()?,
             'o' => self.windows.only(),
-            'q' => return self.ex("quit"),
+            'q' => return self.run_line("quit"),
             _ => {}
         }
-        Vec::new()
+        Ok(Vec::new())
     }
 
     /// `/` and `?` submitted with `text`; an empty pattern repeats the last one.
@@ -669,6 +723,12 @@ impl App {
             height: usize::from(self.window_area().height),
             scrolloff: self.options.scrolloff,
         }
+    }
+
+    /// How `group` is drawn now.
+    #[cfg(test)]
+    pub(crate) fn style(&self, group: crate::hl::Group) -> ratatui::style::Style {
+        self.theme.style(group)
     }
 
     /// The document of the current window, for tests to change as the network would.

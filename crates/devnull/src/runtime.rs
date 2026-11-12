@@ -2,7 +2,9 @@
 //! [`Effect`]s.
 
 use std::io::{self, Stdout, stdout};
+use std::ops::ControlFlow;
 use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::clipboard::CopyToClipboard;
@@ -34,8 +36,29 @@ pub async fn run() -> io::Result<()> {
         height: size.height,
     });
     let mut events = EventStream::new();
-    // Messages that effects send back later, such as wake-ups.
+    // Messages that effects send back later, such as wake-ups and files read.
     let (later, mut arrived) = mpsc::unbounded_channel();
+    let env = |name| std::env::var_os(name).map(PathBuf::from);
+    if let Some(init) = init_file(env("XDG_CONFIG_HOME"), env("HOME")) {
+        match tokio::fs::read_to_string(&init).await {
+            Ok(contents) => {
+                let path = shown_path(&init, env("HOME"));
+                let _ = later.send(Msg::Sourced {
+                    path,
+                    contents: Ok(contents),
+                });
+            }
+            // No init.vim is the usual case, not an error.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                let path = shown_path(&init, env("HOME"));
+                let _ = later.send(Msg::Sourced {
+                    path,
+                    contents: Err(error.to_string()),
+                });
+            }
+        }
+    }
     loop {
         terminal.draw(|frame| app.render(frame))?;
         // Both branches are cancel-safe: an event or message not taken now stays queued.
@@ -52,20 +75,64 @@ pub async fn run() -> io::Result<()> {
             Some(msg) = arrived.recv() => msg,
         };
         for effect in app.update(msg) {
-            match effect {
-                Effect::Quit => return Ok(()),
-                Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
-                Effect::Wake { after, token } => {
-                    let later = later.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(after).await;
-                        // Sending only fails once the loop above has ended, when nobody needs the wake-up.
-                        let _ = later.send(Msg::Wake(token));
-                    });
-                }
+            if perform(effect, &later)?.is_break() {
+                return Ok(());
             }
         }
     }
+}
+
+/// Carries out one effect; `Break` means quit. Effects that finish later send their result through `later`.
+fn perform(effect: Effect, later: &mpsc::UnboundedSender<Msg>) -> io::Result<ControlFlow<()>> {
+    match effect {
+        Effect::Quit => return Ok(ControlFlow::Break(())),
+        Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
+        // Sending below only fails once the loop has ended, when nobody needs the result any more.
+        Effect::Wake { after, token } => {
+            let later = later.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                let _ = later.send(Msg::Wake(token));
+            });
+        }
+        Effect::Source(path) => {
+            let later = later.clone();
+            let file = expand_home(&path, std::env::var_os("HOME").map(PathBuf::from));
+            tokio::spawn(async move {
+                let contents = tokio::fs::read_to_string(file)
+                    .await
+                    .map_err(|error| error.to_string());
+                let _ = later.send(Msg::Sourced { path, contents });
+            });
+        }
+    }
+    Ok(ControlFlow::Continue(()))
+}
+
+/// `path` with a leading `~` standing for `home`, when there is one.
+fn expand_home(path: &str, home: Option<PathBuf>) -> PathBuf {
+    match (path.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
+            home.join(rest.trim_start_matches('/'))
+        }
+        _ => PathBuf::from(path),
+    }
+}
+
+/// `path` as messages show it: under `home`, as `~/…`.
+fn shown_path(path: &Path, home: Option<PathBuf>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf)) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// Where `init.vim` lives (D6): under `$XDG_CONFIG_HOME`, else `~/.config`.
+fn init_file(config_home: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    let config = config_home
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| home.map(|home| home.join(".config")))?;
+    Some(config.join("devnull").join("init.vim"))
 }
 
 /// The message for a terminal event, if `App` cares.
@@ -160,6 +227,56 @@ mod tests {
             kind,
             state: KeyEventState::NONE,
         })
+    }
+
+    #[test]
+    fn a_leading_tilde_is_the_home_directory() {
+        let home = Some(PathBuf::from("/home/u"));
+
+        assert_eq!(
+            expand_home("~/x.vim", home.clone()),
+            PathBuf::from("/home/u/x.vim")
+        );
+        assert_eq!(expand_home("~", home.clone()), PathBuf::from("/home/u"));
+        assert_eq!(
+            expand_home("~bob/x.vim", home.clone()),
+            PathBuf::from("~bob/x.vim")
+        );
+        assert_eq!(expand_home("x.vim", home), PathBuf::from("x.vim"));
+        assert_eq!(expand_home("~/x.vim", None), PathBuf::from("~/x.vim"));
+    }
+
+    #[test]
+    fn paths_under_home_are_shown_with_a_tilde() {
+        let home = Some(PathBuf::from("/home/u"));
+
+        assert_eq!(
+            shown_path(Path::new("/home/u/.config/devnull/init.vim"), home.clone()),
+            "~/.config/devnull/init.vim"
+        );
+        assert_eq!(
+            shown_path(Path::new("/etc/init.vim"), home),
+            "/etc/init.vim"
+        );
+    }
+
+    #[test]
+    fn init_vim_lives_under_the_xdg_config_home_or_dot_config() {
+        let home = Some(PathBuf::from("/home/u"));
+
+        assert_eq!(
+            init_file(Some("/xdg".into()), home.clone()),
+            Some(PathBuf::from("/xdg/devnull/init.vim"))
+        );
+        assert_eq!(
+            init_file(None, home.clone()),
+            Some(PathBuf::from("/home/u/.config/devnull/init.vim"))
+        );
+        assert_eq!(
+            init_file(Some("relative".into()), home),
+            Some(PathBuf::from("/home/u/.config/devnull/init.vim"))
+        );
+        assert_eq!(init_file(None, None), None);
     }
 
     #[test]
