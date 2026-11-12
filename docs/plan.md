@@ -239,6 +239,36 @@ a relative socket path or a short temp dir.
 - **Fixtures**: committed fixtures are synthetic or ported from the Go testdata. Real captured responses stay in the
   scratchpad as schema reference (they contain other people's posts).
 
+## API notes (observed in M0.4)
+
+Laravel backend. Captured responses live in the scratchpad only (they contain other people's posts).
+
+- **IDs** are UUIDv7 strings; `short_hash` is the last 7 hex digits of the id.
+- **Cursor pagination** (Laravel): `links.next` is an absolute URL on the API origin, `meta.next_cursor` the opaque
+  cursor, `per_page` 20. Validate `links.next` stays on `/api/v1/log/<same log>` before following it (as the Go client
+  does).
+- **Commit**: `body`, `body_segments` (`text {text}`, inline `code {code}`, code `block {language, filename, html}`
+  where `html` is server-highlighted markup, so `dn` either parses it or re-highlights from source), `preview_segments`
+  (excerpt for long commits, else null), `mentions` (`handle`, `kind` user|organization, `offset`, `length`), `images` (`url`,
+  `width`, `height`, `description`), `link_preview` (`is_pending` while the server fetches it), `quoted_commit` (one
+  level, embedded), `reply_preview` (`data`, `next_cursor`), `poll`, counts, `starred`, `status` (`approved`; others
+  under moderation), `deleted_at`.
+- **Author**: `type` user|organization; `lane` is an int, a `#rrggbb` string, or null.
+- **Thread** `GET /commits/{id}`: `{data, ancestors, reply_participants}`; replies are a separate paged
+  `GET /commits/{id}/replies`.
+- **Profile** `GET /users/{handle}`: `{data, achievements, activity, bio_profiles, follows_you, is_following,
+  is_muting, pasteis_received, pinned_commit, streaks}`; lists at `/users/{handle}/{commits[?replies=1],followers,
+  following}`.
+- **Organization** `GET /organizations/{handle}`: `{data{…, admins}, can_claim, is_following, settings_url}`; tabs at
+  `/organizations/{handle}/{commits,mentions}`.
+- **Errors** are `{message, code?, errors?}`:
+  - 404: `{message: "No query results for model [App\\Models\\Commit] …"}` (no `code`).
+  - 401 `invalid_signature`: timestamp outside **±300 s** ("Signature expired. Check that your clock is right.").
+    `dn` should say so, not ask to reconnect.
+  - 401 `device_not_approved`: unknown or revoked key; offer `:connect`.
+- **Not observed** (no data on the account, or side effects): starred items, polls, image descriptions,
+  notifications. Use the Go testdata for those.
+
 ## Milestones
 
 Vertical slices; each ends runnable. Images affect layout, so the document model supports fixed-height block spans
@@ -252,9 +282,11 @@ from M1 even though graphics land in M6.
   and compare with the Go implementation's output for the same input. All byte-identical (results in D9).
 - [x] **M0.3 Enrollment**: enrolled a `dn` device against dev-null.sh via the loopback callback (Rust, `reqwest` 0.12 +
   `rustls`); `POST /api/v1/devices` and signed `GET /api/v1/me` both 200. Protocol recorded in D8.
-- [ ] **M0.4 Capture**: real responses for `/me`, `/log/*`, a thread, a profile, notifications and starred, kept in
-  the scratchpad. Caveat: `GET /api/v1/notifications` marks every category read on the server (the unread count lives
-  in `/me`'s `unread_notifications_count`, which does not).
+- [x] **M0.4 Capture**: 23 responses (`/me`, three logs and a second page, threads with and without ancestors,
+  replies, own and another profile, followers/following, starred, an organization and its tabs, suggested users,
+  404s) plus auth failures (clock skew, unapproved key). Notifications skipped: `GET /api/v1/notifications` marks
+  every category read on the server (the unread count lives in `/me`'s `unread_notifications_count`, which does not).
+  Findings in "API notes". The enrolled spike key now lives at `~/.config/devnull/device_ed25519` for M2.
 
 ### M1 Skeleton & feel (no network)
 
