@@ -478,7 +478,8 @@ from M1 even though graphics land in M6.
   its cursor). Saved: empty aborts as git does, the budget is checked, the server previews, and
   `reply 12/4000 → @lin? [y]es/[e]dit/[n]o` asks with the preview above; `n` (or a refusal) keeps the draft. A
   published reply joins its open thread. Shortcodes are the server's (see Open questions). Checked live with a
-  stand-in editor up to the preview, answering `n`: nothing was published.
+  stand-in editor up to the preview, answering `n`: nothing was published. Publishing since checked live by the
+  user (2026-11-12).
   Since the v1 leftovers, `:commit @org` (and `:reply`, `:quote`) posts as an organization: `author` (its handle) in
   `POST /commits`, as the Go client sends it, and `as @org` in the editor's context and the question. `/me` still
   sends neither `organizations` nor `can_post_as_organization` (checked live), so nothing is listed or checked
