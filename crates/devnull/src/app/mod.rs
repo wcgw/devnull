@@ -574,6 +574,42 @@ impl App {
             .collect()
     }
 
+    /// `:jumps`: the jumplist as Vim lists it: how far each entry is from where `<C-o>` and `<C-i>` last went, its
+    /// row and column, and the text there, or the name of its buffer when it is another; `>` marks where one is.
+    fn list_jumps(&mut self) {
+        let width = self.window_area().width;
+        let window = self.windows.current();
+        let (jumps, at) = window.jumplist();
+        let mut lines = vec![" jump line  col file/text".to_owned()];
+        for (i, jump) in jumps.iter().enumerate() {
+            let layout = Layout::new(&self.buffers[jump.buffer].doc, width);
+            let shown = jump.cursor.screen(&layout);
+            let text = if jump.buffer == window.buffer {
+                layout.segments(shown.row).map(|(text, _)| text).collect()
+            } else {
+                self.buffers[jump.buffer].name.clone()
+            };
+            lines.push(format!(
+                "{} {:2} {:5} {:4} {text}",
+                if i == at { '>' } else { ' ' },
+                i.abs_diff(at),
+                shown.row + 1,
+                shown.col,
+            ));
+        }
+        if at == jumps.len() {
+            lines.push(">".to_owned());
+        }
+        let lines = lines
+            .into_iter()
+            .map(|text| Message {
+                text,
+                kind: MessageKind::Info,
+            })
+            .collect();
+        self.mode = AppMode::MorePrompt { lines };
+    }
+
     /// The alternate buffer, as Vim calls it: the listed buffer shown last before the current one.
     fn alternate(&self) -> Option<usize> {
         let current = self.windows.current().buffer;
@@ -938,6 +974,7 @@ impl App {
             Command::Open => return self.following(Self::open),
             Command::Profile(handle) => return self.following(|app| app.profile(handle)),
             Command::Pop => return self.pop_tag(),
+            Command::Jumps => self.list_jumps(),
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Star => return self.star(),
             Command::Commit => return self.compose(composer::Answering::Nothing),

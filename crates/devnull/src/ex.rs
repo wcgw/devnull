@@ -83,6 +83,8 @@ pub enum Command {
     Hover,
     /// `:pop`: back to where `:open` or `:profile` last left for another buffer from (Vim's tag stack).
     Pop,
+    /// `:jumps`: lists the current window's jumplist.
+    Jumps,
     /// `:star`: stars the commit under the cursor, or takes its star back.
     Star,
     /// `:commit`: writes a new commit in `$EDITOR`.
@@ -207,6 +209,7 @@ enum Name {
     YankLink,
     Hover,
     Pop,
+    Jumps,
     Pick,
     Star,
     Commit,
@@ -261,6 +264,7 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("yanklink", 5, Name::YankLink),
     ("hover", 3, Name::Hover),
     ("pop", 2, Name::Pop),
+    ("jumps", 2, Name::Jumps),
     ("pick", 2, Name::Pick),
     ("star", 4, Name::Star),
     ("commit", 4, Name::Commit),
@@ -341,6 +345,7 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::YankLink => Command::YankLink,
         Name::Hover => Command::Hover,
         Name::Pop => Command::Pop,
+        Name::Jumps => Command::Jumps,
         Name::Star => Command::Star,
         Name::Commit => Command::Commit,
         Name::Reply => Command::Reply,

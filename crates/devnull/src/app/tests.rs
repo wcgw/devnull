@@ -3743,3 +3743,44 @@ fn without_an_alternate_buffer_b_hash_says_so() {
 
     assert_eq!(cmdline(&app), "E23: No alternate file");
 }
+
+#[test]
+fn jumps_lists_the_jumplist_as_vim_does() {
+    let mut app = app_with(&["one", "two", "three", "four", "five"], 50, 12);
+    let _ = press(&mut app, "/thr<CR>G");
+
+    let _ = press(&mut app, ":jumps<CR>");
+
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[rows.len() - 5..],
+        [
+            " jump line  col file/text",
+            "   2     1    0 one",
+            "   1     3    0 three",
+            ">",
+            "Press ENTER or type command to continue"
+        ]
+    );
+}
+
+#[test]
+fn jumps_into_other_buffers_show_their_names_and_where_one_went_back_to() {
+    let mut app = three_logs();
+    let _ = press(&mut app, "<C-o>");
+
+    let _ = press(&mut app, ":ju<CR>");
+
+    // Back on latest (never loaded here), between following and trending.
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[rows.len() - 5..],
+        [
+            " jump line  col file/text",
+            "   1     1    0 log/following",
+            ">  0     1    0 Loading log/latest…",
+            "   1     1    0 log/trending",
+            "Press ENTER or type command to continue"
+        ]
+    );
+}

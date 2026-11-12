@@ -437,7 +437,8 @@ from M1 even though graphics land in M6.
   their buffer, and showing another buffer is a jump (as starting to edit another file is in Vim), except from a
   status page. `<C-t>` (`:pop`) is Vim's tag stack: `:open` and `:profile` push where they left from when they show
   another buffer. `<Tab>` also jumps forward: terminals without the kitty keyboard protocol send `<C-i>` as `<Tab>`
-  (a gap since M1). Checked live without the kitty protocol: `<CR>`, `<C-o>`, `<Tab>`, `<C-t>`.
+  (a gap since M1). Checked live without the kitty protocol: `<CR>`, `<C-o>`, `<Tab>`, `<C-t>`. `:jumps` lists the
+  jumplist as Vim does (distance, row, column, the text there or the other buffer's name, `>` where one is).
 - [x] **M3.6** Pickers: fuzzy buffer switching (`<leader><leader>`) and user search (`<leader>/`). `:pick buffers`
   lists the listed buffers, the last shown first, starts on the one before, and narrows fzf-style (smartcase, word
   starts and runs score higher); `:pick users` asks `/search/profiles` once typing pauses (120 ms, as the Go client)

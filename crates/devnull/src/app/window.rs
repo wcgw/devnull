@@ -26,8 +26,8 @@ pub(super) struct Window {
 /// A place in a buffer to go back to.
 #[derive(Debug, Clone)]
 pub(super) struct Jump {
-    buffer: usize,
-    cursor: Cursor,
+    pub(super) buffer: usize,
+    pub(super) cursor: Cursor,
 }
 
 /// Where a window was in a buffer it left: cursor and scroll position.
@@ -90,6 +90,12 @@ impl Window {
         };
         self.left.insert(self.buffer, leaving);
         self.buffer = buffer;
+    }
+
+    /// The jumplist, oldest first, and the entry `<C-o>` and `<C-i>` last went to: past the end when they have not
+    /// since the last jump.
+    pub(super) fn jumplist(&self) -> (&[Jump], usize) {
+        (&self.jumps, self.jump)
     }
 
     /// Where the cursor is, to come back to.
