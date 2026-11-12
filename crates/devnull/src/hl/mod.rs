@@ -289,6 +289,8 @@ const fn attrs(attrs: Attrs) -> Spec {
 pub struct Theme {
     name: &'static str,
     specs: HashMap<Group, Spec>,
+    /// Groups drawn as another (`:hi link`).
+    links: HashMap<Group, Group>,
 }
 
 impl Default for Theme {
@@ -312,6 +314,7 @@ impl Theme {
         Ok(Self {
             name,
             specs: specs.iter().copied().collect(),
+            links: HashMap::new(),
         })
     }
 
@@ -324,7 +327,42 @@ impl Theme {
     /// How `group` is drawn.
     #[must_use]
     pub fn style(&self, group: Group) -> Style {
-        self.specs.get(&group).copied().unwrap_or_default().style()
+        self.specs
+            .get(&self.linked(group))
+            .copied()
+            .unwrap_or_default()
+            .style()
+    }
+
+    /// The group `group` is drawn as, following links; a loop of links ends where it started to repeat.
+    fn linked(&self, group: Group) -> Group {
+        let mut seen = vec![group];
+        let mut current = group;
+        while let Some(&next) = self.links.get(&current) {
+            if seen.contains(&next) {
+                break;
+            }
+            seen.push(next);
+            current = next;
+        }
+        current
+    }
+
+    /// `:hi link {from} {to}`: draws `from` as `to`, or as itself again for `None`.
+    ///
+    /// # Errors
+    ///
+    /// Vim's E411 for an unknown group.
+    pub fn link(&mut self, from: &str, to: Option<&str>) -> Result<(), String> {
+        let named = |name: &str| {
+            Group::named(name).ok_or_else(|| format!("E411: Highlight group not found: {name}"))
+        };
+        let from = named(from)?;
+        match to.map(named).transpose()? {
+            Some(to) => self.links.insert(from, to),
+            None => self.links.remove(&from),
+        };
+        Ok(())
     }
 
     /// `:hi clear`: every group back to the colorscheme's definition.
@@ -349,7 +387,11 @@ impl Theme {
             .ok_or_else(|| format!("E411: Highlight group not found: {group}"))?;
         let mut spec = self.specs.get(&group).copied().unwrap_or_default();
         if attrs.is_empty() {
-            return Ok(Some(format!("{:<15}xxx{}", group.name(), spec.describe())));
+            let shown = match self.links.get(&group) {
+                Some(to) => format!(" links to {}", to.name()),
+                None => spec.describe(),
+            };
+            return Ok(Some(format!("{:<15}xxx{shown}", group.name())));
         }
         for (key, value) in attrs {
             match key.to_ascii_lowercase().as_str() {
@@ -363,6 +405,8 @@ impl Theme {
             }
         }
         self.specs.insert(group, spec);
+        // As in Vim, highlighting a linked group unlinks it.
+        self.links.remove(&group);
         Ok(None)
     }
 }

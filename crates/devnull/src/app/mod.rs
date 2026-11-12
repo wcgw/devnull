@@ -955,6 +955,7 @@ impl App {
                 }
             }
             Command::HighlightClear => self.theme.clear(),
+            Command::HighlightLink { from, to } => self.theme.link(&from, to.as_deref())?,
             Command::Colorscheme(None) => self.info(self.theme.name().to_owned()),
             Command::Colorscheme(Some(name)) => self.theme = Theme::named(&name)?,
             Command::Source(path) => return Ok(vec![Effect::Source(path)]),

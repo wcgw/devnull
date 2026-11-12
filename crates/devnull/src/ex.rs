@@ -47,6 +47,13 @@ pub enum Command {
     },
     /// `:hi clear`: every group back to the colorscheme's defaults.
     HighlightClear,
+    /// `:hi link {from} {to}`: draws `from` as `to`; `:hi link {from} NONE` (`to` is `None`) undoes it.
+    HighlightLink {
+        /// The group drawn as another.
+        from: String,
+        /// The group it is drawn as; `None` to draw it as itself again.
+        to: Option<String>,
+    },
     /// `:colorscheme {name}`, or without a name to show the current one.
     Colorscheme(Option<String>),
     /// `:source {file}`.
@@ -430,6 +437,14 @@ fn highlight(args: &str) -> Result<Command, ExError> {
     if group == "clear" {
         return Ok(Command::HighlightClear);
     }
+    if group == "link" {
+        let from = words.next().ok_or(ExError::ArgumentRequired)?;
+        let to = words.next().ok_or(ExError::ArgumentRequired)?;
+        return Ok(Command::HighlightLink {
+            from: from.to_owned(),
+            to: (to != "NONE").then(|| to.to_owned()),
+        });
+    }
     let attrs = words
         .map(|word| {
             word.split_once('=')
@@ -698,6 +713,28 @@ mod tests {
         );
         assert_eq!(
             parse("pick").unwrap_err().to_string(),
+            "E471: Argument required"
+        );
+    }
+
+    #[test]
+    fn hi_link_names_two_groups_or_none() {
+        assert_eq!(
+            parsed("hi link DevnullHandle ErrorMsg"),
+            Command::HighlightLink {
+                from: "DevnullHandle".into(),
+                to: Some("ErrorMsg".into())
+            }
+        );
+        assert_eq!(
+            parsed("highlight link DevnullHandle NONE"),
+            Command::HighlightLink {
+                from: "DevnullHandle".into(),
+                to: None
+            }
+        );
+        assert_eq!(
+            parse("hi link DevnullHandle").unwrap_err().to_string(),
             "E471: Argument required"
         );
     }

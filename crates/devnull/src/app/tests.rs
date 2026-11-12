@@ -3806,3 +3806,44 @@ fn star_without_a_keyword_ahead_searches_the_non_blank_word_under_the_cursor() {
 
     assert_eq!(screen(&app).cursor, (4, 2));
 }
+
+#[test]
+fn hi_link_draws_a_group_as_another_until_it_is_unlinked_or_restyled() {
+    use crate::hl::Group;
+    let mut app = app_with(&["one"], 40, 6);
+    let own = app.style(Group::Handle);
+
+    let _ = press(&mut app, ":hi link DevnullHandle ErrorMsg<CR>");
+    assert_eq!(app.style(Group::Handle), app.style(Group::ErrorMsg));
+    let _ = press(&mut app, ":hi DevnullHandle<CR>");
+    assert_eq!(cmdline(&app), "DevnullHandle  xxx links to ErrorMsg");
+
+    let _ = press(&mut app, ":hi link DevnullHandle NONE<CR>");
+    assert_eq!(app.style(Group::Handle), own);
+
+    let _ = press(
+        &mut app,
+        ":hi link DevnullHandle ErrorMsg<CR>:hi DevnullHandle gui=bold<CR>",
+    );
+    assert_ne!(
+        app.style(Group::Handle),
+        app.style(Group::ErrorMsg),
+        "restyling a linked group unlinks it"
+    );
+
+    let _ = press(&mut app, ":hi link DevnullHash ErrorMsg<CR>:hi clear<CR>");
+    assert_ne!(app.style(Group::Hash), app.style(Group::ErrorMsg));
+    let _ = press(&mut app, ":hi link Nope ErrorMsg<CR>");
+    assert_eq!(cmdline(&app), "E411: Highlight group not found: Nope");
+}
+
+#[test]
+fn groups_linked_in_a_loop_still_draw() {
+    use crate::hl::Group;
+    let mut app = app_with(&["one"], 40, 6);
+
+    let _ = press(&mut app, ":hi link DevnullHash DevnullHandle<CR>:hi link DevnullHandle DevnullHash<CR>");
+
+    let _ = app.style(Group::Hash);
+    let _ = screen(&app);
+}
