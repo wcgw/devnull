@@ -668,6 +668,37 @@ fn vsplit_puts_windows_side_by_side_with_a_separator() {
 }
 
 #[test]
+fn side_by_side_statuslines_meet_under_the_separator_as_in_vim() {
+    let mut app = app_with(&["one", "two"], 21, 8);
+    let status = |app: &App, x: u16| (style_at(app, x, 6).fg, style_at(app, x, 6).bg);
+
+    let _ = press(&mut app, "<C-w>v");
+    assert_eq!(screen(&app).rows[6].chars().nth(10), Some(' '));
+    assert_eq!(
+        status(&app, 10),
+        status(&app, 9),
+        "the current window's statusline, on the left, goes on"
+    );
+    let _ = press(&mut app, "<C-w>l");
+    assert_eq!(status(&app, 10), status(&app, 9), "now another's");
+    assert_ne!(status(&app, 10), status(&app, 11));
+
+    let _ = press(&mut app, "<C-w>h:sp<CR>");
+    let rows = screen(&app).rows;
+    assert_eq!(
+        rows[3].chars().nth(10),
+        Some('│'),
+        "the bar crosses a statusline it does not meet"
+    );
+    assert_eq!(rows[6].chars().nth(10), Some(' '));
+    assert_eq!(
+        status(&app, 10),
+        status(&app, 9),
+        "the window at the bottom left, not the current one above it"
+    );
+}
+
+#[test]
 fn ctrl_w_w_cycles_through_the_windows() {
     let mut app = app_with(&["one"], 30, 16);
     let _ = press(&mut app, ":sp<CR>:sp<CR>");

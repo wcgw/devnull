@@ -40,7 +40,17 @@ pub(super) struct Arrangement {
     /// Each window with its area, statusline row included, in tree order.
     pub(super) windows: Vec<(WindowId, Rect)>,
     /// The columns separating side-by-side windows.
-    pub(super) separators: Vec<Rect>,
+    pub(super) separators: Vec<Separator>,
+}
+
+/// A column between side-by-side windows. Its last row is a row of statuslines, where it is not a bar but the
+/// statusline of the window on its left goes on, as in Vim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Separator {
+    /// Its column, from top to bottom.
+    pub(super) area: Rect,
+    /// The window on its left at its last row.
+    pub(super) left: WindowId,
 }
 
 /// All open windows and their layout. There is always at least one, and one of them is current.
@@ -261,8 +271,12 @@ fn arrange(split: &Split, area: Rect, out: &mut Arrangement) {
         arrange(child, child_area, out);
         offset += size;
         if axis == Axis::Columns && i + 1 < count {
-            out.separators
-                .push(Rect::new(area.x + offset, area.y, 1, area.height));
+            // Windows are laid out top to bottom, left to right: the last one is the child's bottom right.
+            let (left, _) = *out.windows.last().expect("a split's child holds a window");
+            out.separators.push(Separator {
+                area: Rect::new(area.x + offset, area.y, 1, area.height),
+                left,
+            });
             offset += 1;
         }
     }

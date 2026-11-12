@@ -359,9 +359,9 @@ from M1 even though graphics land in M6.
   - Jumplist per window: searches, `gg G { } ]] [[ H M L` are jumps; `<C-o>`/`<C-i>`, one entry per row.
   - `'hlsearch'` and `'incsearch'`, on as in Neovim (`Search`, `CurSearch`, `IncSearch`); `:noh` hides the
     matches until the next search. Since the v1 leftovers.
-  - Known gaps: the separator column also crosses statusline rows. (A narrow
-    statusline drops the account, then shortens the name as Vim does, `<` and its end, to keep the ruler; the
-    jumplist spans buffers since M3.5.)
+  - Since the v1 leftovers: side-by-side statuslines meet under the separator as in Vim (the left window's goes on);
+    the bar still crosses a statusline it does not meet. A narrow statusline drops the account, then shortens the
+    name as Vim does, `<` and its end, to keep the ruler; the jumplist spans buffers since M3.5.
 - [x] **M1.7** Highlight groups (`:hi` names, including `DevnullHandle` and `StatusLineMode*`); colorschemes
   `tokyonight` (= night), `tokyonight-night|storm|moon|day` and `default` (terminal colours); `:hi` (set, show, Vim's
   E411/E423/E254/E418), `:hi clear`, `:colorscheme`; `init.vim` from `$XDG_CONFIG_HOME/devnull/` or

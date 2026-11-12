@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::window::{Viewport, Window};
+use super::windows::Separator;
 use super::{App, AppMode, Message, MessageKind, text_area};
 use crate::doc::{Layout, SelectionKind};
 use crate::hl::Group;
@@ -47,12 +48,23 @@ impl App {
         frame.render_widget(Paragraph::new(bufferline), Rect::new(0, 0, width, 1));
 
         let arrangement = self.windows.arrange(self.windows_area());
-        for separator in &arrangement.separators {
-            let bar: Vec<Line<'_>> = (0..separator.height).map(|_| Line::from("│")).collect();
+        for &Separator { area, left } in &arrangement.separators {
+            let rows = area.height.saturating_sub(1);
+            let bar: Vec<Line<'_>> = (0..rows).map(|_| Line::from("│")).collect();
             frame.render_widget(
                 Paragraph::new(bar).style(self.theme.style(Group::WinSeparator)),
-                *separator,
+                Rect {
+                    height: rows,
+                    ..area
+                },
             );
+            let joint = Rect {
+                y: area.y + rows,
+                height: area.height.min(1),
+                ..area
+            };
+            let group = statusline_group(left == self.windows.current_id());
+            frame.buffer_mut().set_style(joint, self.theme.style(group));
         }
         let mut cursor = None;
         for &(id, rect) in &arrangement.windows {
@@ -237,11 +249,7 @@ impl App {
             &position(top, viewport.height, layout.row_count()),
             rect.width,
         );
-        let group = if is_current {
-            Group::StatusLine
-        } else {
-            Group::StatusLineNC
-        };
+        let group = statusline_group(is_current);
         let status_area = Rect::new(rect.x, area.bottom(), rect.width, 1);
         frame.render_widget(
             Paragraph::new(status).style(self.theme.style(group)),
@@ -445,6 +453,15 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
         used += cells;
     }
     rows
+}
+
+/// How a window's statusline looks: whether it is the current window's.
+fn statusline_group(is_current: bool) -> Group {
+    if is_current {
+        Group::StatusLine
+    } else {
+        Group::StatusLineNC
+    }
 }
 
 /// A statusline: the mode (on the current window only) and the buffer's name on the left, the ruler on the right.
