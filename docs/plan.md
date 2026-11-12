@@ -142,9 +142,31 @@ Every API request carries an SSHSIG signature (Ed25519, sha512, namespace `devnu
 - **Sign via `ssh-agent`** when `$SSH_AUTH_SOCK` holds the key (user's setup: plain `ssh-agent`). The user can
   `ssh-keygen -p` and `ssh-add` it.
 - Otherwise read the file; prompt once in the cmdline for a passphrase if it has one.
-- Crates: `ssh-key` (OpenSSH keys, SSHSIG) plus an agent client. Verify our signatures against `ssh-keygen -Y verify`
-  in tests.
 - Agents that confirm every signature are unsupported in practice (polling signs every few seconds).
+
+**Canonical message** (from the Go `auth/client.go`): lines joined with `\n`, no trailing newline added:
+
+1. timestamp (Unix seconds), 2. nonce (16 random bytes, lowercase hex), 3. method, 4. request URI (path and query
+   exactly as sent), then the signed lines:
+   - JSON requests (`devnull-api`): the body (empty string when there is none, so a GET ends in `\n`).
+   - Multipart uploads (`devnull-api-images`): comma-joined lowercase hex SHA-256 of each file, then the payload JSON.
+
+`X-SSH-Signature` is the **standard base64 of the raw SSHSIG blob** (magic preamble included), not the armored PEM.
+
+**Verified in M0.2** (scratch crate, 16/16 checks):
+
+- `ssh-key` 0.6.7 signing from the key file and `ssh-agent-client-rs` 1.1.4 signing through an agent produce blobs
+  **byte-identical** to the original's unchanged `key.go` (`x/crypto` v0.58.0) and to `ssh-keygen -Y sign`
+  (Ed25519 is deterministic), for GET and POST messages.
+- `ssh-keygen -Y verify` accepts them; rejects a wrong namespace and a tampered message. The upload namespace verifies.
+- Passphrase-encrypted key files (`ssh-keygen -p`) decrypt and sign identically; a wrong passphrase fails.
+- Generated key file is 0600. An agent without the key fails loudly (no silent fallback).
+- Crates: `ssh-key` 0.6.x (0.7 is still a release candidate), `ssh-encoding` 0.2 for the blob, `ssh-agent-client-rs`
+  1.1 (blocking; call it from `spawn_blocking`).
+
+**Test rule**: agent tests start their own `ssh-agent -D` and refuse to run unless `SSH_AUTH_SOCK` points at it and it
+is empty; never `ssh-add -D`. Absolute scratch or `target/` paths can exceed the 108-byte Unix socket path limit: use
+a relative socket path or a short temp dir.
 
 ### D10. Architecture
 
@@ -204,8 +226,8 @@ from M1 even though graphics land in M6.
 
 - [x] **M0.1 Graphics probe**: placeholders inside a scrolling buffer, native animation, and both at once, run by the
   user in Ghostty 1.4.0. All passed; D7 holds as designed (results in D7).
-- [ ] **M0.2 Signing**: generate a key, SSHSIG-sign from file and via `ssh-agent`, verify with `ssh-keygen -Y verify`,
-  and compare with the Go implementation's output for the same input.
+- [x] **M0.2 Signing**: generate a key, SSHSIG-sign from file and via `ssh-agent`, verify with `ssh-keygen -Y verify`,
+  and compare with the Go implementation's output for the same input. All byte-identical (results in D9).
 - [ ] **M0.3 Enrollment**: read the Go `auth/flow.go`, `callback.go` and `handler_linux.go`, run enrollment against
   dev-null.sh, settle the callback mechanism (loopback vs `devnull://`). User approves in the browser.
 - [ ] **M0.4 Capture**: real responses for `/me`, `/log/*`, a thread, a profile, notifications and starred, kept in
