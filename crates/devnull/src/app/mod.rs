@@ -77,6 +77,8 @@ pub struct App {
     search_generation: u64,
     /// Buffers in the order they were last shown, the latest first.
     recent: Vec<usize>,
+    /// Notifications unread, as the server last counted them.
+    unread: u64,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -283,6 +285,7 @@ impl App {
             poll_generation: 0,
             search_generation: 0,
             recent: Vec::new(),
+            unread: 0,
         }
     }
 
@@ -1100,7 +1103,10 @@ impl App {
                 return effects;
             }
             NetEvent::Connected(me) if !me.terms_accepted => Connection::Terms(me),
-            NetEvent::Connected(me) => Connection::Connected(me),
+            NetEvent::Connected(me) => {
+                self.unread = me.unread_notifications;
+                Connection::Connected(me)
+            }
             NetEvent::NoKey => Connection::NoKey,
             NetEvent::NotApproved => Connection::NotApproved,
             NetEvent::Failed(reason) => Connection::Failed(reason),

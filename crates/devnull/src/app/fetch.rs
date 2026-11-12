@@ -71,6 +71,13 @@ pub enum Request {
         /// The term.
         term: String,
     },
+    /// A page of the commits the account starred.
+    Starred {
+        /// Where the page starts; `None` for the first.
+        after: Option<Cursor>,
+    },
+    /// How many notifications are unread, without marking any read.
+    UnreadCount,
 }
 
 /// The answer to a [`Request`].
@@ -146,6 +153,18 @@ pub enum Fetched {
         term: String,
         /// What was found, or why nothing could be.
         result: Result<ProfileSearch, FetchError>,
+    },
+    /// The answer to [`Request::Starred`].
+    Starred {
+        /// Where the page was asked to start.
+        after: Option<Cursor>,
+        /// The page, or why there is none.
+        result: Result<Page<Commit>, FetchError>,
+    },
+    /// The answer to [`Request::UnreadCount`].
+    UnreadCount {
+        /// The count, or why there is none.
+        result: Result<u64, FetchError>,
     },
 }
 
@@ -299,6 +318,18 @@ impl App {
                 self.page_arrived(&source, after.is_some(), result.map(accounts))
             }
             Fetched::SearchProfiles { term, result } => self.found(&term, result),
+            Fetched::Starred { after, result } => {
+                self.page_arrived(&Source::Starred, after.is_some(), result.map(commits))
+            }
+            Fetched::UnreadCount { result } => match result {
+                Ok(count) => {
+                    self.unread = count;
+                    Vec::new()
+                }
+                Err(FetchError::NotApproved) => self.net(NetEvent::NotApproved),
+                // Asked for every poll: the next one tries again, without an error each time.
+                Err(FetchError::Failed(_)) => Vec::new(),
+            },
         }
     }
 

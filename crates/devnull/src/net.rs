@@ -205,6 +205,21 @@ impl Net {
                         result,
                     }
                 }
+                Request::Starred { after } => {
+                    let result = client
+                        .starred(after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Starred { after, result }
+                }
+                Request::UnreadCount => {
+                    let result = client
+                        .me()
+                        .await
+                        .map(|me| me.unread_notifications)
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::UnreadCount { result }
+                }
                 Request::SearchProfiles { term } => {
                     let result = client
                         .search_profiles(&term)

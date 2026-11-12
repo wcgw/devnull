@@ -167,7 +167,10 @@ impl App {
         let status = statusline(
             is_current.then_some(mode),
             &buffer.name,
-            self.connection.handle(),
+            Account {
+                handle: self.connection.handle(),
+                unread: self.unread,
+            },
             &format!("{},{}", cursor.row + 1, cursor.col + 1),
             &position(top, viewport.height, layout.row_count()),
             rect.width,
@@ -351,10 +354,12 @@ fn wrapped(text: &str, width: usize) -> Vec<String> {
 }
 
 /// A statusline: the mode (on the current window only) and the buffer's name on the left, the ruler on the right.
+/// The statusline: mode (in the current window), buffer name, then the unread notifications, the account, the
+/// ruler and where the view is.
 fn statusline(
     mode: Option<&str>,
     name: &str,
-    handle: Option<&str>,
+    account: Account<'_>,
     ruler: &str,
     position: &str,
     width: u16,
@@ -363,14 +368,29 @@ fn statusline(
         Some(mode) => format!(" {mode}  {name}"),
         None => format!(" {name}"),
     };
-    let account = handle
+    let unread = if account.unread > 0 {
+        format!("󰂚 {}  ", account.unread)
+    } else {
+        String::new()
+    };
+    let handle = account
+        .handle
         .map(|handle| format!("@{handle}  "))
         .unwrap_or_default();
-    let right = format!("{account}{ruler}  {position} ");
+    let right = format!("{unread}{handle}{ruler}  {position} ");
     let gap = usize::from(width)
         .saturating_sub(left.width() + right.width())
         .max(1);
     Line::from(format!("{left}{}{right}", " ".repeat(gap)))
+}
+
+/// What the statusline says about the account.
+#[derive(Debug, Clone, Copy)]
+struct Account<'a> {
+    /// Its handle, once connected.
+    handle: Option<&'a str>,
+    /// Its unread notifications.
+    unread: u64,
 }
 
 /// Where the view is in its buffer, as Vim's ruler says it: `All`, `Top`, `Bot`, or the share of rows above it.

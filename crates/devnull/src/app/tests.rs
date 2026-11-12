@@ -1354,10 +1354,13 @@ fn following_is_polled_every_15_seconds_and_every_30_without_focus() {
 
     assert_eq!(
         fetches(&effects),
-        [Request::Log {
-            log: Log::Following,
-            after: None
-        }]
+        [
+            Request::Log {
+                log: Log::Following,
+                after: None
+            },
+            Request::UnreadCount
+        ]
     );
     assert_eq!(poll(&effects).map(|(after, _)| after.as_secs()), Some(30));
 }
@@ -2733,4 +2736,44 @@ fn buffers_jumped_to_count_as_shown_last() {
     let _ = press(&mut app, "<Space><Space><CR>");
 
     assert!(statusline(&app).contains("log/latest"));
+}
+
+#[test]
+fn leader_s_opens_the_starred_commits() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, "<Space>s");
+
+    assert_eq!(fetches(&effects), [Request::Starred { after: None }]);
+    assert!(statusline(&app).contains("starred"));
+    let _ = arrive(
+        &mut app,
+        Fetched::Starred {
+            after: None,
+            result: Ok(page_of(5, 2, None)),
+        },
+    );
+    assert!(shows(&app, "commit 5") && shows(&app, "commit 6"));
+}
+
+#[test]
+fn the_statusline_counts_unread_notifications_and_polling_keeps_it_current() {
+    let (mut app, _) = starting();
+    let mut ada = me("ada", true);
+    ada.unread_notifications = 3;
+
+    let effects = net(&mut app, NetEvent::Connected(ada));
+
+    assert!(
+        statusline(&app).contains("󰂚 3  @ada"),
+        "{}",
+        statusline(&app)
+    );
+    let (_, token) = poll(&effects).expect("polling");
+    let _ = app.update(Msg::Wake(token));
+    let _ = arrive(&mut app, Fetched::UnreadCount { result: Ok(0) });
+    assert!(
+        !statusline(&app).contains("󰂚"),
+        "nothing unread, nothing shown"
+    );
 }

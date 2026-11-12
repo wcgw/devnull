@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use devnull_api::Log;
 
-use super::{App, Effect, Kind, Wake, WakePurpose};
+use super::{App, Effect, Kind, Request, Wake, WakePurpose};
 
 /// How often chronological logs are checked for new commits while the terminal has focus, and without it.
 const POLL_FOCUSED: Duration = Duration::from_secs(15);
@@ -59,6 +59,7 @@ impl App {
             .filter_map(|index| self.refresh(index))
             .flatten()
             .collect();
+        effects.push(Effect::Fetch(Request::UnreadCount));
         effects.push(self.next_poll());
         effects
     }

@@ -37,6 +37,8 @@ pub(super) enum Source {
     People(String, People),
     /// The commits mentioning an organization; a list alone.
     Mentions(String),
+    /// The commits the account starred; a list alone.
+    Starred,
 }
 
 impl PartialEq for Source {
@@ -48,6 +50,7 @@ impl PartialEq for Source {
             (Self::People(a, which), Self::People(b, other_which)) => {
                 a == b && which == other_which
             }
+            (Self::Starred, Self::Starred) => true,
             _ => false,
         }
     }
@@ -70,6 +73,9 @@ impl Source {
     pub(super) fn named(name: &str) -> Option<Self> {
         if let Some(log) = logs::named(name) {
             return Some(Self::Log(log));
+        }
+        if name == "starred" {
+            return Some(Self::Starred);
         }
         let rest = name.strip_prefix('@')?;
         let (handle, list) = match rest.split_once('/') {
@@ -96,13 +102,14 @@ impl Source {
             Self::Profile { handle, .. } => format!("@{handle}"),
             Self::People(handle, which) => format!("@{handle}/{}", which.name()),
             Self::Mentions(handle) => format!("@{handle}/mentions"),
+            Self::Starred => "starred".to_owned(),
         }
     }
 
     /// The request for the head, if the feed has one.
     fn head(&self) -> Option<Request> {
         match self {
-            Self::Log(_) | Self::People(..) | Self::Mentions(_) => None,
+            Self::Log(_) | Self::People(..) | Self::Mentions(_) | Self::Starred => None,
             Self::Thread(id) => Some(Request::Thread { id: id.clone() }),
             Self::Profile { handle, kind } => Some(Request::Profile {
                 handle: handle.clone(),
@@ -146,6 +153,7 @@ impl Source {
                 tab: OrganizationTab::Mentions,
                 after,
             },
+            Self::Starred => Request::Starred { after },
         })
     }
 
@@ -153,9 +161,11 @@ impl Source {
         match self {
             Self::Log(Log::Trending) => Order::Ranked,
             Self::Thread(_) => Order::Oldest,
-            Self::Log(_) | Self::Profile { .. } | Self::People(..) | Self::Mentions(_) => {
-                Order::Newest
-            }
+            Self::Log(_)
+            | Self::Profile { .. }
+            | Self::People(..)
+            | Self::Mentions(_)
+            | Self::Starred => Order::Newest,
         }
     }
 }
