@@ -47,7 +47,7 @@ pub(super) struct Arrangement {
 #[derive(Debug)]
 pub(super) struct Windows {
     tree: Split,
-    windows: HashMap<WindowId, Window>,
+    open: HashMap<WindowId, Window>,
     current: WindowId,
     next_id: u64,
 }
@@ -58,7 +58,7 @@ impl Windows {
         let id = WindowId(0);
         Self {
             tree: Split::Leaf(id),
-            windows: HashMap::from([(id, window)]),
+            open: HashMap::from([(id, window)]),
             current: id,
             next_id: 1,
         }
@@ -69,21 +69,21 @@ impl Windows {
     }
 
     pub(super) fn current(&self) -> &Window {
-        &self.windows[&self.current]
+        &self.open[&self.current]
     }
 
     pub(super) fn current_mut(&mut self) -> &mut Window {
-        self.windows
+        self.open
             .get_mut(&self.current)
             .expect("the current window is open")
     }
 
     pub(super) fn get(&self, id: WindowId) -> &Window {
-        &self.windows[&id]
+        &self.open[&id]
     }
 
     pub(super) fn count(&self) -> usize {
-        self.windows.len()
+        self.open.len()
     }
 
     /// `:split` and `:vsplit`: a copy of the current window's view goes above or to the left of it and becomes
@@ -92,7 +92,7 @@ impl Windows {
         let id = WindowId(self.next_id);
         self.next_id += 1;
         // Cloned so the new window starts where the current one is, then moves on its own.
-        self.windows.insert(id, self.current().clone());
+        self.open.insert(id, self.current().clone());
         self.tree.split(self.current, id, axis);
         self.current = id;
     }
@@ -100,14 +100,14 @@ impl Windows {
     /// `:close`: closes the current window, giving the cursor to the one before it (or after it, for the first).
     /// Returns `false`, closing nothing, when it is the last window.
     pub(super) fn close(&mut self) -> bool {
-        if self.windows.len() == 1 {
+        if self.open.len() == 1 {
             return false;
         }
         let order = self.order();
         let at = order.iter().position(|&id| id == self.current).unwrap_or(0);
         let next = if at > 0 { order[at - 1] } else { order[at + 1] };
         self.tree.remove(self.current);
-        self.windows.remove(&self.current);
+        self.open.remove(&self.current);
         self.current = next;
         true
     }
@@ -115,7 +115,7 @@ impl Windows {
     /// `:only`: closes every window but the current one.
     pub(super) fn only(&mut self) {
         self.tree = Split::Leaf(self.current);
-        self.windows.retain(|&id, _| id == self.current);
+        self.open.retain(|&id, _| id == self.current);
     }
 
     /// `<C-w>w` (`forward`) and `<C-w>W`: the next or previous window, wrapping around.
@@ -176,7 +176,7 @@ impl Windows {
 
     /// Window ids in tree order: top to bottom, left to right.
     fn order(&self) -> Vec<WindowId> {
-        let mut order = Vec::with_capacity(self.windows.len());
+        let mut order = Vec::with_capacity(self.open.len());
         self.tree.leaves(&mut order);
         order
     }

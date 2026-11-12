@@ -77,11 +77,18 @@ impl Options {
                 let on = *field(self);
                 Ok(Some(format!("{}{name}", if on { "" } else { "no" })))
             }
-            (Opt::Flag(field), SetOp::On) => set_flag(field(self), true),
-            (Opt::Flag(field), SetOp::Off) => set_flag(field(self), false),
+            (Opt::Flag(field), SetOp::On) => {
+                *field(self) = true;
+                Ok(None)
+            }
+            (Opt::Flag(field), SetOp::Off) => {
+                *field(self) = false;
+                Ok(None)
+            }
             (Opt::Flag(field), SetOp::Toggle) => {
                 let flag = field(self);
-                set_flag(flag, !*flag)
+                *flag = !*flag;
+                Ok(None)
             }
             (Opt::Number(field), SetOp::Assign(value)) => {
                 *field(self) = number(&arg.name, value)?;
@@ -112,11 +119,6 @@ impl Options {
             _ => Err(invalid()),
         }
     }
-}
-
-fn set_flag(flag: &mut bool, on: bool) -> Result<Option<String>, String> {
-    *flag = on;
-    Ok(None)
 }
 
 fn number(name: &str, value: &str) -> Result<u64, String> {

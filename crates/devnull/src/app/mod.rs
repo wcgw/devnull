@@ -14,7 +14,8 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 
 use crate::doc::{
-    Direction, Document, FoldOp, Layout, Line, Pattern, SearchOutcome, Selection, SelectionKind,
+    Direction, Document, FoldOp, Layout, Line, Motion, Pattern, SearchOutcome, Selection,
+    SelectionKind,
 };
 use crate::ex::{self, Command};
 use crate::key::Key;
@@ -417,19 +418,36 @@ impl App {
         let area = self.window_area();
         let window = self.windows.current_mut();
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+        // Searches and these motions are jumps: where they start goes into the jumplist, as in Vim.
+        let from = window.cursor.clone();
         match invocation.action {
             Action::Motion(motion) => {
                 window.cursor.apply(&layout, motion, count);
+                if is_jump(motion) {
+                    window.record_jump(&layout, from);
+                }
+                window.follow_cursor(&layout, viewport);
+            }
+            Action::JumpOlder => {
+                window.jump_older(&layout, count);
+                window.follow_cursor(&layout, viewport);
+            }
+            Action::JumpNewer => {
+                window.jump_newer(count);
                 window.follow_cursor(&layout, viewport);
             }
             Action::Scroll(scroll) => window.scroll(&layout, viewport, scroll, count),
             Action::Place(place) => window.place(&layout, viewport, place),
-            Action::ViewRow(place) => window.view_row(&layout, viewport, place, count),
+            Action::ViewRow(place) => {
+                window.view_row(&layout, viewport, place, count);
+                window.record_jump(&layout, from);
+            }
             Action::SearchWord(direction) => {
                 let case = self.options.case_mode();
                 if let Some((pattern, outcome)) =
                     window.cursor.search_word(&layout, direction, count, case)
                 {
+                    window.record_jump(&layout, from);
                     self.last_search = Some(LastSearch { pattern, direction });
                     self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
@@ -445,6 +463,9 @@ impl App {
                         direction
                     };
                     let outcome = window.cursor.search(&layout, &pattern, direction, count);
+                    if outcome != SearchOutcome::NotFound {
+                        window.record_jump(&layout, from);
+                    }
                     self.open_fold_at_cursor();
                     self.report_search(outcome, direction, "");
                 }
@@ -584,7 +605,11 @@ impl App {
         let area = self.window_area();
         let window = self.windows.current_mut();
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+        let from = window.cursor.clone();
         let outcome = window.cursor.search(&layout, &pattern, direction, count);
+        if outcome != SearchOutcome::NotFound {
+            window.record_jump(&layout, from);
+        }
         self.last_search = Some(LastSearch { pattern, direction });
         self.open_fold_at_cursor();
         self.report_search(outcome, direction, text);
@@ -651,6 +676,19 @@ impl App {
     pub(crate) fn doc_mut(&mut self) -> &mut Document {
         &mut self.buffers[self.windows.current().buffer].doc
     }
+}
+
+/// Whether `motion` is a jump, remembered in the jumplist.
+fn is_jump(motion: Motion) -> bool {
+    matches!(
+        motion,
+        Motion::GotoRow(_)
+            | Motion::LastRow
+            | Motion::ParagraphForward
+            | Motion::ParagraphBackward
+            | Motion::NextBlock
+            | Motion::PrevBlock
+    )
 }
 
 /// A window's text area: all of `rect` but its last row, the statusline.

@@ -11,7 +11,14 @@ pub(super) struct Window {
     pub(super) cursor: Cursor,
     /// The text at the first row shown.
     top: Cursor,
+    /// Where jumps started from, oldest first (Vim's jumplist).
+    jumps: Vec<Cursor>,
+    /// The entry `<C-o>` and `<C-i>` last went to; `jumps.len()` when they haven't since the last jump.
+    jump: usize,
 }
+
+/// How many positions a jumplist keeps, as in Vim.
+const MAX_JUMPS: usize = 100;
 
 /// How a window is shown: its height in rows, and the context (`'scrolloff'`) kept around the cursor.
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +44,41 @@ impl Window {
             buffer,
             cursor: Cursor::new(),
             top: Cursor::new(),
+            jumps: Vec::new(),
+            jump: 0,
+        }
+    }
+
+    /// Remembers `from`, where a jump started, as the newest jumplist entry; an older entry on the same row goes.
+    pub(super) fn record_jump(&mut self, layout: &Layout<'_>, from: Cursor) {
+        let row = from.screen(layout).row;
+        self.jumps.retain(|jump| jump.screen(layout).row != row);
+        self.jumps.push(from);
+        if self.jumps.len() > MAX_JUMPS {
+            self.jumps.remove(0);
+        }
+        self.jump = self.jumps.len();
+    }
+
+    /// `<C-o>`: back `count` entries. Going back from the newest position first remembers it, so `<C-i>` can return.
+    pub(super) fn jump_older(&mut self, layout: &Layout<'_>, count: usize) {
+        if self.jump == self.jumps.len() {
+            self.record_jump(layout, self.cursor.clone());
+            self.jump = self.jumps.len() - 1;
+        }
+        let target = self.jump.saturating_sub(count);
+        if target != self.jump {
+            self.jump = target;
+            self.cursor = self.jumps[target].clone();
+        }
+    }
+
+    /// `<C-i>`: forward `count` entries, after `<C-o>` went back.
+    pub(super) fn jump_newer(&mut self, count: usize) {
+        let target = self.jump + count;
+        if target < self.jumps.len() {
+            self.jump = target;
+            self.cursor = self.jumps[target].clone();
         }
     }
 

@@ -705,3 +705,51 @@ fn statuslines(app: &App) -> usize {
         .map(|row| row.matches("1,1").count())
         .sum()
 }
+
+#[test]
+fn ctrl_o_and_ctrl_i_walk_back_and_forth_through_jumps() {
+    let mut app = app_with(&["one", "two", "three", "four", "five"], 30, 10);
+
+    let _ = press(&mut app, "/thr<CR>G");
+    assert_eq!(screen(&app).cursor, (0, 5));
+    let _ = press(&mut app, "<C-o>");
+    assert_eq!(screen(&app).cursor, (0, 3));
+    let _ = press(&mut app, "<C-o>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+    let _ = press(&mut app, "<C-o>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+    let _ = press(&mut app, "<C-i>");
+    assert_eq!(screen(&app).cursor, (0, 3));
+    let _ = press(&mut app, "<C-i>");
+    assert_eq!(screen(&app).cursor, (0, 5));
+}
+
+#[test]
+fn ordinary_motions_are_not_jumps() {
+    let mut app = app_with(&["one", "two", "three"], 30, 10);
+
+    let _ = press(&mut app, "jj<C-o>");
+
+    assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+#[test]
+fn a_jump_after_going_back_starts_the_way_forward_again() {
+    let mut app = app_with(&["one", "two", "three", "four", "five"], 30, 10);
+    let _ = press(&mut app, "G<C-o>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+
+    let _ = press(&mut app, "3G<C-o>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+    let _ = press(&mut app, "<C-i>");
+    assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+#[test]
+fn the_jumplist_keeps_one_entry_per_row() {
+    let mut app = app_with(&["one", "two", "three", "four", "five"], 30, 10);
+
+    let _ = press(&mut app, "GggGgg<C-o><C-o>");
+
+    assert_eq!(screen(&app).cursor, (0, 5));
+}
