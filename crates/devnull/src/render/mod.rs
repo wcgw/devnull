@@ -6,7 +6,7 @@ mod notifications;
 #[cfg(test)]
 mod tests;
 
-use devnull_api::model::{AccountKind, Author, Commit, Segment};
+use devnull_api::model::{AccountKind, Author, Commit, Mention, Preview, Segment};
 
 pub use accounts::{account_block, organization_header, pinned_block, profile_header};
 pub use notifications::notification_block;
@@ -251,14 +251,24 @@ fn reply_line(reply: &Commit) -> Line {
 /// The commit's text as lines: text segments break at newlines, inline code stays in its line, code blocks get
 /// lines of their own.
 fn body_lines(commit: &Commit) -> Vec<Line> {
-    let mentioned: Vec<(String, AccountKind)> = commit
-        .mentions
+    segment_lines(&commit.body_segments, &commit.mentions)
+}
+
+/// What the server would show of a draft, from its preview: the text alone, its mentions not yet resolved.
+#[must_use]
+pub fn preview_block(preview: &Preview) -> Content {
+    segment_lines(&preview.segments, &[]).into()
+}
+
+/// `segments` as lines (see [`body_lines`]); only handles in `mentions` refer to accounts.
+fn segment_lines(segments: &[Segment], mentions: &[Mention]) -> Vec<Line> {
+    let mentioned: Vec<(String, AccountKind)> = mentions
         .iter()
         .map(|m| (m.handle.to_lowercase(), m.kind))
         .collect();
     let mut lines = Vec::new();
     let mut current: Vec<Span> = Vec::new();
-    for segment in &commit.body_segments {
+    for segment in segments {
         match segment {
             Segment::Text { text } => {
                 for (i, piece) in text.split('\n').enumerate() {

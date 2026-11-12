@@ -2,6 +2,7 @@
 
 mod actions;
 mod cmdline;
+mod composer;
 mod connection;
 mod feed;
 mod fetch;
@@ -81,6 +82,10 @@ pub struct App {
     recent: Vec<usize>,
     /// Notifications unread, as the server last counted them.
     unread: u64,
+    /// The draft being written, from opening the editor until it is published or kept.
+    composing: Option<composer::Composing>,
+    /// Drafts not published, to open again.
+    drafts: composer::Drafts,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -114,6 +119,9 @@ pub enum Msg {
     Key(Key),
     /// Text was pasted (bracketed paste). It never runs commands; on the command line it is inserted.
     Paste(String),
+    /// The editor opened by [`Effect::Edit`] closed: what it saved, or why there is nothing (it failed, or quit
+    /// with an error as Vim's `:cq` does).
+    Edited(Result<String, String>),
     /// The terminal gained focus.
     FocusGained,
     /// The terminal lost focus.
@@ -165,6 +173,11 @@ pub enum Effect {
     EnrollPasted(String),
     /// Accept the terms of this version.
     AcceptTerms(String),
+    /// Hand the terminal to the user's editor on `text`, then send [`Msg::Edited`].
+    Edit {
+        /// What the editor opens.
+        text: String,
+    },
     /// Open this link in the browser.
     OpenUrl(String),
     /// Ask the server, sending the answer back as [`Msg::Fetched`].
@@ -290,6 +303,8 @@ impl App {
             search_generation: 0,
             recent: Vec::new(),
             unread: 0,
+            composing: None,
+            drafts: composer::Drafts::new(),
         }
     }
 
@@ -339,6 +354,7 @@ impl App {
                 _ => Vec::new(),
             },
             Msg::Sourced { path, contents } => self.source(&path, contents),
+            Msg::Edited(saved) => self.edited(saved),
             Msg::Net(event) => self.net(event),
             Msg::Fetched { fetched, now } => self.fetched(fetched, now),
             Msg::FocusGained => {
@@ -850,6 +866,9 @@ impl App {
             Command::Pop => return self.pop_tag(),
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Star => return self.star(),
+            Command::Commit => return self.compose(composer::Answering::Nothing),
+            Command::Reply => return self.compose(composer::Answering::Reply(String::new())),
+            Command::Quote => return self.compose(composer::Answering::Quote(String::new())),
             Command::Delete => return self.delete(),
             Command::Follow { handle, on } => return self.follow(handle, on),
             Command::Browse { link } => return self.browse(link),

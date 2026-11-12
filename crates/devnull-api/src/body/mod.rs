@@ -104,7 +104,7 @@ pub enum BodyError {
     #[error("each link must fit within {MAX_LINK} characters")]
     LinkTooLong,
     /// More than [`MAX_LENGTH`] characters counted.
-    #[error("the commit counts {count} characters, over the {MAX_LENGTH} budget")]
+    #[error("{count}/{MAX_LENGTH} characters, over the budget")]
     OverBudget {
         /// How many it counts.
         count: usize,

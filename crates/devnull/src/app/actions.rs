@@ -3,43 +3,64 @@
 
 use devnull_api::model::Commit;
 
+use devnull_api::Draft;
+
+use super::composer::Composing;
 use super::feed::Source;
 use super::threads::short_hash;
 use super::{App, AppMode, Effect, FetchError, Kind, NetEvent, Request};
-use crate::doc::{Layout, Target};
-use crate::key::{Code, Key};
+use crate::doc::{Document, Layout, Target};
+use crate::key::{Code, Key, Mods};
 use crate::render::{commit_block, deleted_block, focused_block};
 
-/// A question in the command line, answered by the next key: `y` does it, anything else does not.
+/// A question in the command line, answered by the next key: `y` does it, anything else does not (but see
+/// [`Pending::Publish`]).
 #[derive(Debug)]
 pub(super) struct Confirm {
     question: String,
     then: Pending,
+    /// What the question is about, shown above it.
+    shown: Option<Document>,
 }
 
-/// What a confirmed question does.
+/// What a question is about.
 #[derive(Debug)]
-enum Pending {
+pub(super) enum Pending {
     /// Delete the account's commit of this id.
     Delete(String),
+    /// Publish a draft; `e` edits it again.
+    Publish { draft: Draft, composing: Composing },
 }
 
 impl Confirm {
+    pub(super) fn new(question: String, then: Pending, shown: Option<Document>) -> Self {
+        Self {
+            question,
+            then,
+            shown,
+        }
+    }
+
     /// The question, with its answers.
     pub(super) fn question(&self) -> &str {
         &self.question
     }
+
+    /// What the question is about, to show above it.
+    pub(super) fn shown(&self) -> Option<&Document> {
+        self.shown.as_ref()
+    }
 }
 
 /// The commit under the cursor, as `:browse` finds it: a quote's, else the one holding the cursor.
-struct UnderCursor {
-    id: String,
-    author: Option<String>,
+pub(super) struct UnderCursor {
+    pub(super) id: String,
+    pub(super) author: Option<String>,
     starred: bool,
 }
 
 impl App {
-    fn commit_under_cursor(&self) -> Option<UnderCursor> {
+    pub(super) fn commit_under_cursor(&self) -> Option<UnderCursor> {
         let window = self.windows.current();
         let layout = Layout::new(&self.buffers[window.buffer].doc, self.window_area().width);
         [
@@ -82,10 +103,11 @@ impl App {
         if commit.author.is_none() || commit.author.as_deref() != self.connection.handle() {
             return Err("You can only delete your own commits".to_owned());
         }
-        self.mode = AppMode::Confirm(Confirm {
-            question: format!("Delete commit {}? (y/n)", short_hash(&commit.id)),
-            then: Pending::Delete(commit.id),
-        });
+        self.mode = AppMode::Confirm(Confirm::new(
+            format!("Delete commit {}? (y/n)", short_hash(&commit.id)),
+            Pending::Delete(commit.id),
+            None,
+        ));
         Ok(Vec::new())
     }
 
@@ -115,11 +137,16 @@ impl App {
         let AppMode::Confirm(confirm) = std::mem::replace(&mut self.mode, AppMode::Normal) else {
             return Vec::new();
         };
-        if key != Key::new(Code::Char('y')) {
-            return Vec::new();
-        }
+        let answer = match key.code {
+            Code::Char(answer) if key.mods == Mods::NONE => answer,
+            _ => '\0',
+        };
         match confirm.then {
-            Pending::Delete(id) => vec![Effect::Fetch(Request::DeleteCommit { id })],
+            Pending::Delete(id) if answer == 'y' => {
+                vec![Effect::Fetch(Request::DeleteCommit { id })]
+            }
+            Pending::Delete(_) => Vec::new(),
+            Pending::Publish { draft, composing } => self.publish(answer, draft, composing),
         }
     }
 

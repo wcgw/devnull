@@ -85,6 +85,12 @@ pub enum Command {
     Pop,
     /// `:star`: stars the commit under the cursor, or takes its star back.
     Star,
+    /// `:commit`: writes a new commit in `$EDITOR`.
+    Commit,
+    /// `:reply`: writes a reply to the commit under the cursor.
+    Reply,
+    /// `:quote`: writes a quote of the commit under the cursor.
+    Quote,
     /// `:delete`: deletes the account's own commit under the cursor, once confirmed.
     Delete,
     /// `:follow [handle]` and `:unfollow [handle]`: the account named, or under the cursor (or the author of the
@@ -203,6 +209,9 @@ enum Name {
     Pop,
     Pick,
     Star,
+    Commit,
+    Reply,
+    Quote,
     Delete,
     Follow(bool),
     Edit,
@@ -254,6 +263,9 @@ const COMMANDS: &[(&str, usize, Name)] = &[
     ("pop", 2, Name::Pop),
     ("pick", 2, Name::Pick),
     ("star", 4, Name::Star),
+    ("commit", 4, Name::Commit),
+    ("reply", 3, Name::Reply),
+    ("quote", 3, Name::Quote),
     ("delete", 1, Name::Delete),
     ("follow", 3, Name::Follow(true)),
     ("unfollow", 3, Name::Follow(false)),
@@ -330,6 +342,9 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Hover => Command::Hover,
         Name::Pop => Command::Pop,
         Name::Star => Command::Star,
+        Name::Commit => Command::Commit,
+        Name::Reply => Command::Reply,
+        Name::Quote => Command::Quote,
         Name::Delete => Command::Delete,
         Name::Follow(on) => Command::Follow {
             handle: (!args.is_empty()).then(|| args.trim_start_matches('@').to_owned()),

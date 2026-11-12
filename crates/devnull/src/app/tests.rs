@@ -3193,3 +3193,283 @@ fn s_on_a_mention_stars_the_commit_holding_it() {
         }]
     );
 }
+
+/// The text the editor was asked to open, if any.
+fn edited(effects: &[Effect]) -> Option<String> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::Edit { text } => Some(text.clone()),
+        _ => None,
+    })
+}
+
+/// Saves `body` in the editor that `effects` opened, keeping what the template has below the scissors.
+fn save(app: &mut App, effects: &[Effect], body: &str) -> Vec<Effect> {
+    let text = edited(effects).expect("the editor opened");
+    let scissors = text.find("# ---").expect("a scissors line");
+    app.update(Msg::Edited(Ok(format!("{body}\n\n{}", &text[scissors..]))))
+}
+
+fn preview_of(body: &str) -> devnull_api::model::Preview {
+    serde_json::from_value(
+        serde_json::json!({ "body": body, "body_segments": [{ "type": "text", "text": body }] }),
+    )
+    .expect("preview")
+}
+
+#[test]
+fn c_opens_the_editor_on_a_new_commit_with_its_context_below_the_scissors() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, "c");
+
+    let text = edited(&effects).expect("the editor opened");
+    assert!(text.starts_with('\n'), "an empty body first: {text:?}");
+    assert!(text.contains("# ------------------------ >8 ------------------------"));
+    assert!(text.contains("# A new commit as @ada."));
+}
+
+#[test]
+fn a_saved_draft_is_previewed_then_published_once_confirmed() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+
+    let effects = save(&mut app, &effects, "hello :wave:\n# not a comment");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Preview {
+            body: "hello :wave:\n# not a comment".into()
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "hello :wave:\n# not a comment".into(),
+            result: Ok(preview_of("hello 👋")),
+        },
+    );
+    assert_eq!(cmdline(&app), "commit 7/4000? [y]es/[e]dit/[n]o");
+    assert!(
+        shows(&app, "hello 👋"),
+        "the preview shows: {:#?}",
+        screen(&app).rows
+    );
+
+    let effects = press(&mut app, "y");
+    let draft = devnull_api::Draft::Commit {
+        body: "hello :wave:\n# not a comment".into(),
+    };
+    assert_eq!(
+        fetches(&effects),
+        [Request::Publish {
+            draft: draft.clone()
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Published {
+            draft,
+            result: Ok(Box::new(starred_as("c9", false, 0))),
+        },
+    );
+    assert_eq!(cmdline(&app), "Published c9");
+    let effects = press(&mut app, "c");
+    assert!(
+        edited(&effects).expect("editor").starts_with('\n'),
+        "nothing kept once published"
+    );
+}
+
+#[test]
+fn n_keeps_the_draft_for_next_time_and_e_edits_it_again() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+    let _ = save(&mut app, &effects, "first try");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "first try".into(),
+            result: Ok(preview_of("first try")),
+        },
+    );
+
+    let effects = press(&mut app, "e");
+    assert!(edited(&effects).expect("editor").starts_with("first try\n"));
+    let _ = save(&mut app, &effects, "second try");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "second try".into(),
+            result: Ok(preview_of("second try")),
+        },
+    );
+    let effects = press(&mut app, "n");
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(cmdline(&app), "Kept as a draft");
+
+    let effects = press(&mut app, "c");
+    assert!(
+        edited(&effects)
+            .expect("editor")
+            .starts_with("second try\n")
+    );
+}
+
+#[test]
+fn r_replies_and_capital_r_quotes_the_commit_under_the_cursor() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let effects = press(&mut app, "]]r");
+    assert!(
+        edited(&effects)
+            .expect("editor")
+            .contains("# Replying to @ada: commit 2")
+    );
+    let _ = save(&mut app, &effects, "agreed");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "agreed".into(),
+            result: Ok(preview_of("agreed")),
+        },
+    );
+    assert_eq!(cmdline(&app), "reply 6/4000 → @ada? [y]es/[e]dit/[n]o");
+    let effects = press(&mut app, "y");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Publish {
+            draft: devnull_api::Draft::Reply {
+                to: "c2".into(),
+                body: "agreed".into()
+            }
+        }]
+    );
+
+    let effects = press(&mut app, "R");
+    assert!(
+        edited(&effects)
+            .expect("editor")
+            .contains("# Quoting @ada: commit 2")
+    );
+}
+
+#[test]
+fn a_reply_published_shows_in_its_thread() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let _ = press(&mut app, "<CR>");
+    let _ = arrive(
+        &mut app,
+        Fetched::Replies {
+            id: "c1".into(),
+            after: None,
+            result: Ok(page_of(10, 1, None)),
+        },
+    );
+    let thread = Fetched::Thread {
+        id: "c1".into(),
+        result: Ok(thread_of(&[], commit_with("c1", "hello", None))),
+    };
+    let _ = arrive(&mut app, thread);
+    let effects = press(&mut app, "r");
+    let _ = save(&mut app, &effects, "agreed");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "agreed".into(),
+            result: Ok(preview_of("agreed")),
+        },
+    );
+    let _ = press(&mut app, "y");
+
+    let draft = devnull_api::Draft::Reply {
+        to: "c1".into(),
+        body: "agreed".into(),
+    };
+    let _ = arrive(
+        &mut app,
+        Fetched::Published {
+            draft,
+            result: Ok(Box::new(starred_as("c99", false, 0))),
+        },
+    );
+
+    let _ = press(&mut app, "G");
+    assert!(shows(&app, "0000099"), "{:#?}", screen(&app).rows);
+}
+
+#[test]
+fn an_empty_draft_or_a_failed_editor_commits_nothing() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+
+    let effects = save(&mut app, &effects, "  \n ");
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(
+        cmdline(&app),
+        "Aborting commit due to empty commit message."
+    );
+
+    let _ = press(&mut app, "c");
+    let effects = app.update(Msg::Edited(Err("the editor exited with 1".into())));
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(cmdline(&app), "Not committed: the editor exited with 1");
+}
+
+#[test]
+fn a_draft_over_budget_is_kept_and_not_sent() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+    let long = "x".repeat(4001);
+
+    let effects = save(&mut app, &effects, &long);
+
+    assert_eq!(fetches(&effects), []);
+    assert_eq!(
+        cmdline(&app),
+        "Not committed: 4001/4000 characters, over the budget"
+    );
+    let effects = press(&mut app, "c");
+    assert!(edited(&effects).expect("editor").starts_with(&long));
+}
+
+#[test]
+fn a_draft_the_server_refuses_is_kept_with_its_reason() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+    let _ = save(&mut app, &effects, "hi");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "hi".into(),
+            result: Err(FetchError::Failed("The body field is required.".into())),
+        },
+    );
+
+    assert_eq!(cmdline(&app), "Not committed: The body field is required.");
+    let effects = press(&mut app, "c");
+    assert!(edited(&effects).expect("editor").starts_with("hi\n"));
+}
+
+#[test]
+fn emptying_a_kept_draft_lets_it_go() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let effects = press(&mut app, "c");
+    let _ = save(&mut app, &effects, "maybe later");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "maybe later".into(),
+            result: Ok(preview_of("maybe later")),
+        },
+    );
+    let _ = press(&mut app, "n");
+
+    let effects = press(&mut app, "c");
+    let _ = save(&mut app, &effects, "");
+
+    let effects = press(&mut app, "c");
+    assert!(
+        edited(&effects).expect("editor").starts_with('\n'),
+        "an empty draft is not kept"
+    );
+}

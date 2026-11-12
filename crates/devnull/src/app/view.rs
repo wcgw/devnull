@@ -93,6 +93,9 @@ impl App {
                 return;
             }
             AppMode::Confirm(confirm) => {
+                if let Some(shown) = confirm.shown() {
+                    self.render_shown(frame, shown);
+                }
                 let question = confirm.question();
                 frame.render_widget(Paragraph::new(question), cmdline_area);
                 frame.set_cursor_position(Position::new(
@@ -252,6 +255,36 @@ impl App {
             Paragraph::new(shown),
             Rect::new(x, area.y, SHOWCMD_WIDTH, 1),
         );
+    }
+
+    /// `shown` in a bordered box just above the command line, as tall as it needs, up to half the screen.
+    fn render_shown(&self, frame: &mut Frame<'_>, shown: &crate::doc::Document) {
+        let (width, height) = self.size;
+        if width < 4 || height < 6 {
+            return;
+        }
+        let inner_width = width - 2;
+        let layout = Layout::new(shown, inner_width);
+        let rows = to_u16(layout.row_count()).clamp(1, height / 2);
+        let area = Rect::new(0, height - 1 - (rows + 2), width, rows + 2);
+        let block = Block::bordered()
+            .title(" Preview ")
+            .border_style(self.theme.style(Group::FloatBorder))
+            .style(self.theme.style(Group::NormalFloat));
+        let inner = block.inner(area);
+        frame.render_widget(Clear, area);
+        frame.render_widget(block, area);
+        let lines: Vec<Line<'_>> = (0..layout.row_count().min(usize::from(rows)))
+            .map(|row| {
+                Line::from(
+                    layout
+                        .segments(row)
+                        .map(|(text, group)| Span::styled(text, self.theme.style(group)))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(lines), inner);
     }
 
     /// The which-key popup: what may follow the pending keys, in columns, just above the command line.

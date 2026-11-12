@@ -1020,3 +1020,12 @@ fn word_motions_treat_a_closed_fold_as_one_stop() {
         [at(1, 0), at(0, 0)]
     );
 }
+
+#[test]
+fn a_block_s_lines_can_be_read_back() {
+    let doc = doc(&[("a", &["header", "body"])]);
+
+    assert_eq!(doc.line_text("a", 1), Some("body"));
+    assert_eq!(doc.line_text("a", 2), None);
+    assert_eq!(doc.line_text("b", 0), None);
+}

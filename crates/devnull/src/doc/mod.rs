@@ -565,6 +565,13 @@ impl Document {
             .map_or(self.blocks[block].folds[index].closed, |open| !open)
     }
 
+    /// The text of line `line` (from 0) of block `key`, if both are there.
+    #[must_use]
+    pub fn line_text(&self, key: impl Into<BlockKey>, line: usize) -> Option<&str> {
+        let block = &self.blocks[*self.index.get(&key.into())?];
+        block.lines.get(line).map(|shaped| shaped.text.as_str())
+    }
+
     /// Whether a block with this key is in the document.
     #[must_use]
     pub fn contains(&self, key: impl Into<BlockKey>) -> bool {

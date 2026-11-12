@@ -1,9 +1,9 @@
 //! What feeds ask dev-null.sh for, and how the answers reach their buffers.
 
 use devnull_api::model::{
-    Account, AccountKind, AccountPage, Commit, Cursor, Inbox, Page, ProfileSearch, Thread,
+    Account, AccountKind, AccountPage, Commit, Cursor, Inbox, Page, Preview, ProfileSearch, Thread,
 };
-use devnull_api::{Category, Log, OrganizationTab, People};
+use devnull_api::{Category, Draft, Log, OrganizationTab, People};
 
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
 use super::{App, Buffer, Effect, Kind, NetEvent, threads};
@@ -105,6 +105,16 @@ pub enum Request {
     DeleteCommit {
         /// The commit's id.
         id: String,
+    },
+    /// A draft's text as the server would keep and show it; publishes nothing.
+    Preview {
+        /// The draft's text.
+        body: String,
+    },
+    /// Publish a draft.
+    Publish {
+        /// The draft.
+        draft: Draft,
     },
 }
 
@@ -227,6 +237,20 @@ pub enum Fetched {
         id: String,
         /// Done, or why not.
         result: Result<(), FetchError>,
+    },
+    /// The answer to [`Request::Preview`].
+    Preview {
+        /// The draft's text.
+        body: String,
+        /// The preview, or why the server refuses the text.
+        result: Result<Preview, FetchError>,
+    },
+    /// The answer to [`Request::Publish`].
+    Published {
+        /// The draft.
+        draft: Draft,
+        /// The commit as published, or why not. Boxed: commits are large.
+        result: Result<Box<Commit>, FetchError>,
     },
 }
 
@@ -422,6 +446,8 @@ impl App {
             Fetched::Star { id, on, result } => self.starred(&id, on, result, now),
             Fetched::Follow { handle, on, result } => self.followed(&handle, on, result),
             Fetched::DeleteCommit { id, result } => self.deleted(&id, result),
+            Fetched::Preview { body, result } => self.previewed(body, result),
+            Fetched::Published { draft, result } => self.published(&draft, result, now),
             Fetched::Starred { after, result } => {
                 self.page_arrived(&Source::Starred, after.is_some(), result.map(commits))
             }

@@ -2,10 +2,10 @@
 //! [`Effect`]s.
 
 use std::io::{self, Stdout, stdout};
-use std::ops::ControlFlow;
+
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::event::{
@@ -67,7 +67,7 @@ pub async fn run() -> io::Result<()> {
         }
     }
     for effect in app.start() {
-        if perform(effect, &later, &mut net)?.is_break() {
+        if let Step::Quit = perform(effect, &later, &mut net)? {
             return Ok(());
         }
     }
@@ -87,21 +87,36 @@ pub async fn run() -> io::Result<()> {
             Some(msg) = arrived.recv() => msg,
         };
         for effect in app.update(msg) {
-            if perform(effect, &later, &mut net)?.is_break() {
-                return Ok(());
+            match perform(effect, &later, &mut net)? {
+                Step::Go => {}
+                Step::Quit => return Ok(()),
+                Step::Edit(text) => {
+                    // The editor reads the keys until it exits: stop reading them meanwhile.
+                    drop(events);
+                    let saved = terminal.edit(&text)?;
+                    events = EventStream::new();
+                    // Fails only once the loop has ended.
+                    let _ = later.send(Msg::Edited(saved));
+                }
             }
         }
     }
 }
 
-/// Carries out one effect; `Break` means quit. Effects that finish later send their result through `later`.
-fn perform(
-    effect: Effect,
-    later: &mpsc::UnboundedSender<Msg>,
-    net: &mut Net,
-) -> io::Result<ControlFlow<()>> {
+/// What the loop does after an effect.
+enum Step {
+    Go,
+    Quit,
+    /// Hand the terminal to the editor on this text.
+    Edit(String),
+}
+
+/// Carries out one effect, but for the editor, which needs the terminal. Effects that finish later send their result
+/// through `later`.
+fn perform(effect: Effect, later: &mpsc::UnboundedSender<Msg>, net: &mut Net) -> io::Result<Step> {
     match effect {
-        Effect::Quit => return Ok(ControlFlow::Break(())),
+        Effect::Quit => return Ok(Step::Quit),
+        Effect::Edit { text } => return Ok(Step::Edit(text)),
         Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
         // Sending below only fails once the loop has ended, when nobody needs the result any more.
         Effect::Wake { after, token } => {
@@ -135,7 +150,71 @@ fn perform(
             });
         }
     }
-    Ok(ControlFlow::Continue(()))
+    Ok(Step::Go)
+}
+
+/// Counts drafts opened, so each gets a file of its own.
+static EDITS: AtomicUsize = AtomicUsize::new(0);
+
+/// The user's editor (D3): `$EDITOR`, else `$VISUAL`, else `nvim` when installed, else `vi`.
+fn editor() -> String {
+    let set = |name| {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    set("EDITOR").or_else(|| set("VISUAL")).unwrap_or_else(|| {
+        let installed = std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("nvim").is_file()));
+        if installed { "nvim" } else { "vi" }.to_owned()
+    })
+}
+
+/// Where drafts are written (D3): `$XDG_RUNTIME_DIR` (memory only, the user's alone), else the temporary directory.
+fn drafts_dir() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute() && dir.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+/// Runs `editor` (a shell command, as `$EDITOR` may hold arguments) on a file of `dir` holding `text`, readable by
+/// the user alone and removed after; what it saved, or why there is nothing: it could not run, or exited with an
+/// error (`:cq`).
+fn run_editor(editor: &str, dir: &Path, text: &str) -> Result<String, String> {
+    let path = dir.join(format!(
+        "dn-draft-{}-{}.md",
+        std::process::id(),
+        EDITS.fetch_add(1, Ordering::SeqCst)
+    ));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options
+        .open(&path)
+        .and_then(|mut file| io::Write::write_all(&mut file, text.as_bytes()));
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&path);
+        return Err(format!("cannot write the draft: {error}"));
+    }
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("dn")
+        .arg(&path)
+        .status();
+    let saved = std::fs::read_to_string(&path);
+    // The draft stays in the app's memory, not on disk.
+    let _ = std::fs::remove_file(&path);
+    match status {
+        Err(error) => Err(format!("cannot run {editor}: {error}")),
+        Ok(status) if !status.success() => Err(match status.code() {
+            Some(code) => format!("the editor exited with {code}"),
+            None => "the editor was stopped".to_owned(),
+        }),
+        Ok(_) => saved.map_err(|error| format!("cannot read the draft: {error}")),
+    }
 }
 
 /// `path` with a leading `~` standing for `home`, when there is one.
@@ -187,21 +266,19 @@ static KEYBOARD_ENHANCED: AtomicBool = AtomicBool::new(false);
 /// kitty keyboard protocol (so `<C-i>` and `<Tab>` differ). Dropping it, or panicking, restores the terminal.
 struct Session {
     terminal: DefaultTerminal,
+    /// Whether the terminal speaks the kitty keyboard protocol, asked once: asking takes a round trip.
+    keyboard: bool,
 }
 
 impl Session {
     fn start() -> io::Result<Self> {
         // Raw mode, the alternate screen, and a panic hook that leaves both.
         let terminal = ratatui::try_init()?;
-        let session = Self { terminal };
-        execute!(stdout(), EnableFocusChange, EnableBracketedPaste)?;
-        if supports_keyboard_enhancement().unwrap_or(false) {
-            execute!(
-                stdout(),
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-            )?;
-            KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
-        }
+        let session = Self {
+            terminal,
+            keyboard: supports_keyboard_enhancement().unwrap_or(false),
+        };
+        enter_modes(session.keyboard)?;
         // Runs before ratatui's hook, which this one wraps.
         let ratatui_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
@@ -210,6 +287,41 @@ impl Session {
         }));
         Ok(session)
     }
+}
+
+impl Session {
+    /// Hands the terminal to the user's editor on `text` until it exits, then takes it back; what it saved, or why
+    /// there is nothing.
+    fn edit(&mut self, text: &str) -> io::Result<Result<String, String>> {
+        leave_modes();
+        ratatui::restore();
+        let saved = run_editor(&editor(), &drafts_dir(), text);
+        crossterm::terminal::enable_raw_mode()?;
+        execute!(
+            stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        )?;
+        enter_modes(self.keyboard)?;
+        // A blank screen, and a terminal that knows it, so the next draw paints it all. Not `Terminal::clear`: it
+        // asks the terminal where the cursor is, and gives up with an error when the answer is slow.
+        self.terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))?;
+        Ok(saved)
+    }
+}
+
+/// Turns on the modes `dn` adds on top of ratatui's: focus reporting, bracketed paste and, when the terminal speaks
+/// it (`keyboard`), the kitty keyboard protocol.
+fn enter_modes(keyboard: bool) -> io::Result<()> {
+    execute!(stdout(), EnableFocusChange, EnableBracketedPaste)?;
+    if keyboard {
+        execute!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+        KEYBOARD_ENHANCED.store(true, Ordering::SeqCst);
+    }
+    Ok(())
 }
 
 /// Turns off the modes `Session::start` added on top of ratatui's. Errors are ignored: this runs while exiting or
@@ -337,5 +449,50 @@ mod tests {
                 height: 24
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use super::*;
+
+    fn files(dir: &Path) -> usize {
+        std::fs::read_dir(dir).expect("dir").count()
+    }
+
+    #[test]
+    fn what_the_editor_saved_comes_back_and_the_draft_file_goes() {
+        let dir = tempfile::tempdir().expect("dir");
+
+        let saved = run_editor("printf 'saved' >", dir.path(), "draft");
+
+        assert_eq!(saved, Ok("saved".to_owned()));
+        assert_eq!(files(dir.path()), 0);
+    }
+
+    #[test]
+    fn an_editor_quitting_with_an_error_gives_nothing() {
+        let dir = tempfile::tempdir().expect("dir");
+
+        let saved = run_editor("false", dir.path(), "draft");
+
+        assert_eq!(saved, Err("the editor exited with 1".to_owned()));
+        assert_eq!(files(dir.path()), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_draft_is_the_user_s_alone_and_editors_may_take_arguments() {
+        let dir = tempfile::tempdir().expect("dir");
+
+        let mode = run_editor(
+            "f() { stat -c %a \"$1\" > \"$1\"; }; f",
+            dir.path(),
+            "draft",
+        );
+        let edited = run_editor("sed -i s/draft/done/", dir.path(), "a draft");
+
+        assert_eq!(mode, Ok("600\n".to_owned()));
+        assert_eq!(edited, Ok("a done".to_owned()));
     }
 }

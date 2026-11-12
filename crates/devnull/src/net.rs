@@ -232,6 +232,21 @@ impl Net {
                         .map_err(|error| fetch_error(&error));
                     Fetched::Follow { handle, on, result }
                 }
+                Request::Preview { body } => {
+                    let result = client
+                        .preview(&body)
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Preview { body, result }
+                }
+                Request::Publish { draft } => {
+                    let result = client
+                        .publish(&draft)
+                        .await
+                        .map(Box::new)
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Published { draft, result }
+                }
                 Request::DeleteCommit { id } => {
                     let result = client
                         .delete_commit(&id)

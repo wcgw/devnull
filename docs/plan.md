@@ -463,7 +463,13 @@ from M1 even though graphics land in M6.
   account under the cursor as `gX` finds it; a star redraws the commit wherever it shows (a thread's own, whole),
   following refreshes an open profile, and a deleted commit says so where it was. Only against a fake server: each
   writes to the account.
-- [ ] **M5.3** `$EDITOR` composer for commit/reply/quote with server preview and keep-draft (D3); `gy` is done (M3.4).
+- [x] **M5.3** `$EDITOR` composer for commit/reply/quote with server preview and keep-draft (D3); `gy` is done (M3.4).
+  `c`/`r`/`R` (`:commit`, `:reply`, `:quote`) open the kept draft or an empty one, the context below the scissors;
+  the editor gets the terminal (the key reader stopped, the screen redrawn after without asking the terminal for
+  its cursor). Saved: empty aborts as git does, the budget is checked, the server previews, and
+  `reply 12/4000 → @lin? [y]es/[e]dit/[n]o` asks with the preview above; `n` (or a refusal) keeps the draft. A
+  published reply joins its open thread. Shortcodes are the server's (see Open questions). Not done: posting as an
+  organization. Checked live with a stand-in editor up to the preview, answering `n`: nothing was published.
 
 ### M6 Graphics
 
