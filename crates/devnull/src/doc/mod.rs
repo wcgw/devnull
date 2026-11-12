@@ -480,6 +480,12 @@ impl Document {
             .map_or(self.blocks[block].folds[index].closed, |open| !open)
     }
 
+    /// Whether a block with this key is in the document.
+    #[must_use]
+    pub fn contains(&self, key: impl Into<BlockKey>) -> bool {
+        self.index.contains_key(&key.into())
+    }
+
     /// Whether the document has no blocks.
     #[must_use]
     pub fn is_empty(&self) -> bool {

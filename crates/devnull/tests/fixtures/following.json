@@ -1,0 +1,236 @@
+{
+ "data": [
+  {
+   "id": "01a1d000-0000-7000-8000-000007f3a9c1",
+   "short_hash": "7f3a9c1",
+   "body": "Shipped the new parser today. Thanks @mrivers for the review!",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Shipped the new parser today. Thanks @mrivers for the review!"
+    }
+   ],
+   "mentions": [
+    {
+     "handle": "mrivers",
+     "kind": "user",
+     "offset": 37,
+     "length": 8
+    }
+   ],
+   "author": {
+    "id": "u-adaq",
+    "handle": "adaq",
+    "name": "Ada Quill",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 0
+   },
+   "created_at": "2026-11-12T15:11:40.000000Z",
+   "html_url": "https://dev-null.sh/@adaq/7f3a9c1",
+   "stars_count": 12,
+   "replies_count": 3,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d001-0000-7000-8000-00000b21e0d4",
+   "short_hash": "b21e0d4",
+   "body": "Reminder that `cargo test -- --nocapture` exists and will save your afternoon.",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Reminder that "
+    },
+    {
+     "type": "code",
+     "code": "cargo test -- --nocapture"
+    },
+    {
+     "type": "text",
+     "text": " exists and will save your afternoon."
+    }
+   ],
+   "mentions": [],
+   "author": {
+    "id": "u-mrivers",
+    "handle": "mrivers",
+    "name": "Mo Rivers",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 1
+   },
+   "created_at": "2026-11-12T14:59:40.000000Z",
+   "html_url": "https://dev-null.sh/@mrivers/b21e0d4",
+   "stars_count": 4,
+   "replies_count": 0,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d002-0000-7000-8000-000000c9d77e",
+   "short_hash": "0c9d77e",
+   "body": "Spent the morning chasing a flaky test. Long story, so here goes.\nIt only failed on CI, only on Tuesdays, and only when the cache was warm.\nTurned out the fixture used the weekday to pick a timezone. Nobody remembers why.\nRetried it forty times with the cache cold. Green every time.\nWarmed the cache, set the clock to a Tuesday: red.\nPinned the timezone in the fixture and deleted the weekday logic.\nMoral: never let a test read the clock. Write-up at https://example.org/flaky-tuesdays",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Spent the morning chasing a flaky test. Long story, so here goes.\nIt only failed on CI, only on Tuesdays, and only when the cache was warm.\nTurned out the fixture used the weekday to pick a timezone. Nobody remembers why.\nRetried it forty times with the cache cold. Green every time.\nWarmed the cache, set the clock to a Tuesday: red.\nPinned the timezone in the fixture and deleted the weekday logic.\nMoral: never let a test read the clock. Write-up at https://example.org/flaky-tuesdays"
+    }
+   ],
+   "mentions": [],
+   "author": {
+    "id": "u-ivarga",
+    "handle": "ivarga",
+    "name": "Ines Varga",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 2
+   },
+   "created_at": "2026-11-12T14:32:40.000000Z",
+   "html_url": "https://dev-null.sh/@ivarga/0c9d77e",
+   "stars_count": 31,
+   "replies_count": 7,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d003-0000-7000-8000-000005e11f02",
+   "short_hash": "5e11f02",
+   "body": "Does anyone else use `jj` for everything now? Asking for @adaq.",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Does anyone else use "
+    },
+    {
+     "type": "code",
+     "code": "jj"
+    },
+    {
+     "type": "text",
+     "text": " for everything now? Asking for @adaq."
+    }
+   ],
+   "mentions": [
+    {
+     "handle": "adaq",
+     "kind": "user",
+     "offset": 57,
+     "length": 5
+    }
+   ],
+   "author": {
+    "id": "u-tokafor",
+    "handle": "tokafor",
+    "name": "Tom Okafor",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 3
+   },
+   "created_at": "2026-11-12T14:13:40.000000Z",
+   "html_url": "https://dev-null.sh/@tokafor/5e11f02",
+   "stars_count": 2,
+   "replies_count": 5,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d004-0000-7000-8000-00000a8c40b9",
+   "short_hash": "a8c40b9",
+   "body": "Released v0.4 of my little TUI toolkit 🦀 https://example.org/tui-kit",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Released v0.4 of my little TUI toolkit 🦀 https://example.org/tui-kit"
+    }
+   ],
+   "mentions": [],
+   "author": {
+    "id": "u-lhara",
+    "handle": "lhara",
+    "name": "Lin Hara",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 4
+   },
+   "created_at": "2026-11-12T13:13:40.000000Z",
+   "html_url": "https://dev-null.sh/@lhara/a8c40b9",
+   "stars_count": 18,
+   "replies_count": 2,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d005-0000-7000-8000-0000019bf6e8",
+   "short_hash": "19bf6e8",
+   "body": "Coffee, then code review. In that order, always.",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Coffee, then code review. In that order, always."
+    }
+   ],
+   "mentions": [],
+   "author": {
+    "id": "u-sortiz",
+    "handle": "sortiz",
+    "name": "Sam Ortiz",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 5
+   },
+   "created_at": "2026-11-12T10:13:40.000000Z",
+   "html_url": "https://dev-null.sh/@sortiz/19bf6e8",
+   "stars_count": 6,
+   "replies_count": 1,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  },
+  {
+   "id": "01a1d006-0000-7000-8000-00000c3a2e51",
+   "short_hash": "c3a2e51",
+   "body": "Pairing with @lhara on the release pipeline tomorrow. Bring snacks.",
+   "body_segments": [
+    {
+     "type": "text",
+     "text": "Pairing with @lhara on the release pipeline tomorrow. Bring snacks."
+    }
+   ],
+   "mentions": [
+    {
+     "handle": "lhara",
+     "kind": "user",
+     "offset": 13,
+     "length": 6
+    }
+   ],
+   "author": {
+    "id": "u-ivarga",
+    "handle": "ivarga",
+    "name": "Ines Varga",
+    "avatar_url": null,
+    "type": "user",
+    "lane": 6
+   },
+   "created_at": "2026-11-12T07:13:40.000000Z",
+   "html_url": "https://dev-null.sh/@ivarga/c3a2e51",
+   "stars_count": 3,
+   "replies_count": 0,
+   "starred": false,
+   "status": "approved",
+   "images": []
+  }
+ ],
+ "links": {
+  "next": null
+ },
+ "meta": {
+  "next_cursor": null
+ }
+}

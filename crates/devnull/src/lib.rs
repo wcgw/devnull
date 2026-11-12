@@ -5,9 +5,9 @@
 pub mod app;
 pub mod doc;
 pub mod ex;
-pub mod fake;
 pub mod hl;
 pub mod key;
 pub mod keymap;
 mod net;
+pub mod render;
 pub mod runtime;

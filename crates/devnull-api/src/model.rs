@@ -279,6 +279,22 @@ pub struct Page<T> {
     pub next: Option<Cursor>,
 }
 
+impl<T> Page<T> {
+    /// A page of `items`, followed by the page `next` points at, if any.
+    #[must_use]
+    pub fn new(items: Vec<T>, next: Option<Cursor>) -> Self {
+        Self { items, next }
+    }
+}
+
 /// Where a list's next page starts, as the server gave it. Opaque.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cursor(pub(crate) String);
+
+impl Cursor {
+    /// A cursor as the server gave it, such as one kept from an earlier page.
+    #[must_use]
+    pub fn new(cursor: impl Into<String>) -> Self {
+        Self(cursor.into())
+    }
+}

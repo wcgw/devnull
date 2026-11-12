@@ -1,28 +1,28 @@
 ---
 source: crates/devnull/src/app/tests.rs
-assertion_line: 902
+assertion_line: 930
 expression: "screen(&app).rows.join(\"\\n\")"
 ---
  log/following
 Ada Quill @adaq · 2m · 7f3a9c1
 Shipped the new parser today. Thanks @mrivers for the review!
-★ 12  ↩ 3
+☆ 12  ↩ 3
 
 Mo Rivers @mrivers · 14m · b21e0d4
 Reminder that cargo test -- --nocapture exists and will save your afternoon.
-★ 4  ↩ 0
+☆ 4  ↩ 0
 
 Ines Varga @ivarga · 41m · 0c9d77e
 Spent the morning chasing a flaky test. Long story, so here goes.
 It only failed on CI, only on Tuesdays, and only when the cache was warm.
-… 2 more lines
-★ 31  ↩ 7
+Turned out the fixture used the weekday to pick a timezone. Nobody remembers
+why.
+Retried it forty times with the cache cold. Green every time.
+Warmed the cache, set the clock to a Tuesday: red.
+Pinned the timezone in the fixture and deleted the weekday logic.
+… 1 more line
+☆ 31  ↩ 7
 
 Tom Okafor @tokafor · 1h · 5e11f02
 Does anyone else use jj for everything now? Asking for @adaq.
-★ 2  ↩ 5
-
-Lin Hara @lhara · 2h · a8c40b9
-Released v0.4 of my little TUI toolkit 🦀  https://example.org/tui-kit
-★ 18  ↩ 2
  NORMAL  log/following                                           @ada  1,1  Top

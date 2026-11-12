@@ -10,7 +10,7 @@ use devnull_api::{ApiError, Client, ORIGIN};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::app::{Msg, NetEvent};
+use crate::app::{FetchError, Fetched, Msg, NetEvent, Request};
 
 /// What the device is called on dev-null.sh's device list.
 const DEVICE_NAME: &str = "dn";
@@ -136,6 +136,30 @@ impl Net {
         self.key.clone()
     }
 
+    /// Asks the server for `request`, answering with [`Msg::Fetched`].
+    pub(crate) fn fetch(&self, request: Request) {
+        let Some(client) = self.client() else {
+            return report(&self.later, NetEvent::Error("Not connected".to_owned()));
+        };
+        let later = self.later.clone();
+        tokio::spawn(async move {
+            let fetched = match request {
+                Request::Log { log, after } => {
+                    let result = client
+                        .log(log, after.as_ref())
+                        .await
+                        .map_err(|error| fetch_error(&error));
+                    Fetched::Log { log, after, result }
+                }
+            };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs());
+            // Fails only once the runtime's loop has ended, when nobody needs the answer.
+            let _ = later.send(Msg::Fetched { fetched, now });
+        });
+    }
+
     fn client(&self) -> Option<Client> {
         // Cloned out so the lock is never held across `.await`; a poisoned lock still holds a usable client.
         self.client
@@ -217,6 +241,13 @@ async fn approve(
         }
         Err(EnrollError::Api(error)) => report(&later, failure(&error)),
         Err(error) => report(&later, NetEvent::Failed(error.to_string())),
+    }
+}
+
+fn fetch_error(error: &ApiError) -> FetchError {
+    match error {
+        ApiError::NotApproved => FetchError::NotApproved,
+        other => FetchError::Failed(other.to_string()),
     }
 }
 

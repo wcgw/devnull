@@ -5,6 +5,9 @@ use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 
 use super::*;
+use devnull_api::Log;
+use devnull_api::model::{Commit, Page};
+
 use crate::doc::{Content, Document, Fold, Line};
 use crate::hl::Group;
 use crate::key::{Key, parse_keys};
@@ -886,12 +889,37 @@ fn long_messages_wrap_in_the_message_view() {
     );
 }
 
-/// The app as `dn` starts it, in an 80 × 24 terminal, once connected as `@ada`.
+/// When the following fixture was "fetched": 2026-11-12T15:13:40Z.
+const FIXTURE_NOW: u64 = 1_794_496_420;
+
+/// The invented following log (`tests/fixtures/following.json`), as the API sends it.
+fn following_page() -> Page<Commit> {
+    let page: serde_json::Value =
+        serde_json::from_str(include_str!("../../tests/fixtures/following.json")).expect("fixture");
+    Page::new(
+        serde_json::from_value(page["data"].clone()).expect("commits"),
+        None,
+    )
+}
+
+/// The app as `dn` starts it, in an 80 × 24 terminal, connected as `@ada` and with the following log loaded.
 fn started() -> App {
     let mut app = App::new();
-    let _ = app.update(Msg::Resize { width: 80, height: 24 });
+    let _ = app.update(Msg::Resize {
+        width: 80,
+        height: 24,
+    });
     let _ = app.start();
     let _ = app.update(Msg::Net(NetEvent::Connected(me("ada", true))));
+    let fetched = Fetched::Log {
+        log: Log::Following,
+        after: None,
+        result: Ok(following_page()),
+    };
+    let _ = app.update(Msg::Fetched {
+        fetched,
+        now: FIXTURE_NOW,
+    });
     app
 }
 
@@ -908,7 +936,8 @@ fn double_brackets_go_from_commit_to_commit_and_zo_shows_the_rest_of_a_long_one(
 
     let _ = press(&mut app, "2]]");
     assert!(screen(&app).rows[screen(&app).cursor.1 as usize].starts_with("Ines Varga @ivarga"));
-    let _ = press(&mut app, "jjjzo");
+    // The header, six lines of text (one wraps onto a second row at 80 columns), then the fold.
+    let _ = press(&mut app, "8jzo");
     let rows = screen(&app).rows;
     assert!(
         rows.iter()
@@ -1027,4 +1056,71 @@ fn terms_must_be_agreed_to_before_anything_else() {
         press(&mut app, ":agree<CR>"),
         [Effect::AcceptTerms("2026-11-01".into())]
     );
+}
+
+#[test]
+fn once_connected_the_following_log_is_fetched_and_shows_while_loading() {
+    let (mut app, _) = starting();
+
+    let effects = net(&mut app, NetEvent::Connected(me("ada", true)));
+
+    assert_eq!(
+        effects,
+        [Effect::Fetch(Request::Log {
+            log: Log::Following,
+            after: None
+        })]
+    );
+    assert!(shows(&app, "Loading log/following…"));
+}
+
+#[test]
+fn a_fetched_page_shows_its_commits() {
+    let app = started();
+
+    assert!(shows(&app, "Ada Quill @adaq · 2m · 7f3a9c1"));
+    assert!(shows(
+        &app,
+        "Shipped the new parser today. Thanks @mrivers for the review!"
+    ));
+}
+
+#[test]
+fn a_log_that_cannot_load_says_why() {
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+
+    let result = Err(FetchError::Failed("cannot reach the server".into()));
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result,
+        },
+        now: 0,
+    });
+
+    assert_eq!(
+        cmdline(&app),
+        "Cannot load log/following: cannot reach the server"
+    );
+    assert!(shows(&app, "Cannot load log/following"));
+}
+
+#[test]
+fn a_device_refused_while_fetching_goes_back_to_connecting() {
+    let (mut app, _) = starting();
+    let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
+
+    let result = Err(FetchError::NotApproved);
+    let _ = app.update(Msg::Fetched {
+        fetched: Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result,
+        },
+        now: 0,
+    });
+
+    assert!(shows(&app, "not approved"));
 }

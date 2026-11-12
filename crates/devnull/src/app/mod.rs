@@ -2,6 +2,7 @@
 
 mod cmdline;
 mod connection;
+mod logs;
 mod options;
 mod view;
 mod window;
@@ -25,6 +26,8 @@ use crate::keymap::{Action, Invocation, Keymap, Mode};
 use cmdline::{Cmdline, Edit, Purpose};
 use connection::Connection;
 pub use connection::NetEvent;
+use logs::LogState;
+pub use logs::{FetchError, Fetched, Request};
 use options::Options;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
@@ -92,6 +95,13 @@ pub enum Msg {
     Wake(Wake),
     /// News about the connection.
     Net(NetEvent),
+    /// The answer to an [`Effect::Fetch`], and when it arrived (Unix seconds), for ages.
+    Fetched {
+        /// The answer.
+        fetched: Fetched,
+        /// When it arrived.
+        now: u64,
+    },
     /// A file to run as ex commands, such as `init.vim` at startup or what `:source` asked for, or why it could not
     /// be read.
     Sourced {
@@ -130,6 +140,8 @@ pub enum Effect {
     AcceptTerms(String),
     /// Open this link in the browser.
     OpenUrl(String),
+    /// Ask the server, sending the answer back as [`Msg::Fetched`].
+    Fetch(Request),
     /// Send [`Msg::Wake`] with `token` once `after` has passed.
     Wake {
         /// How long to wait.
@@ -144,6 +156,8 @@ pub enum Effect {
 struct Buffer {
     name: String,
     doc: Document,
+    /// For a log's buffer, what it loaded so far.
+    log: Option<LogState>,
 }
 
 /// What keys are for right now.
@@ -207,6 +221,7 @@ impl App {
             buffers: vec![Buffer {
                 name: name.into(),
                 doc,
+                log: None,
             }],
             windows: Windows::new(Window::new(0)),
             mode: AppMode::Normal,
@@ -263,6 +278,7 @@ impl App {
             }
             Msg::Sourced { path, contents } => self.source(&path, contents),
             Msg::Net(event) => self.net(event),
+            Msg::Fetched { fetched, now } => self.fetched(fetched, now),
             Msg::FocusGained => {
                 self.focused = true;
                 Vec::new()
@@ -782,37 +798,42 @@ impl App {
                 Connection::Enrolling { url, fingerprint }
             }
         };
-        self.show_connection();
+        effects.extend(self.show_connection());
         effects
     }
 
-    /// Shows the `connect` buffer while not connected, and the log once connected.
-    fn show_connection(&mut self) {
-        let (name, doc) = match self.connection.document() {
-            Some(doc) => ("connect", Some(doc)),
-            None => ("log/following", None),
-        };
-        let index = match self.buffers.iter().position(|buffer| buffer.name == name) {
-            Some(index) => index,
+    /// Shows the `connect` buffer while not connected, and the following log once connected, asking for it if it
+    /// was never loaded.
+    fn show_connection(&mut self) -> Vec<Effect> {
+        let (index, effects) = match self.connection.document() {
+            Some(doc) => {
+                let index = match self
+                    .buffers
+                    .iter()
+                    .position(|buffer| buffer.name == "connect")
+                {
+                    Some(index) => index,
+                    None => {
+                        self.buffers.push(Buffer {
+                            name: "connect".to_owned(),
+                            doc: Document::new(),
+                            log: None,
+                        });
+                        self.buffers.len() - 1
+                    }
+                };
+                self.buffers[index].doc = doc;
+                (index, Vec::new())
+            }
             None => {
-                self.buffers.push(Buffer {
-                    name: name.to_owned(),
-                    doc: Document::new(),
-                });
-                self.buffers.len() - 1
+                let index = self.log_buffer(devnull_api::Log::Following);
+                (index, self.load_log(index))
             }
         };
-        match doc {
-            Some(doc) => self.buffers[index].doc = doc,
-            // Made up until the real log arrives in M2.5.
-            None if self.buffers[index].doc.is_empty() => {
-                self.buffers[index].doc = crate::fake::following()
-            }
-            None => {}
-        }
         if self.windows.current().buffer != index {
             *self.windows.current_mut() = Window::new(index);
         }
+        effects
     }
 
     /// `:connect`, whose meaning depends on where connecting stands.

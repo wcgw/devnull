@@ -374,8 +374,13 @@ from M1 even though graphics land in M6.
   `Passphrase:` prompt, terms with `:agree`; `@handle` in the statusline. Runtime `net` module holds the client.
   Verified in a pty: the stored key connects; without a key the `connect` buffer shows. Not verified end to end
   through `dn`: approving a new device (needs a browser; the library flow is mock-tested, and M0.3 did it live).
-- [ ] **M2.5** `dn` log buffers rendered from real commits (segments, mentions, quotes, link cards, counts), through
-  request/response messages. ⏸ try against dev-null.sh.
+- [x] **M2.5** `dn` log buffers rendered from real commits, through `Effect::Fetch` / `Msg::Fetched` (stamped with
+  the arrival time for ages). `render`: header (author, `(org)`, age, hash), text segments with mentions (only the
+  commit's) and links as targets, inline code, code blocks (server HTML reduced to text), quotes under `┃`, link
+  cards, image placeholders, counts and status, reply previews, "Commit deleted"; bodies over six lines fold.
+  `fake.rs` retired: the invented log is now an API-shaped fixture. Verified in a pty against the real log.
+  ⏸ try against dev-null.sh.
+  - Not yet: `preview_segments` (the server's excerpt) is not used; the fold shows the first six lines instead.
 - [ ] **M2.6** Paging near the end, `:e!`, polling with new commits arriving above.
 - [ ] **M2.7** Buffers: `:e log/latest`, `<leader>1/2/3`, a bufferline listing them.
 

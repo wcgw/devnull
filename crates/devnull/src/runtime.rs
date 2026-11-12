@@ -116,6 +116,7 @@ fn perform(
         Effect::Enroll => net.enroll(),
         Effect::EnrollPasted(link) => net.paste(link),
         Effect::AcceptTerms(version) => net.accept_terms(version),
+        Effect::Fetch(request) => net.fetch(request),
         Effect::OpenUrl(url) => {
             if let Err(error) = open_url(&url) {
                 let _ = later.send(Msg::Net(NetEvent::Error(format!(
