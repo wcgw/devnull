@@ -42,15 +42,18 @@ pub struct Draft {
     pub body: String,
     /// The commit it answers, if any.
     pub answering: Answering,
+    /// The organization it is posted as, by handle (one the account is a member of); `None` for the account itself.
+    pub author: Option<String>,
 }
 
 impl Draft {
-    /// `body`, answering what `answering` says.
+    /// `body`, answering what `answering` says, posted as the account itself.
     #[must_use]
     pub fn new(answering: Answering, body: impl Into<String>) -> Self {
         Self {
             body: body.into(),
             answering,
+            author: None,
         }
     }
 }
@@ -581,16 +584,15 @@ impl Client {
     ///
     /// Not cancel safe: the commit may be published even when the response is lost.
     pub async fn publish(&self, draft: &Draft) -> Result<Commit, ApiError> {
-        let body = &draft.body;
-        let payload = match &draft.answering {
-            Answering::Nothing => serde_json::json!({ "body": body }),
-            Answering::Reply(to) => {
-                serde_json::json!({ "body": body, "parent_id": segment(to)? })
-            }
-            Answering::Quote(of) => {
-                serde_json::json!({ "body": body, "quoted_commit_id": segment(of)? })
-            }
-        };
+        let mut payload = serde_json::json!({ "body": draft.body });
+        match &draft.answering {
+            Answering::Nothing => {}
+            Answering::Reply(to) => payload["parent_id"] = segment(to)?.into(),
+            Answering::Quote(of) => payload["quoted_commit_id"] = segment(of)?.into(),
+        }
+        if let Some(author) = &draft.author {
+            payload["author"] = segment(author)?.into();
+        }
         let bytes = self
             .write(Method::POST, "/api/v1/commits", Some(payload))
             .await?;

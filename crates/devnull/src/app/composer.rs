@@ -26,6 +26,8 @@ pub(super) struct Composing {
     answering: Answering,
     /// Whom it answers, for the confirmation.
     to: Option<String>,
+    /// The organization it is posted as; `None` for the account itself.
+    author: Option<String>,
     /// What the editor says it is, below the scissors.
     context: String,
 }
@@ -43,6 +45,13 @@ fn template(body: &str, composing: &Composing) -> String {
     )
 }
 
+/// How a draft posted as the organization `author` says so; nothing for the account itself.
+fn posted_as(author: Option<&str>) -> String {
+    author
+        .map(|author| format!(" as @{author}"))
+        .unwrap_or_default()
+}
+
 /// The draft in what the editor saved: everything above the scissors line, without trailing blanks.
 fn parse(saved: &str) -> &str {
     let end = saved
@@ -54,8 +63,13 @@ fn parse(saved: &str) -> &str {
 
 impl App {
     /// `:commit` (`c`), `:reply` (`r`) and `:quote` (`R`): opens the editor on the draft kept for that, or an
-    /// empty one; a reply or quote is of the commit under the cursor.
-    pub(super) fn compose(&mut self, answering: Answering) -> Result<Vec<Effect>, String> {
+    /// empty one; a reply or quote is of the commit under the cursor. It is posted as the organization `author`, if
+    /// any (the server refuses one the account is not a member of).
+    pub(super) fn compose(
+        &mut self,
+        answering: Answering,
+        author: Option<String>,
+    ) -> Result<Vec<Effect>, String> {
         let me = self
             .connection
             .handle()
@@ -65,13 +79,14 @@ impl App {
             Answering::Nothing => Composing {
                 answering,
                 to: None,
-                context: format!("A new commit as @{me}."),
+                context: format!("A new commit as @{}.", author.as_deref().unwrap_or(&me)),
+                author,
             },
             _ => {
                 let commit = self
                     .commit_under_cursor()
                     .ok_or_else(|| "No commit under the cursor".to_owned())?;
-                let author = commit.author.unwrap_or_default();
+                let to = commit.author.unwrap_or_default();
                 let excerpt = self.buffers[self.windows.current().buffer]
                     .doc
                     .line_text(commit.id.as_str(), 1)
@@ -91,8 +106,9 @@ impl App {
                 };
                 Composing {
                     answering,
-                    context: format!("{verb} @{author}{what}"),
-                    to: Some(author),
+                    context: format!("{verb} @{to}{}{what}", posted_as(author.as_deref())),
+                    to: Some(to),
+                    author,
                 }
             }
         };
@@ -167,9 +183,13 @@ impl App {
         let count = body::count(&preview.body);
         let mut shown = Document::new();
         shown.push_back("preview", preview_block(&preview));
-        let draft = Draft::new(composing.answering.clone(), draft);
+        let mut draft = Draft::new(composing.answering.clone(), draft);
+        draft.author.clone_from(&composing.author);
         self.mode = AppMode::Confirm(Confirm::new(
-            format!("{kind} {count}/{MAX_LENGTH}{to}? [y]es/[e]dit/[n]o"),
+            format!(
+                "{kind} {count}/{MAX_LENGTH}{to}{}? [y]es/[e]dit/[n]o",
+                posted_as(composing.author.as_deref())
+            ),
             Pending::Publish { draft, composing },
             Some(shown),
         ));
@@ -221,7 +241,15 @@ impl App {
         } else {
             ""
         };
-        self.info(format!("Published {}{held}", short_hash(&commit.id)));
+        let published = format!("Published {}", short_hash(&commit.id));
+        // Should the server ignore whom to post as, the commit is out under another name: say so.
+        let posted_as = commit.author.as_ref().map(|author| author.handle.as_str());
+        match (draft.author.as_deref(), posted_as) {
+            (Some(asked), Some(posted)) if !asked.eq_ignore_ascii_case(posted) => {
+                self.error(format!("{published} as @{posted}, not @{asked}{held}"));
+            }
+            _ => self.info(format!("{published}{held}")),
+        }
         Vec::new()
     }
 }

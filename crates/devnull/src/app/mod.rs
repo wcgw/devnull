@@ -1011,9 +1011,13 @@ impl App {
             Command::Nohlsearch => self.highlighting = false,
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Star => return self.star(),
-            Command::Commit => return self.compose(Answering::Nothing),
-            Command::Reply => return self.compose(Answering::Reply(String::new())),
-            Command::Quote => return self.compose(Answering::Quote(String::new())),
+            Command::Commit { author } => return self.compose(Answering::Nothing, author),
+            Command::Reply { author } => {
+                return self.compose(Answering::Reply(String::new()), author);
+            }
+            Command::Quote { author } => {
+                return self.compose(Answering::Quote(String::new()), author);
+            }
             Command::Delete => return self.delete(),
             Command::Follow { handle, on } => return self.follow(handle, on),
             Command::Browse { link } => return self.browse(link),

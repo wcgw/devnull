@@ -661,6 +661,35 @@ async fn a_draft_is_published_as_a_commit_a_reply_or_a_quote() {
 }
 
 #[tokio::test]
+async fn a_draft_posted_as_an_organization_names_it_by_handle() {
+    let (server, client, signed) = server_and_client().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/commits"))
+        .and(body_json(
+            serde_json::json!({ "body": "news", "parent_id": "p1", "author": "acme" }),
+        ))
+        .and(signed)
+        .respond_with(
+            ResponseTemplate::new(201)
+                .set_body_string(serde_json::json!({ "data": commit_json("n1") }).to_string()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut draft = Draft::new(Answering::Reply("p1".into()), "news");
+    draft.author = Some("acme".into());
+
+    let commit = client.publish(&draft).await.expect("published");
+
+    assert_eq!(commit.id, "n1");
+    draft.author = Some("../me".into());
+    assert!(
+        matches!(client.publish(&draft).await, Err(ApiError::Invalid(_))),
+        "not a handle"
+    );
+}
+
+#[tokio::test]
 async fn stars_follows_and_deletions_are_signed_writes() {
     let (server, client, signed) = server_and_client().await;
     let starred = |on: bool| {

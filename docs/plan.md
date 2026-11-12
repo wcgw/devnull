@@ -81,8 +81,8 @@ Defaults:
 | `gx` / `gX` | Open URL under cursor / the commit on the web | `:browse` |
 | `]]`, `[[` | Next/previous commit | |
 | `zo zc za zR zM` | Folds: long commits, reply groups, notification groups | |
-| `c` | New commit | `:commit` |
-| `r` / `R` | Reply / quote | `:reply`, `:quote` |
+| `c` | New commit | `:commit [@org]` |
+| `r` / `R` | Reply / quote | `:reply [@org]`, `:quote [@org]` |
 | `s` | Toggle star | `:star` |
 | `dd` | Delete own commit (confirms) | `:delete` |
 | `yy`, `v…y` | Yank text (Vim semantics) | |
@@ -473,8 +473,14 @@ from M1 even though graphics land in M6.
   the editor gets the terminal (the key reader stopped, the screen redrawn after without asking the terminal for
   its cursor). Saved: empty aborts as git does, the budget is checked, the server previews, and
   `reply 12/4000 → @lin? [y]es/[e]dit/[n]o` asks with the preview above; `n` (or a refusal) keeps the draft. A
-  published reply joins its open thread. Shortcodes are the server's (see Open questions). Not done: posting as an
-  organization. Checked live with a stand-in editor up to the preview, answering `n`: nothing was published.
+  published reply joins its open thread. Shortcodes are the server's (see Open questions). Checked live with a
+  stand-in editor up to the preview, answering `n`: nothing was published.
+  Since the v1 leftovers, `:commit @org` (and `:reply`, `:quote`) posts as an organization: `author` (its handle) in
+  `POST /commits`, as the Go client sends it, and `as @org` in the editor's context and the question. `/me` still
+  sends neither `organizations` nor `can_post_as_organization` (checked live), so nothing is listed or checked
+  beforehand: the server refuses an author the account may not post as (the Go client maps 422s on `author`), and
+  the draft is kept. Should a commit come back under another author, `dn` says so as an error. Only against a fake
+  server: it publishes.
 
 ### M6 Graphics
 

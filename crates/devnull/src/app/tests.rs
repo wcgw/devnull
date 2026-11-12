@@ -3347,6 +3347,135 @@ fn r_replies_and_capital_r_quotes_the_commit_under_the_cursor() {
     );
 }
 
+/// `draft`, posted as the organization `handle`.
+fn posted_as(mut draft: devnull_api::Draft, handle: &str) -> devnull_api::Draft {
+    draft.author = Some(handle.into());
+    draft
+}
+
+/// Commit `id`, published by the account `handle`.
+fn published_by(id: &str, handle: &str) -> Box<devnull_api::model::Commit> {
+    let mut commit = commit_with(id, "news", None);
+    commit["author"] = serde_json::json!({ "id": "o", "handle": handle, "type": "organization" });
+    Box::new(serde_json::from_value(commit).expect("commit"))
+}
+
+#[test]
+fn commit_with_a_handle_posts_as_that_organization() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+
+    let effects = press(&mut app, ":commit @acme<CR>");
+    assert!(
+        edited(&effects)
+            .expect("the editor opened")
+            .contains("# A new commit as @acme.")
+    );
+    let _ = save(&mut app, &effects, "news");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "news".into(),
+            result: Ok(preview_of("news")),
+        },
+    );
+    assert_eq!(cmdline(&app), "commit 4/4000 as @acme? [y]es/[e]dit/[n]o");
+
+    let effects = press(&mut app, "e");
+    assert!(
+        edited(&effects)
+            .expect("editing again")
+            .contains("# A new commit as @acme."),
+        "still as the organization"
+    );
+    let _ = save(&mut app, &effects, "news");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "news".into(),
+            result: Ok(preview_of("news")),
+        },
+    );
+    let effects = press(&mut app, "y");
+    let draft = posted_as(devnull_api::Draft::new(Answering::Nothing, "news"), "acme");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Publish {
+            draft: draft.clone()
+        }]
+    );
+    let _ = arrive(
+        &mut app,
+        Fetched::Published {
+            draft,
+            result: Ok(published_by("c9", "acme")),
+        },
+    );
+    assert_eq!(cmdline(&app), "Published c9");
+}
+
+#[test]
+fn reply_and_quote_with_a_handle_answer_as_that_organization() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let effects = press(&mut app, "]]:reply acme<CR>");
+    assert!(
+        edited(&effects)
+            .expect("editor")
+            .contains("# Replying to @ada as @acme: commit 2")
+    );
+    let _ = save(&mut app, &effects, "agreed");
+    let _ = arrive(
+        &mut app,
+        Fetched::Preview {
+            body: "agreed".into(),
+            result: Ok(preview_of("agreed")),
+        },
+    );
+    assert_eq!(
+        cmdline(&app),
+        "reply 6/4000 → @ada as @acme? [y]es/[e]dit/[n]o"
+    );
+    let effects = press(&mut app, "y");
+    assert_eq!(
+        fetches(&effects),
+        [Request::Publish {
+            draft: posted_as(
+                devnull_api::Draft::new(Answering::Reply("c2".into()), "agreed"),
+                "acme"
+            )
+        }]
+    );
+
+    let effects = press(&mut app, ":quote @acme<CR>");
+    assert!(
+        edited(&effects)
+            .expect("editor")
+            .contains("# Quoting @ada as @acme: commit 2")
+    );
+}
+
+#[test]
+fn a_commit_published_as_someone_else_than_asked_says_so() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let draft = posted_as(devnull_api::Draft::new(Answering::Nothing, "news"), "acme");
+
+    let _ = arrive(
+        &mut app,
+        Fetched::Published {
+            draft,
+            result: Ok(published_by("c9", "ada")),
+        },
+    );
+
+    assert_eq!(cmdline(&app), "Published c9 as @ada, not @acme");
+    let (_, height) = app.size();
+    assert_eq!(
+        style_at(&app, 0, height - 1).fg,
+        app.style(Group::ErrorMsg).fg,
+        "said as an error"
+    );
+}
+
 #[test]
 fn a_reply_published_shows_in_its_thread() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));

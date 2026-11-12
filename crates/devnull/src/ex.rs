@@ -96,12 +96,22 @@ pub enum Command {
     Nohlsearch,
     /// `:star`: stars the commit under the cursor, or takes its star back.
     Star,
-    /// `:commit`: writes a new commit in `$EDITOR`.
-    Commit,
-    /// `:reply`: writes a reply to the commit under the cursor.
-    Reply,
-    /// `:quote`: writes a quote of the commit under the cursor.
-    Quote,
+    /// `:commit [@organization]`: writes a new commit in `$EDITOR`, posted as the account or the organization
+    /// named.
+    Commit {
+        /// The organization's handle, without `@`; `None` for the account itself.
+        author: Option<String>,
+    },
+    /// `:reply [@organization]`: writes a reply to the commit under the cursor, as `:commit` does.
+    Reply {
+        /// As for [`Command::Commit`].
+        author: Option<String>,
+    },
+    /// `:quote [@organization]`: writes a quote of the commit under the cursor, as `:commit` does.
+    Quote {
+        /// As for [`Command::Commit`].
+        author: Option<String>,
+    },
     /// `:delete`: deletes the account's own commit under the cursor, once confirmed.
     Delete,
     /// `:follow [handle]` and `:unfollow [handle]`: the account named, or under the cursor (or the author of the
@@ -359,9 +369,15 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         Name::Jumps => Command::Jumps,
         Name::Nohlsearch => Command::Nohlsearch,
         Name::Star => Command::Star,
-        Name::Commit => Command::Commit,
-        Name::Reply => Command::Reply,
-        Name::Quote => Command::Quote,
+        Name::Commit => Command::Commit {
+            author: author(args)?,
+        },
+        Name::Reply => Command::Reply {
+            author: author(args)?,
+        },
+        Name::Quote => Command::Quote {
+            author: author(args)?,
+        },
         Name::Delete => Command::Delete,
         Name::Follow(on) => Command::Follow {
             handle: (!args.is_empty()).then(|| args.trim_start_matches('@').to_owned()),
@@ -394,6 +410,15 @@ pub fn parse(line: &str) -> Result<Option<Command>, ExError> {
         }
     };
     Ok(Some(command))
+}
+
+/// Whom `:commit` and its kin post as: the one handle in `args`, `@` or not; `None` without one.
+fn author(args: &str) -> Result<Option<String>, ExError> {
+    match args.split_whitespace().collect::<Vec<_>>()[..] {
+        [] => Ok(None),
+        [handle] => Ok(Some(handle.trim_start_matches('@').to_owned())),
+        _ => Err(ExError::InvalidArgument(args.to_owned())),
+    }
 }
 
 fn required(args: &str) -> Result<&str, ExError> {
@@ -470,6 +495,28 @@ mod tests {
 
     fn parsed(line: &str) -> Command {
         parse(line).expect("valid command").expect("not blank")
+    }
+
+    #[test]
+    fn commit_reply_and_quote_take_whom_to_post_as() {
+        assert_eq!(parsed("commit"), Command::Commit { author: None });
+        assert_eq!(
+            parsed("comm @acme"),
+            Command::Commit {
+                author: Some("acme".into())
+            }
+        );
+        assert_eq!(
+            parsed("rep acme "),
+            Command::Reply {
+                author: Some("acme".into())
+            }
+        );
+        assert_eq!(parsed("quo"), Command::Quote { author: None });
+        assert_eq!(
+            parse("commit @a @b"),
+            Err(ExError::InvalidArgument("@a @b".into()))
+        );
     }
 
     #[test]
