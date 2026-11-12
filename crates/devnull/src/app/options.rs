@@ -2,6 +2,7 @@
 
 use crate::doc::CaseMode;
 use crate::ex::{SetArg, SetOp};
+use crate::graphics::Graphics;
 use crate::key::{Key, parse_keys};
 use crate::keymap::Keymap;
 
@@ -14,6 +15,8 @@ pub(super) struct Options {
     pub(super) scrolloff: usize,
     /// How long, in milliseconds, an ambiguous key sequence waits for more.
     pub(super) timeoutlen: u64,
+    /// How pictures are drawn.
+    pub(super) graphics: Graphics,
 }
 
 impl Default for Options {
@@ -23,6 +26,7 @@ impl Default for Options {
             smartcase: false,
             scrolloff: 0,
             timeoutlen: 1000,
+            graphics: Graphics::HalfBlocks,
         }
     }
 }
@@ -52,6 +56,8 @@ enum Opt {
     Count(fn(&mut Options) -> &mut usize),
     /// `leader`: the key `<leader>` stands for, kept by the keymap.
     Leader,
+    /// `graphics`: how pictures are drawn.
+    Graphics,
 }
 
 const OPTIONS: &[(&str, &str, Opt)] = &[
@@ -60,6 +66,7 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
     ("scrolloff", "so", Opt::Count(|o| &mut o.scrolloff)),
     ("timeoutlen", "tm", Opt::Number(|o| &mut o.timeoutlen)),
     ("leader", "", Opt::Leader),
+    ("graphics", "", Opt::Graphics),
 ];
 
 impl Options {
@@ -161,6 +168,13 @@ impl Options {
             }
             (Opt::Leader, SetOp::Query | SetOp::On) => {
                 Ok(Some(format!("{name}={}", keymap.leader())))
+            }
+            (Opt::Graphics, SetOp::Assign(value)) => {
+                self.graphics = Graphics::named(value).ok_or_else(invalid)?;
+                Ok(None)
+            }
+            (Opt::Graphics, SetOp::Query | SetOp::On) => {
+                Ok(Some(format!("{name}={}", self.graphics.name())))
             }
             _ => Err(invalid()),
         }

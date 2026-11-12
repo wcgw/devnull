@@ -19,7 +19,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 pub use cursor::{Cursor, Motion};
-pub use layout::{Layout, ScreenPos};
+pub use layout::{Layout, PictureRow, ScreenPos};
 pub use search::{CaseMode, Direction, Pattern, PatternError, SearchOutcome};
 pub use visual::{Selection, SelectionKind};
 
@@ -49,13 +49,15 @@ impl From<&str> for BlockKey {
 pub enum Line {
     /// Styled text, wrapped to the layout width.
     Text(Vec<Span>),
-    /// Space for an image: `rows` empty screen rows whatever the width, `cols` cells wide. The cursor moves through
-    /// it like empty lines; the window draws the image over it (D7).
+    /// Space for a picture: `rows` empty screen rows whatever the width, `cols` cells wide. The cursor moves through
+    /// it like empty lines; the window draws the picture over it (D7).
     Image {
         /// Height in screen rows; 0 counts as 1.
         rows: u16,
         /// Width in cells.
         cols: u16,
+        /// Where the picture is, such as its URL.
+        source: String,
     },
 }
 
@@ -270,9 +272,18 @@ struct Shaped {
     graphemes: Vec<Grapheme>,
     /// The spans' styling and targets, by the byte range of `text` they cover, in order.
     runs: Vec<Run>,
-    /// For an image, its height in rows; text lines wrap instead. On an image line a position's column is not a
+    /// For a picture, the space it takes; text lines wrap instead. On a picture's line a position's column is not a
     /// grapheme (there are none) but which of its rows the cursor is on.
-    fixed_rows: Option<usize>,
+    image: Option<Space>,
+}
+
+/// The space a picture takes.
+#[derive(Debug)]
+struct Space {
+    source: String,
+    cols: u16,
+    /// At least 1.
+    rows: u16,
 }
 
 /// A span without its text: what styles and targets `text[previous run's end..end]`.
@@ -294,12 +305,16 @@ impl Shaped {
     fn new(line: Line) -> Self {
         let spans = match line {
             Line::Text(spans) => spans,
-            Line::Image { rows, .. } => {
+            Line::Image { rows, cols, source } => {
                 return Self {
                     text: String::new(),
                     graphemes: Vec::new(),
                     runs: Vec::new(),
-                    fixed_rows: Some(usize::from(rows.max(1))),
+                    image: Some(Space {
+                        source,
+                        cols,
+                        rows: rows.max(1),
+                    }),
                 };
             }
         };
@@ -324,7 +339,7 @@ impl Shaped {
             text,
             graphemes,
             runs,
-            fixed_rows: None,
+            image: None,
         }
     }
 
@@ -352,11 +367,14 @@ impl Shaped {
 
     /// The highest column a position on this line can have: its last grapheme, or an image's last row.
     fn last_col(&self) -> usize {
-        self.fixed_rows.unwrap_or(self.len()).saturating_sub(1)
+        self.image
+            .as_ref()
+            .map_or(self.len(), |image| usize::from(image.rows))
+            .saturating_sub(1)
     }
 
     fn is_image(&self) -> bool {
-        self.fixed_rows.is_some()
+        self.image.is_some()
     }
 
     /// The byte offset of grapheme `i`, or the text's length for `i == len()`.

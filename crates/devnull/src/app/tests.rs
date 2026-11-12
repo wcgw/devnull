@@ -3473,3 +3473,178 @@ fn emptying_a_kept_draft_lets_it_go() {
         "an empty draft is not kept"
     );
 }
+
+/// One commit, `c1`, with a 400 × 200 picture: 48 × 12 cells.
+fn with_picture() -> Page<Commit> {
+    one_commit(
+        "look",
+        serde_json::json!({ "images": [{ "id": "i1", "url": "https://example.org/p.png", "width": 400, "height": 200 }] }),
+    )
+}
+
+/// A connected app on following, drawing pictures as `graphics` does, and the effects of `page` arriving.
+fn pictured(graphics: crate::graphics::Graphics, page: Page<Commit>) -> (App, Vec<Effect>) {
+    let mut app = with_log(Log::Following, page_of(1, 0, None));
+    app.set_graphics(graphics);
+    let _ = press(&mut app, ":e!<CR>");
+    let effects = arrive(
+        &mut app,
+        Fetched::Log {
+            log: Log::Following,
+            after: None,
+            result: Ok(page),
+        },
+    );
+    (app, effects)
+}
+
+fn pictures(effects: &[Effect]) -> Vec<(String, u16, u16, Option<u32>)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Picture {
+                source,
+                cols,
+                rows,
+                kitty,
+            } => Some((source.clone(), *cols, *rows, *kitty)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
+    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+
+    assert_eq!(
+        pictures(&effects),
+        [("https://example.org/p.png".to_owned(), 48, 12, None)]
+    );
+    let loading = screen(&app)
+        .rows
+        .iter()
+        .filter(|row| row.contains("loading…"))
+        .count();
+    assert_eq!(loading, 1, "said once, in its first row");
+    assert_eq!(pictures(&press(&mut app, "j")), [], "asked for once");
+
+    let red = crate::graphics::HalfBlock {
+        upper: Some((255, 0, 0)),
+        lower: Some((0, 0, 255)),
+    };
+    let prepared = Prepared::HalfBlocks(vec![vec![red; 48]; 12]);
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols: 48,
+        rows: 12,
+        result: Ok(prepared),
+    });
+
+    // Row 0 is the bufferline, then the header and "look".
+    let rows = screen(&app).rows;
+    assert!(rows[3].starts_with("▀▀▀"), "{rows:#?}");
+    let style = style_at(&app, 0, 3);
+    assert_eq!(
+        (style.fg, style.bg),
+        (Some(Color::Rgb(255, 0, 0)), Some(Color::Rgb(0, 0, 255)))
+    );
+}
+
+#[test]
+fn with_kitty_graphics_a_picture_is_sent_once_and_shown_by_placeholders() {
+    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
+        panic!("one picture with an id: {effects:?}");
+    };
+
+    let effects = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols,
+        rows,
+        result: Ok(Prepared::Kitty("<sent>".into())),
+    });
+
+    assert_eq!(effects, [Effect::Graphics("<sent>".into())]);
+    let rows = screen(&app).rows;
+    assert!(rows[3].starts_with('\u{10EEEE}'), "{rows:#?}");
+    let (r, g, b) = crate::graphics::image_colour(id);
+    assert_eq!(style_at(&app, 0, 3).fg, Some(Color::Rgb(r, g, b)));
+}
+
+#[test]
+fn a_picture_out_of_view_is_asked_for_once_scrolled_to() {
+    let mut page = page_of(1, 6, None);
+    let mut last = with_picture().items.remove(0);
+    // Not c1: that one is in the page already.
+    last.id = "c9".into();
+    page.items.push(last);
+    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+    assert_eq!(pictures(&effects), []);
+
+    let effects = press(&mut app, "G");
+
+    assert_eq!(pictures(&effects).len(), 1);
+}
+
+#[test]
+fn a_picture_that_cannot_be_had_says_so_in_its_place() {
+    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols: 48,
+        rows: 12,
+        result: Err("gone".into()),
+    });
+
+    assert!(shows(&app, "unavailable"));
+}
+
+#[test]
+fn switching_graphics_frees_what_was_sent_and_draws_pictures_again() {
+    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
+        panic!("one picture: {effects:?}");
+    };
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols,
+        rows,
+        result: Ok(Prepared::Kitty(String::new())),
+    });
+
+    let effects = press(&mut app, ":set graphics=halfblocks<CR>");
+
+    assert!(effects.contains(&Effect::Graphics(crate::graphics::kitty_delete(id))));
+    assert_eq!(
+        pictures(&effects),
+        [("https://example.org/p.png".to_owned(), 48, 12, None)]
+    );
+    assert_eq!(press(&mut app, ":set graphics?<CR>"), []);
+    assert_eq!(cmdline(&app), "graphics=halfblocks");
+}
+
+#[test]
+fn quitting_frees_the_pictures_sent() {
+    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
+        panic!("one picture: {effects:?}");
+    };
+    let _ = app.update(Msg::Picture {
+        source: "https://example.org/p.png".into(),
+        cols,
+        rows,
+        result: Ok(Prepared::Kitty(String::new())),
+    });
+
+    let effects = press(&mut app, ":qa<CR>");
+
+    assert_eq!(
+        effects,
+        [
+            Effect::Graphics(crate::graphics::kitty_delete(id)),
+            Effect::Quit
+        ]
+    );
+}

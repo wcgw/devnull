@@ -12,10 +12,15 @@ pub use accounts::{account_block, organization_header, pinned_block, profile_hea
 pub use notifications::notification_block;
 
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
+use crate::graphics::fit;
 use crate::hl::Group;
 
 /// Lines of text shown before the rest of a long commit folds away.
 const SHOWN_LINES: usize = 6;
+
+/// The most cells a commit's picture takes across, and down: a glance; the caption opens it whole.
+const PICTURE_COLS: u16 = 48;
+const PICTURE_ROWS: u16 = 14;
 
 /// Replies shown under a commit, from those the server sends along.
 const REPLY_PREVIEWS: usize = 3;
@@ -93,6 +98,14 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
         ]));
     }
     for image in &commit.images {
+        let (cols, rows) = fit(image.width, image.height, PICTURE_COLS, PICTURE_ROWS);
+        if cols > 0 {
+            lines.push(Line::Image {
+                rows,
+                cols,
+                source: image.url.clone(),
+            });
+        }
         let mut text = format!("🖼 image {}×{}", image.width, image.height);
         if let Some(description) = image.description.as_deref().filter(|d| !d.is_empty()) {
             text.push_str(&format!(": {description}"));

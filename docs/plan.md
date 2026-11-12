@@ -473,7 +473,19 @@ from M1 even though graphics land in M6.
 
 ### M6 Graphics
 
-- Avatars, inline images, link-card pictures, animation; half-block fallback.
+- [x] **M6.1** `devnull-api::media`: pictures downloaded unsigned as the Go client does: HTTPS, no proxy, only from
+  the public internet (names resolved and IP literals checked, redirects too) or the API's origin; 10 MB, 12 s.
+  Checked live (a GitHub avatar; loopback refused).
+- [x] **M6.2** `graphics`: decode PNG, JPEG, WebP, GIF (first frame; 8 megapixels at most), fit to cells (2:1), send
+  with the kitty protocol as a virtual placement shown by placeholder cells, or draw with half blocks.
+- [x] **M6.3** Commit pictures in buffers: an image line (at most 48 × 14) above the 🖼 caption, asked for once in
+  view, drawn by placeholders or half blocks; `:set graphics=kitty|halfblocks`, guessed from `$TERM`/`$TERM_PROGRAM`
+  (half blocks in tmux), not by the `a=q` query D7 planned (its answer would come back among the keys). Pictures sent
+  are freed when switching and on quitting. Checked live in a pty: 8 pictures sent and freed, placeholders drawn;
+  3568 true-colour half blocks. Not seen yet in Ghostty itself.
+- [ ] **M6.4** Avatars and link-card pictures.
+- [ ] **M6.5** Animation: commit pictures are JPEG, PNG or WebP (the server refuses others), so only link cards could
+  move.
 
 ### Then
 

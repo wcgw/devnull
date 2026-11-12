@@ -155,6 +155,13 @@ impl App {
             .collect();
         frame.render_widget(Paragraph::new(rows), area);
         for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+            if let Some(picture) = layout.picture(row) {
+                let line = Rect::new(area.x, y, area.width, 1);
+                self.pictures
+                    .draw(frame.buffer_mut(), line, picture, &self.theme);
+            }
+        }
+        for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
             if layout.is_folded(row) {
                 frame.buffer_mut().set_style(
                     Rect::new(area.x, y, area.width, 1),

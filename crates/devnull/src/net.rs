@@ -11,7 +11,11 @@ use devnull_api::{ApiError, Client, ORIGIN};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::app::{FetchError, Fetched, Msg, NetEvent, Request};
+use devnull_api::media::Media;
+use tokio::sync::Semaphore;
+
+use crate::app::{FetchError, Fetched, Msg, NetEvent, Prepared, Request};
+use crate::graphics::Picture;
 
 /// What the device is called on dev-null.sh's device list.
 const DEVICE_NAME: &str = "dn";
@@ -29,6 +33,10 @@ pub(crate) struct Net {
     approval: Option<(mpsc::UnboundedSender<String>, JoinHandle<()>)>,
     /// Where results go.
     later: mpsc::UnboundedSender<Msg>,
+    /// Downloads pictures.
+    media: Option<Media>,
+    /// Pictures downloading at once: two, as the Go client.
+    picture_slots: Arc<Semaphore>,
 }
 
 impl Net {
@@ -43,6 +51,8 @@ impl Net {
             client: Arc::new(Mutex::new(None)),
             approval: None,
             later,
+            media: Media::new(ORIGIN).ok(),
+            picture_slots: Arc::new(Semaphore::new(2)),
         }
     }
 
@@ -301,6 +311,39 @@ impl Net {
         });
     }
 
+    /// Downloads the picture at `source` and prepares it for `cols` × `rows` cells (for the kitty protocol as image
+    /// `kitty`, else as half blocks), answering with [`Msg::Picture`].
+    pub(crate) fn picture(&self, source: String, cols: u16, rows: u16, kitty: Option<u32>) {
+        let (media, slots, later) = (
+            self.media.clone(),
+            Arc::clone(&self.picture_slots),
+            self.later.clone(),
+        );
+        tokio::spawn(async move {
+            // Never closed: a permit always comes.
+            let _slot = slots.acquire_owned().await;
+            let result = match media {
+                None => Err("pictures cannot be downloaded".to_owned()),
+                Some(media) => match media.get(&source).await {
+                    Ok(bytes) => {
+                        // Decoding and scaling take a while: off the runtime's thread.
+                        tokio::task::spawn_blocking(move || prepare(&bytes, cols, rows, kitty))
+                            .await
+                            .unwrap_or_else(|_| Err("cannot prepare it".to_owned()))
+                    }
+                    Err(error) => Err(error.to_string()),
+                },
+            };
+            // Fails only once the runtime's loop has ended, when nobody needs the picture.
+            let _ = later.send(Msg::Picture {
+                source,
+                cols,
+                rows,
+                result,
+            });
+        });
+    }
+
     fn client(&self) -> Option<Client> {
         // Cloned out so the lock is never held across `.await`; a poisoned lock still holds a usable client.
         self.client
@@ -406,6 +449,16 @@ async fn follow(
             other => other,
         },
     }
+}
+
+/// The picture in `bytes`, prepared for `cols` × `rows` cells: for the kitty protocol as image `kitty`, else as
+/// half blocks.
+fn prepare(bytes: &[u8], cols: u16, rows: u16, kitty: Option<u32>) -> Result<Prepared, String> {
+    let picture = Picture::decode(bytes).ok_or_else(|| "not a picture dn shows".to_owned())?;
+    Ok(match kitty {
+        Some(id) => Prepared::Kitty(picture.kitty(id, cols, rows)),
+        None => Prepared::HalfBlocks(picture.half_blocks(cols, rows)),
+    })
 }
 
 fn fetch_error(error: &ApiError) -> FetchError {

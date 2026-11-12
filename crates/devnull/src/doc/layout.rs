@@ -25,6 +25,19 @@ pub(super) struct Row {
     pub(super) folded: bool,
 }
 
+/// A screen row of a picture: which picture, and which of its rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PictureRow<'d> {
+    /// Where the picture is.
+    pub source: &'d str,
+    /// Its width in cells.
+    pub cols: u16,
+    /// Its height in rows.
+    pub rows: u16,
+    /// Which of its rows this is, from 0.
+    pub row: u16,
+}
+
 /// A cell on screen, relative to the top-left of the whole laid-out document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScreenPos {
@@ -81,6 +94,27 @@ impl<'d> Layout<'d> {
     #[must_use]
     pub fn is_folded(&self, row: usize) -> bool {
         self.rows[row].folded
+    }
+
+    /// The picture row `row` shows, if it shows one (not when it is the summary of a fold over it).
+    #[must_use]
+    pub fn picture(&self, row: usize) -> Option<PictureRow<'d>> {
+        let Row {
+            line,
+            start,
+            folded,
+            ..
+        } = *self.rows.get(row)?;
+        if folded {
+            return None;
+        }
+        let image = self.doc.line(line).image.as_ref()?;
+        Some(PictureRow {
+            source: &image.source,
+            cols: image.cols,
+            rows: image.rows,
+            row: u16::try_from(start).unwrap_or(u16::MAX),
+        })
     }
 
     /// The number of screen rows.
@@ -216,9 +250,9 @@ impl<'d> Layout<'d> {
 /// that reaches the edge stays on its row, hanging past it, rather than starting the next one. An empty line is one
 /// empty row; an image is as many empty rows as it is tall.
 fn wrap(line: &Shaped, width: usize, mut emit: impl FnMut(usize, usize)) {
-    if let Some(rows) = line.fixed_rows {
-        // Row `i` is the empty range at `i`, so that column `i` lands on it (see `Shaped::fixed_rows`).
-        (0..rows).for_each(|i| emit(i, i));
+    if let Some(image) = &line.image {
+        // Row `i` is the empty range at `i`, so that column `i` lands on it (see `Shaped::image`).
+        (0..usize::from(image.rows)).for_each(|i| emit(i, i));
         return;
     }
     let mut start = 0;

@@ -626,7 +626,11 @@ fn an_image_line_takes_its_rows_whatever_the_width_and_the_cursor_walks_through_
         "a",
         vec![
             Line::text("above"),
-            Line::Image { rows: 3, cols: 16 },
+            Line::Image {
+                rows: 3,
+                cols: 16,
+                source: "p.png".into(),
+            },
             Line::text("below"),
         ],
     );
@@ -649,7 +653,14 @@ fn on_an_image_h_and_l_stay_put_and_the_cursor_keeps_its_image_row_across_resize
     let mut doc = Document::new();
     doc.push_back(
         "a",
-        vec![Line::text("above"), Line::Image { rows: 3, cols: 16 }],
+        vec![
+            Line::text("above"),
+            Line::Image {
+                rows: 3,
+                cols: 16,
+                source: "p.png".into(),
+            },
+        ],
     );
     let mut cursor = Cursor::new();
     cursor.apply(&Layout::new(&doc, 80), Motion::Down, 2);
@@ -1028,4 +1039,59 @@ fn a_block_s_lines_can_be_read_back() {
     assert_eq!(doc.line_text("a", 1), Some("body"));
     assert_eq!(doc.line_text("a", 2), None);
     assert_eq!(doc.line_text("b", 0), None);
+}
+
+#[test]
+fn a_picture_row_says_which_picture_and_which_of_its_rows() {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![
+            Line::text("above"),
+            Line::Image {
+                rows: 2,
+                cols: 16,
+                source: "p.png".into(),
+            },
+        ],
+    );
+    let layout = Layout::new(&doc, 80);
+
+    assert_eq!(layout.picture(0), None);
+    assert_eq!(
+        layout.picture(2),
+        Some(PictureRow {
+            source: "p.png",
+            cols: 16,
+            rows: 2,
+            row: 1
+        })
+    );
+}
+
+#[test]
+fn a_picture_folded_away_shows_no_picture_rows() {
+    let mut doc = Document::new();
+    let picture = Line::Image {
+        rows: 2,
+        cols: 16,
+        source: "p.png".into(),
+    };
+    let fold = Fold {
+        lines: 1..2,
+        summary: Line::text("+ a picture"),
+        closed: true,
+    };
+    doc.push_back(
+        "a",
+        Content {
+            lines: vec![Line::text("above"), picture],
+            folds: vec![fold],
+            ..Content::default()
+        },
+    );
+    let layout = Layout::new(&doc, 80);
+
+    assert_eq!(layout.row_count(), 2);
+    assert_eq!(layout.picture(1), None, "the fold's summary row");
 }

@@ -20,6 +20,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 
 use crate::app::{App, Effect, Msg, NetEvent};
+use crate::graphics::Graphics;
 use crate::key::Key;
 use crate::net::{Net, open_url};
 
@@ -31,6 +32,15 @@ use crate::net::{Net, open_url};
 pub async fn run() -> io::Result<()> {
     let mut terminal = Session::start()?;
     let mut app = App::new();
+    let var = |name| std::env::var(name).ok();
+    let graphics = Graphics::guess(
+        var("TERM").as_deref(),
+        var("TERM_PROGRAM").as_deref(),
+        std::env::var_os("TMUX").is_some(),
+    );
+    // Nothing was drawn yet, so nothing to free.
+    let _ = app.set_graphics(graphics);
+    app.number_pictures_from(first_picture_id());
     let size = terminal.size()?;
     let _ = app.update(Msg::Resize {
         width: size.width,
@@ -103,6 +113,15 @@ pub async fn run() -> io::Result<()> {
     }
 }
 
+/// The id of the first picture sent to the terminal: from the process and the time, so that two runs, or another
+/// program, are unlikely to reuse it while the terminal still holds the first's.
+fn first_picture_id() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.subsec_nanos());
+    (std::process::id().wrapping_mul(2_654_435_761) ^ nanos) & 0x007f_ffff | 0x0001_0000
+}
+
 /// What the loop does after an effect.
 enum Step {
     Go,
@@ -132,6 +151,17 @@ fn perform(effect: Effect, later: &mpsc::UnboundedSender<Msg>, net: &mut Net) ->
         Effect::EnrollPasted(link) => net.paste(link),
         Effect::AcceptTerms(version) => net.accept_terms(version),
         Effect::Fetch(request) => net.fetch(request),
+        Effect::Picture {
+            source,
+            cols,
+            rows,
+            kitty,
+        } => net.picture(source, cols, rows, kitty),
+        Effect::Graphics(escapes) => {
+            let mut out = stdout();
+            io::Write::write_all(&mut out, escapes.as_bytes())?;
+            io::Write::flush(&mut out)?;
+        }
         Effect::OpenUrl(url) => {
             if let Err(error) = open_url(&url) {
                 let _ = later.send(Msg::Net(NetEvent::Error(format!(

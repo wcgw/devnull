@@ -116,3 +116,47 @@ fn a_placeholder_cell_names_its_row_and_column_and_its_colour_the_image() {
 fn deleting_an_image_frees_it_quietly() {
     assert_eq!(kitty_delete(7), "\x1b_Ga=d,d=I,i=7,q=2\x1b\\");
 }
+
+#[test]
+fn kitty_graphics_are_guessed_from_the_terminal_and_never_through_tmux() {
+    let guess =
+        |term: &str, program: &str, tmux: bool| Graphics::guess(Some(term), Some(program), tmux);
+
+    assert_eq!(guess("xterm-ghostty", "", false), Graphics::Kitty);
+    assert_eq!(guess("xterm-kitty", "", false), Graphics::Kitty);
+    assert_eq!(guess("xterm-256color", "ghostty", false), Graphics::Kitty);
+    assert_eq!(
+        guess("xterm-256color", "Apple_Terminal", false),
+        Graphics::HalfBlocks
+    );
+    assert_eq!(
+        guess("xterm-ghostty", "", true),
+        Graphics::HalfBlocks,
+        "placeholders need passthrough there"
+    );
+    assert_eq!(Graphics::guess(None, None, false), Graphics::HalfBlocks);
+}
+
+#[test]
+fn graphics_have_the_names_set_takes() {
+    for graphics in [Graphics::Kitty, Graphics::HalfBlocks] {
+        assert_eq!(Graphics::named(graphics.name()), Some(graphics));
+    }
+    assert_eq!(Graphics::named("sixel"), None);
+}
+
+#[test]
+fn transparent_pixels_show_the_background() {
+    let clear = RgbaImage::from_pixel(2, 2, Rgba([255, 255, 255, 0]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    clear.write_to(&mut bytes, ImageFormat::Png).expect("png");
+    let picture = Picture::decode(&bytes.into_inner()).expect("picture");
+
+    assert_eq!(
+        picture.half_blocks(1, 1),
+        [[HalfBlock {
+            upper: None,
+            lower: None
+        }]]
+    );
+}

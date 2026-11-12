@@ -48,6 +48,51 @@ const DIACRITICS: [char; 100] = [
     '\u{745}', '\u{747}', '\u{749}', '\u{74A}',
 ];
 
+/// How pictures are drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Graphics {
+    /// Sent with the kitty graphics protocol, shown through placeholder cells.
+    Kitty,
+    /// Drawn with half blocks in true colour.
+    HalfBlocks,
+}
+
+impl Graphics {
+    /// What the terminal likely speaks, from `$TERM` and `$TERM_PROGRAM`: the kitty protocol in kitty and Ghostty,
+    /// but not inside tmux (`tmux`), where placeholders would need passing through; half blocks elsewhere.
+    #[must_use]
+    pub fn guess(term: Option<&str>, program: Option<&str>, tmux: bool) -> Self {
+        let named = |name: &str| {
+            [term, program]
+                .into_iter()
+                .flatten()
+                .any(|value| value.to_lowercase().contains(name))
+        };
+        if !tmux && (named("kitty") || named("ghostty")) {
+            Self::Kitty
+        } else {
+            Self::HalfBlocks
+        }
+    }
+
+    /// Its name, as `:set graphics=` takes it.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Kitty => "kitty",
+            Self::HalfBlocks => "halfblocks",
+        }
+    }
+
+    /// The graphics of that name.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::Kitty, Self::HalfBlocks]
+            .into_iter()
+            .find(|graphics| graphics.name() == name)
+    }
+}
+
 /// The cells a `width` × `height` pixel picture takes when as wide as `max_cols` and no taller than `max_rows`
 /// (both within the protocol's limits), as (columns, rows); cells are twice as tall as they are wide. `(0, 0)` for
 /// an empty picture.

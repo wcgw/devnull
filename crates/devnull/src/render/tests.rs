@@ -3,7 +3,7 @@
 use devnull_api::model::{Account, Commit, OrganizationPage, Profile};
 
 use super::*;
-use crate::doc::{AccountRef, Content, Cursor, Document, Layout, LinkCard, Motion, Target};
+use crate::doc::{AccountRef, Content, Cursor, Document, Layout, Line, LinkCard, Motion, Target};
 
 /// 2026-11-12T15:13:40Z, a little after the fixtures' commits.
 const NOW: u64 = 1_794_496_420;
@@ -232,12 +232,46 @@ fn link_cards_images_status_and_replies_follow_the_text() {
         [
             "Grace @grace · 3m · 6cd1130",
             "look",
-            "🔗 Example · example.org",
+            "🔗 Example · example.org"
+        ]
+        .into_iter()
+        // The picture's rows, then its caption.
+        .chain(std::iter::repeat_n("", 14))
+        .chain([
             "🖼 image 640×480",
             "★ 2  ↩ 1 · pending",
             "  ↳ Lin @lin: first line",
             "",
-        ]
+        ])
+        .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_picture_takes_its_fitted_space_above_its_caption() {
+    let block = commit_block(
+        &commit(serde_json::json!({
+            "images": [
+                { "id": "i1", "url": "https://example.org/wide.png", "width": 960, "height": 240 },
+                { "id": "i2", "url": "https://example.org/unknown.png", "width": 0, "height": 0 }
+            ]
+        })),
+        NOW,
+    );
+
+    assert_eq!(
+        block.lines[1],
+        Line::Image {
+            rows: 6,
+            cols: 48,
+            source: "https://example.org/wide.png".into()
+        }
+    );
+    assert_eq!(
+        // The header, then the picture's six rows.
+        rows(block)[7..9],
+        ["🖼 image 960×240", "🖼 image 0×0"],
+        "a picture of unknown size has its caption alone"
     );
 }
 

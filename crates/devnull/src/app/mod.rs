@@ -10,6 +10,7 @@ mod hover;
 mod logs;
 mod options;
 mod picker;
+mod pictures;
 mod profiles;
 mod threads;
 mod view;
@@ -41,6 +42,7 @@ pub use fetch::{FetchError, Fetched, Request};
 use hover::Hover;
 use options::Options;
 use picker::Picker;
+pub use pictures::Prepared;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
 
@@ -86,6 +88,8 @@ pub struct App {
     composing: Option<composer::Composing>,
     /// Drafts not published, to open again.
     drafts: composer::Drafts,
+    /// The pictures asked for.
+    pictures: pictures::Pictures,
 }
 
 /// How long pending keys wait before the which-key popup shows what can follow them.
@@ -122,6 +126,17 @@ pub enum Msg {
     /// The editor opened by [`Effect::Edit`] closed: what it saved, or why there is nothing (it failed, or quit
     /// with an error as Vim's `:cq` does).
     Edited(Result<String, String>),
+    /// A picture asked for by [`Effect::Picture`], prepared as asked, or why it could not be.
+    Picture {
+        /// Where it is.
+        source: String,
+        /// Its width in cells.
+        cols: u16,
+        /// Its height in cells.
+        rows: u16,
+        /// The picture, or why there is none.
+        result: Result<Prepared, String>,
+    },
     /// The terminal gained focus.
     FocusGained,
     /// The terminal lost focus.
@@ -173,6 +188,20 @@ pub enum Effect {
     EnrollPasted(String),
     /// Accept the terms of this version.
     AcceptTerms(String),
+    /// Download the picture at `source` and prepare it for `cols` × `rows` cells, then send [`Msg::Picture`]: for the
+    /// kitty protocol as image `kitty` when given, as half blocks otherwise.
+    Picture {
+        /// Where it is.
+        source: String,
+        /// Its width in cells.
+        cols: u16,
+        /// Its height in cells.
+        rows: u16,
+        /// Its id in the terminal, for the kitty protocol.
+        kitty: Option<u32>,
+    },
+    /// Write these graphics protocol escapes to the terminal, as they are.
+    Graphics(String),
     /// Hand the terminal to the user's editor on `text`, then send [`Msg::Edited`].
     Edit {
         /// What the editor opens.
@@ -305,6 +334,7 @@ impl App {
             unread: 0,
             composing: None,
             drafts: composer::Drafts::new(),
+            pictures: pictures::Pictures::default(),
         }
     }
 
@@ -322,6 +352,14 @@ impl App {
 
     /// Reacts to `msg`, returning what the runtime must do.
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
+        let mut effects = self.react(msg);
+        if !effects.contains(&Effect::Quit) {
+            effects.extend(self.wanted_pictures());
+        }
+        effects
+    }
+
+    fn react(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
             Msg::Key(key) => {
                 self.generation += 1;
@@ -355,6 +393,12 @@ impl App {
             },
             Msg::Sourced { path, contents } => self.source(&path, contents),
             Msg::Edited(saved) => self.edited(saved),
+            Msg::Picture {
+                source,
+                cols,
+                rows,
+                result,
+            } => self.picture_arrived(source, cols, rows, result),
             Msg::Net(event) => self.net(event),
             Msg::Fetched { fetched, now } => self.fetched(fetched, now),
             Msg::FocusGained => {
@@ -798,7 +842,11 @@ impl App {
             Command::Quit { all: false, .. } if self.windows.count() > 1 => {
                 self.windows.close();
             }
-            Command::Quit { .. } => return Ok(vec![Effect::Quit]),
+            Command::Quit { .. } => {
+                let mut effects = self.free_pictures();
+                effects.push(Effect::Quit);
+                return Ok(effects);
+            }
             Command::Split { vertical } => {
                 self.windows
                     .split(if vertical { Axis::Columns } else { Axis::Rows })
@@ -807,10 +855,15 @@ impl App {
             Command::Only => self.windows.only(),
             Command::Wincmd(ch) => return self.wincmd(ch),
             Command::Set(args) => {
+                let graphics = self.options.graphics;
                 for arg in &args {
                     if let Some(shown) = self.options.set(arg, &mut self.keymap)? {
                         self.info(shown);
                     }
+                }
+                if self.options.graphics != graphics {
+                    // Drawn otherwise now: what was sent goes, and pictures are asked for again.
+                    return Ok(self.pictures.clear());
                 }
             }
             Command::Map {
