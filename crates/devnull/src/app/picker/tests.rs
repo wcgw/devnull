@@ -58,5 +58,9 @@ fn a_match_says_which_characters_matched() {
         "the best place, not the first"
     );
     assert_eq!(matched("x", "log"), None);
-    assert_eq!(matched("a", "a/a"), Some(vec![0]), "of equal places, the first");
+    assert_eq!(
+        matched("a", "a/a"),
+        Some(vec![0]),
+        "of equal places, the first"
+    );
 }
