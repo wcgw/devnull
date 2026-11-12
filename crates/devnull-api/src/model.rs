@@ -417,6 +417,18 @@ pub struct Organization {
     pub admins: Vec<Account>,
 }
 
+/// A commit's text as the server would show it, from `POST /api/v1/commits/preview`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[non_exhaustive]
+pub struct Preview {
+    /// The text as it would be kept.
+    #[serde(default, deserialize_with = "or_default")]
+    pub body: String,
+    /// The text as it would be shown.
+    #[serde(rename = "body_segments", default, deserialize_with = "or_default")]
+    pub segments: Vec<Segment>,
+}
+
 /// A notification, or a group of them about the same thing (several stars on one commit, say), from
 /// `GET /api/v1/notifications`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]

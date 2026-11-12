@@ -275,6 +275,12 @@ Laravel backend. Captured responses live in the scratchpad only (they contain ot
   new to this visit. Types: `followed`, `starred`, `replied`, `quoted`, `mentioned`, `approved`, `rejected`; `commit`
   is the reply/quote/mention, or the account's own for stars and moderation. The unread count is
   `unread_notifications_count` in `/me`'s envelope, and reading it marks nothing. From the Go client; not checked live.
+- **Commit writing**: `POST /commits/preview {body}` answers `{data: {body, body_segments, …}}` with the text as the
+  server would keep it (shortcodes replaced outside code) and changes nothing; it refuses what publishing would, with
+  a 422 and Laravel's message ("The body field is required.", "The body field must not be greater than 4000
+  characters."). `POST /commits {body, parent_id | quoted_commit_id}` publishes; `DELETE /commits/{id}`;
+  `POST`/`DELETE /commits/{id}/star` answer the commit; `POST`/`DELETE /users|organizations/{handle}/follow`. The
+  budget rules (links count 23, code whole, blank runs collapsed) are ported from the Go client with its vectors.
 - **Profile search** `GET /search/profiles?q=`: `{users, organizations}`, not paged, best match first; terms up to 100
   characters (the Go client's limit). Prefixes match (`jolic` finds `jolicode`); an empty term finds nothing.
 - **Errors** are `{message, code?, errors?}`:
@@ -451,7 +457,10 @@ from M1 even though graphics land in M6.
 
 ### M5 Writing & actions
 
-- `$EDITOR` composer for commit/reply/quote with server preview, shortcodes, keep-draft; star, follow, delete, `gy`.
+- [x] **M5.1** `devnull-api`: the body budget, preview, publish (commit, reply, quote), delete, star, follow. The preview
+  was checked live (it changes nothing); the writes only against a fake server.
+- [ ] **M5.2** Actions: `s` (`:star`), `:follow`/`:unfollow`, `dd` (`:delete`, confirmed).
+- [ ] **M5.3** `$EDITOR` composer for commit/reply/quote with server preview and keep-draft (D3); `gy` is done (M3.4).
 
 ### M6 Graphics
 
@@ -463,5 +472,7 @@ from M1 even though graphics land in M6.
 
 ## Open questions
 
-- Emoji shortcode data source (M5): match the original's `tools/emoji` generator so shortcodes agree with the web.
-- Server preview endpoint (`/api/v1/commits/preview`) behavior and limits (M5).
+- ~~Emoji shortcode data source (M5)~~: none needed. The server replaces `:shortcode:` outside code itself (checked
+  live through the preview in M5.1); `dn` sends what was typed and shows the preview. That publishing does the same
+  is likely but not checked (it would publish).
+- ~~Server preview endpoint behavior and limits (M5)~~: see "Commit writing" in the API notes.

@@ -13,8 +13,8 @@ use ssh_key::rand_core::{OsRng, RngCore};
 use url::Url;
 
 use crate::model::{
-    Account, AccountPage, Commit, Cursor, Inbox, Me, Notification, OrganizationPage, Page, Profile,
-    ProfileSearch, Thread,
+    Account, AccountKind, AccountPage, Commit, Cursor, Inbox, Me, Notification, OrganizationPage,
+    Page, Preview, Profile, ProfileSearch, Thread,
 };
 use crate::signing::{Namespace, SignError, Signer, canonical_message};
 
@@ -31,6 +31,41 @@ fn segment(value: &str) -> Result<&str, ApiError> {
         Ok(value)
     } else {
         Err(ApiError::Invalid(format!("not a handle or id: {value:?}")))
+    }
+}
+
+/// A commit to publish: one of its own, a reply, or a quote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Draft {
+    /// A commit of its own.
+    Commit {
+        /// Its text.
+        body: String,
+    },
+    /// A reply.
+    Reply {
+        /// The id of the commit it replies to.
+        to: String,
+        /// Its text.
+        body: String,
+    },
+    /// A quote.
+    Quote {
+        /// The id of the commit it quotes.
+        of: String,
+        /// Its text.
+        body: String,
+    },
+}
+
+impl Draft {
+    /// Its text.
+    #[must_use]
+    pub fn body(&self) -> &str {
+        match self {
+            Self::Commit { body } | Self::Reply { body, .. } | Self::Quote { body, .. } => body,
+        }
     }
 }
 
@@ -83,6 +118,15 @@ impl Category {
             .into_iter()
             .find(|category| category.name() == name)
     }
+}
+
+/// Where following `handle` happens: a person's or an organization's.
+fn follow_path(handle: &str, kind: AccountKind) -> Result<String, ApiError> {
+    let handle = segment(handle)?;
+    Ok(match kind {
+        AccountKind::Organization => format!("/api/v1/organizations/{handle}/follow"),
+        _ => format!("/api/v1/users/{handle}/follow"),
+    })
 }
 
 /// The longest search term the server takes, in characters.
@@ -504,6 +548,155 @@ impl Client {
     /// Cancel safe: it only reads.
     pub async fn starred(&self, after: Option<&Cursor>) -> Result<Page<Commit>, ApiError> {
         self.list("/api/v1/starred", &[], after).await
+    }
+
+    /// `body` as the server would keep and show it, without publishing anything.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::Refused`] with the server's message for a text it would refuse.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Cancel safe: it changes nothing.
+    pub async fn preview(&self, body: &str) -> Result<Preview, ApiError> {
+        let bytes = self
+            .write(
+                Method::POST,
+                "/api/v1/commits/preview",
+                Some(serde_json::json!({ "body": body })),
+            )
+            .await?;
+        let envelope: Envelope<Preview> =
+            serde_json::from_slice(&bytes).map_err(|error| ApiError::Invalid(error.to_string()))?;
+        Ok(envelope.data)
+    }
+
+    /// Publishes `draft`; the commit as published, which moderation may hold (see [`Commit::status`]).
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::Refused`] with the server's message for a text it refuses.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Not cancel safe: the commit may be published even when the response is lost.
+    pub async fn publish(&self, draft: &Draft) -> Result<Commit, ApiError> {
+        let payload = match draft {
+            Draft::Commit { body } => serde_json::json!({ "body": body }),
+            Draft::Reply { to, body } => {
+                serde_json::json!({ "body": body, "parent_id": segment(to)? })
+            }
+            Draft::Quote { of, body } => {
+                serde_json::json!({ "body": body, "quoted_commit_id": segment(of)? })
+            }
+        };
+        let bytes = self
+            .write(Method::POST, "/api/v1/commits", Some(payload))
+            .await?;
+        let envelope: Envelope<Commit> =
+            serde_json::from_slice(&bytes).map_err(|error| ApiError::Invalid(error.to_string()))?;
+        Ok(envelope.data)
+    }
+
+    /// Deletes the account's commit `id`.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Not cancel safe: the commit may be deleted even when the response is lost.
+    pub async fn delete_commit(&self, id: &str) -> Result<(), ApiError> {
+        let path = format!("/api/v1/commits/{}", segment(id)?);
+        self.write(Method::DELETE, &path, None).await.map(drop)
+    }
+
+    /// Stars commit `id`; the commit as the server now counts it.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`]; [`ApiError::Invalid`] when the server does not confirm the star.
+    ///
+    /// # Cancel Safety
+    ///
+    /// Not cancel safe: the star may be given even when the response is lost.
+    pub async fn star(&self, id: &str) -> Result<Commit, ApiError> {
+        self.set_star(id, true).await
+    }
+
+    /// Takes the star off commit `id`; the commit as the server now counts it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::star`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// As [`Client::star`].
+    pub async fn unstar(&self, id: &str) -> Result<Commit, ApiError> {
+        self.set_star(id, false).await
+    }
+
+    async fn set_star(&self, id: &str, on: bool) -> Result<Commit, ApiError> {
+        let path = format!("/api/v1/commits/{}/star", segment(id)?);
+        let method = if on { Method::POST } else { Method::DELETE };
+        let bytes = self.write(method, &path, None).await?;
+        let envelope: Envelope<Commit> =
+            serde_json::from_slice(&bytes).map_err(|error| ApiError::Invalid(error.to_string()))?;
+        let commit = envelope.data;
+        if commit.id != id || commit.starred != on {
+            return Err(ApiError::Invalid(
+                "the server did not confirm the star".to_owned(),
+            ));
+        }
+        Ok(commit)
+    }
+
+    /// Follows the person or organization `handle`.
+    ///
+    /// # Errors
+    ///
+    /// See [`ApiError`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// Not cancel safe: the follow may happen even when the response is lost.
+    pub async fn follow(&self, handle: &str, kind: AccountKind) -> Result<(), ApiError> {
+        self.write(Method::POST, &follow_path(handle, kind)?, None)
+            .await
+            .map(drop)
+    }
+
+    /// Stops following the person or organization `handle`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Client::follow`].
+    ///
+    /// # Cancel Safety
+    ///
+    /// As [`Client::follow`].
+    pub async fn unfollow(&self, handle: &str, kind: AccountKind) -> Result<(), ApiError> {
+        self.write(Method::DELETE, &follow_path(handle, kind)?, None)
+            .await
+            .map(drop)
+    }
+
+    /// Sends a signed `method` request to `path` with `payload` as its JSON body, if any; the response's body.
+    async fn write(
+        &self,
+        method: Method,
+        path: &str,
+        payload: Option<serde_json::Value>,
+    ) -> Result<Vec<u8>, ApiError> {
+        let url = self
+            .origin
+            .join(path)
+            .map_err(|error| ApiError::Invalid(error.to_string()))?;
+        let body = payload.map_or_else(Vec::new, |payload| payload.to_string().into_bytes());
+        self.send(method, url, body).await
     }
 
     /// A page of a person's commits, or of their replies.

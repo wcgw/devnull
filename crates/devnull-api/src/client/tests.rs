@@ -4,13 +4,13 @@ use std::path::Path;
 
 use ssh_encoding::Decode;
 use ssh_key::{PublicKey, SshSig};
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{body_json, method, path, query_param};
 use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
 use super::*;
 use crate::model::{AccountKind, AccountPage, Lane, NotificationKind, Segment};
 use crate::signing::{Signer, canonical_message};
-use crate::{Category, OrganizationTab, People};
+use crate::{Category, Draft, OrganizationTab, People};
 
 fn fixture(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -587,6 +587,149 @@ async fn starred_commits_come_in_pages() {
 
     assert_eq!(starred.items[0].id, "s1");
     assert!(starred.next.is_none());
+}
+
+#[tokio::test]
+async fn a_preview_is_the_text_as_the_server_would_show_it() {
+    let (server, client, signed) = server_and_client().await;
+    let preview = serde_json::json!({ "data": {
+        "body": "hi @ada", "body_segments": [{ "type": "text", "text": "hi @ada" }], "mentions": []
+    } });
+    Mock::given(method("POST"))
+        .and(path("/api/v1/commits/preview"))
+        .and(body_json(serde_json::json!({ "body": "hi @ada" })))
+        .and(signed)
+        .respond_with(json(&preview.to_string()))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let preview = client.preview("hi @ada").await.expect("preview");
+
+    assert_eq!(preview.body, "hi @ada");
+    assert_eq!(preview.segments.len(), 1);
+}
+
+#[tokio::test]
+async fn a_draft_is_published_as_a_commit_a_reply_or_a_quote() {
+    let (server, client, signed) = server_and_client().await;
+    let created = |id: &str| {
+        let mut commit = commit_json(id);
+        commit["status"] = "approved".into();
+        ResponseTemplate::new(201)
+            .set_body_string(serde_json::json!({ "data": commit }).to_string())
+    };
+    for (payload, id) in [
+        (serde_json::json!({ "body": "hello" }), "n1"),
+        (
+            serde_json::json!({ "body": "agreed", "parent_id": "p1" }),
+            "n2",
+        ),
+        (
+            serde_json::json!({ "body": "look", "quoted_commit_id": "q1" }),
+            "n3",
+        ),
+    ] {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/commits"))
+            .and(body_json(payload))
+            .and(signed.clone())
+            .respond_with(created(id))
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    let commit = client
+        .publish(&Draft::Commit {
+            body: "hello".into(),
+        })
+        .await
+        .expect("commit");
+    let reply = client
+        .publish(&Draft::Reply {
+            to: "p1".into(),
+            body: "agreed".into(),
+        })
+        .await
+        .expect("reply");
+    let quote = client
+        .publish(&Draft::Quote {
+            of: "q1".into(),
+            body: "look".into(),
+        })
+        .await
+        .expect("quote");
+
+    assert_eq!([commit.id, reply.id, quote.id], ["n1", "n2", "n3"]);
+}
+
+#[tokio::test]
+async fn stars_follows_and_deletions_are_signed_writes() {
+    let (server, client, signed) = server_and_client().await;
+    let starred = |on: bool| {
+        let mut commit = commit_json("c1");
+        commit["starred"] = on.into();
+        json(&serde_json::json!({ "data": commit }).to_string())
+    };
+    for (verb, route, response) in [
+        ("POST", "/api/v1/commits/c1/star", starred(true)),
+        ("DELETE", "/api/v1/commits/c1/star", starred(false)),
+        (
+            "POST",
+            "/api/v1/users/ada/follow",
+            ResponseTemplate::new(204),
+        ),
+        (
+            "DELETE",
+            "/api/v1/users/ada/follow",
+            ResponseTemplate::new(204),
+        ),
+        (
+            "POST",
+            "/api/v1/organizations/acme/follow",
+            ResponseTemplate::new(204),
+        ),
+        ("DELETE", "/api/v1/commits/c1", ResponseTemplate::new(204)),
+    ] {
+        Mock::given(method(verb))
+            .and(path(route))
+            .and(signed.clone())
+            .respond_with(response)
+            .expect(1)
+            .mount(&server)
+            .await;
+    }
+
+    assert!(client.star("c1").await.expect("star").starred);
+    assert!(!client.unstar("c1").await.expect("unstar").starred);
+    client
+        .follow("ada", AccountKind::User)
+        .await
+        .expect("follow");
+    client
+        .unfollow("ada", AccountKind::User)
+        .await
+        .expect("unfollow");
+    client
+        .follow("acme", AccountKind::Organization)
+        .await
+        .expect("follow an organization");
+    client.delete_commit("c1").await.expect("delete");
+}
+
+#[tokio::test]
+async fn a_star_the_server_does_not_confirm_is_an_error() {
+    let (server, client, _) = server_and_client().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/commits/c1/star"))
+        .respond_with(json(
+            &serde_json::json!({ "data": commit_json("c1") }).to_string(),
+        ))
+        .mount(&server)
+        .await;
+
+    assert!(matches!(client.star("c1").await, Err(ApiError::Invalid(_))));
 }
 
 #[tokio::test]
