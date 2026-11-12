@@ -1,5 +1,7 @@
 //! The application core (D10): state and a pure `update`; the runtime does the I/O.
 
+mod cmdline;
+mod options;
 mod view;
 mod window;
 
@@ -8,12 +10,14 @@ mod tests;
 
 use ratatui::layout::Rect;
 
-use crate::doc::{Document, Layout, Line};
+use crate::doc::{Direction, Document, Layout, Line, Pattern, SearchOutcome};
 use crate::ex::{self, Command};
 use crate::key::Key;
-use crate::keymap::{Action, Invocation, Keymap, Mode};
+use crate::keymap::{Action, CmdlineKind, Invocation, Keymap, Mode};
 
-use window::Window;
+use cmdline::{Cmdline, Edit};
+use options::Options;
+use window::{Viewport, Window};
 
 /// Everything `dn` knows, and the only place that decides what happens next.
 #[derive(Debug)]
@@ -22,8 +26,19 @@ pub struct App {
     size: (u16, u16),
     focused: bool,
     keymap: Keymap,
+    options: Options,
     buffers: Vec<Buffer>,
     window: Window,
+    mode: AppMode,
+    /// The message shown in the command line until the next key, if any.
+    message: Option<Message>,
+    /// Every message shown, oldest first, for `:messages`.
+    messages: Vec<Message>,
+    /// Command lines run, oldest first.
+    ex_history: Vec<String>,
+    /// Patterns searched for, oldest first.
+    search_history: Vec<String>,
+    last_search: Option<LastSearch>,
 }
 
 /// Something that happened, for [`App::update`] to react to.
@@ -31,7 +46,7 @@ pub struct App {
 pub enum Msg {
     /// A key was pressed.
     Key(Key),
-    /// Text was pasted (bracketed paste). It never runs commands.
+    /// Text was pasted (bracketed paste). It never runs commands; on the command line it is inserted.
     Paste(String),
     /// The terminal gained focus.
     FocusGained,
@@ -60,6 +75,37 @@ struct Buffer {
     doc: Document,
 }
 
+/// What keys are for right now.
+#[derive(Debug)]
+enum AppMode {
+    Normal,
+    /// Typing after `:`, `/` or `?`.
+    Cmdline(Cmdline),
+    /// `:messages`, waiting for a key to continue.
+    MorePrompt,
+}
+
+/// A line for the command line area.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Message {
+    text: String,
+    kind: MessageKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageKind {
+    Info,
+    Warning,
+    Error,
+}
+
+/// The last search, for `n` and `N`.
+#[derive(Debug, Clone)]
+struct LastSearch {
+    pattern: Pattern,
+    direction: Direction,
+}
+
 impl Default for App {
     fn default() -> Self {
         Self::new()
@@ -80,11 +126,18 @@ impl App {
             size: (80, 24),
             focused: true,
             keymap: Keymap::new(),
+            options: Options::default(),
             buffers: vec![Buffer {
                 name: name.into(),
                 doc,
             }],
             window: Window::new(0),
+            mode: AppMode::Normal,
+            message: None,
+            messages: Vec::new(),
+            ex_history: Vec::new(),
+            search_history: Vec::new(),
+            last_search: None,
         }
     }
 
@@ -103,13 +156,13 @@ impl App {
     /// Reacts to `msg`, returning what the runtime must do.
     pub fn update(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
-            Msg::Key(key) => {
-                let ran = self.keymap.feed(Mode::Normal, key);
-                ran.into_iter()
-                    .flat_map(|invocation| self.run(invocation))
-                    .collect()
+            Msg::Key(key) => self.key(key),
+            Msg::Paste(text) => {
+                if let AppMode::Cmdline(cmdline) = &mut self.mode {
+                    cmdline.paste(&text);
+                }
+                Vec::new()
             }
-            Msg::Paste(_) => Vec::new(),
             Msg::FocusGained => {
                 self.focused = true;
                 Vec::new()
@@ -125,37 +178,240 @@ impl App {
         }
     }
 
+    fn key(&mut self, key: Key) -> Vec<Effect> {
+        match &mut self.mode {
+            AppMode::Normal => {
+                self.message = None;
+                let ran = self.keymap.feed(Mode::Normal, key);
+                self.run_all(ran)
+            }
+            AppMode::MorePrompt => {
+                self.mode = AppMode::Normal;
+                // As in Vim, <CR>, <Space> and <Esc> only dismiss; any other key also does its usual job.
+                let dismiss_only = [
+                    Key::new(crate::key::Code::Enter),
+                    Key::char(' '),
+                    Key::new(crate::key::Code::Esc),
+                ];
+                if dismiss_only.contains(&key) {
+                    Vec::new()
+                } else {
+                    self.key(key)
+                }
+            }
+            AppMode::Cmdline(cmdline) => {
+                let history = match cmdline.kind {
+                    CmdlineKind::Ex => &self.ex_history,
+                    CmdlineKind::Search(_) => &self.search_history,
+                };
+                match cmdline.key(key, history) {
+                    Edit::Editing => Vec::new(),
+                    Edit::Cancel => {
+                        self.mode = AppMode::Normal;
+                        Vec::new()
+                    }
+                    Edit::Submit(text) => {
+                        let AppMode::Cmdline(cmdline) =
+                            std::mem::replace(&mut self.mode, AppMode::Normal)
+                        else {
+                            unreachable!("the mode was just matched as the command line");
+                        };
+                        match cmdline.kind {
+                            CmdlineKind::Ex => {
+                                remember(&mut self.ex_history, &text);
+                                self.ex(&text)
+                            }
+                            CmdlineKind::Search(direction) => {
+                                remember(&mut self.search_history, &text);
+                                self.search(&text, direction, cmdline.count.unwrap_or(1));
+                                Vec::new()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn run_all(&mut self, ran: Vec<Invocation>) -> Vec<Effect> {
+        ran.into_iter()
+            .flat_map(|invocation| self.run(invocation))
+            .collect()
+    }
+
     fn run(&mut self, invocation: Invocation) -> Vec<Effect> {
         let count = invocation.count.unwrap_or(1);
+        let viewport = self.viewport();
         let area = self.window_area();
-        let height = usize::from(area.height);
         let window = &mut self.window;
         let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
         match invocation.action {
             Action::Motion(motion) => {
                 window.cursor.apply(&layout, motion, count);
-                window.follow_cursor(&layout, height);
+                window.follow_cursor(&layout, viewport);
             }
-            Action::Scroll(scroll) => window.scroll(&layout, height, scroll, count),
-            Action::Place(place) => window.place(&layout, height, place),
-            Action::ViewRow(place) => window.view_row(&layout, height, place, count),
+            Action::Scroll(scroll) => window.scroll(&layout, viewport, scroll, count),
+            Action::Place(place) => window.place(&layout, viewport, place),
+            Action::ViewRow(place) => window.view_row(&layout, viewport, place, count),
+            Action::SearchWord(direction) => {
+                let case = self.options.case_mode();
+                if let Some((pattern, outcome)) =
+                    window.cursor.search_word(&layout, direction, count, case)
+                {
+                    window.follow_cursor(&layout, viewport);
+                    self.last_search = Some(LastSearch { pattern, direction });
+                    self.report_search(outcome, direction, "");
+                } else {
+                    self.error("E348: No string under cursor");
+                }
+            }
+            Action::SearchNext { reverse } => match self.last_search.clone() {
+                Some(LastSearch { pattern, direction }) => {
+                    let direction = if reverse {
+                        opposite(direction)
+                    } else {
+                        direction
+                    };
+                    let outcome = window.cursor.search(&layout, &pattern, direction, count);
+                    window.follow_cursor(&layout, viewport);
+                    self.report_search(outcome, direction, "");
+                }
+                None => self.error("E35: No previous regular expression"),
+            },
+            Action::Cmdline(kind) => {
+                self.mode = AppMode::Cmdline(Cmdline::new(kind, invocation.count))
+            }
+            Action::Keys { keys, remap } => {
+                return keys
+                    .into_iter()
+                    .flat_map(|key| self.replay(key, remap))
+                    .collect();
+            }
             Action::Ex(line) => return self.ex(&line),
+            Action::Error(text) => self.error(text),
             _ => {}
         }
         Vec::new()
     }
 
-    /// The document of the current window, for tests to change as the network would.
-    #[cfg(test)]
-    pub(crate) fn doc_mut(&mut self) -> &mut Document {
-        &mut self.buffers[self.window.buffer].doc
+    /// Feeds one key of an [`Action::Keys`] to whatever mode is current now.
+    fn replay(&mut self, key: Key, remap: bool) -> Vec<Effect> {
+        match self.mode {
+            AppMode::Normal => {
+                let ran = self.keymap.replay(Mode::Normal, &[key], remap);
+                self.run_all(ran)
+            }
+            AppMode::Cmdline(_) | AppMode::MorePrompt => self.key(key),
+        }
     }
 
     fn ex(&mut self, line: &str) -> Vec<Effect> {
-        match ex::parse(line) {
-            Ok(Some(Command::Quit { .. })) => vec![Effect::Quit],
-            _ => Vec::new(),
+        let command = match ex::parse(line) {
+            Ok(Some(command)) => command,
+            Ok(None) => return Vec::new(),
+            Err(error) => {
+                self.error(error.to_string());
+                return Vec::new();
+            }
+        };
+        match command {
+            Command::Quit { .. } => return vec![Effect::Quit],
+            Command::Set(args) => {
+                for arg in &args {
+                    match self.options.set(arg, &mut self.keymap) {
+                        Ok(Some(shown)) => self.info(shown),
+                        Ok(None) => {}
+                        Err(error) => {
+                            self.error(error);
+                            break;
+                        }
+                    }
+                }
+            }
+            Command::Map {
+                modes,
+                lhs,
+                rhs,
+                remap,
+            } => {
+                for mode in modes {
+                    self.keymap.map(mode, &lhs, &rhs, remap);
+                }
+            }
+            Command::Unmap { modes, lhs } => {
+                let mut removed = false;
+                for mode in modes {
+                    removed |= self.keymap.unmap(mode, &lhs);
+                }
+                if !removed {
+                    self.error("E31: No such mapping");
+                }
+            }
+            // Like Vim, nothing to show means no prompt either.
+            Command::Messages if self.messages.is_empty() => {}
+            Command::Messages => self.mode = AppMode::MorePrompt,
+            Command::Highlight { .. }
+            | Command::HighlightClear
+            | Command::Colorscheme(_)
+            | Command::Source(_) => {
+                self.error("E319: Sorry, the command is not available in this version");
+            }
         }
+        Vec::new()
+    }
+
+    /// `/` and `?` submitted with `text`; an empty pattern repeats the last one.
+    fn search(&mut self, text: &str, direction: Direction, count: usize) {
+        let pattern = if text.is_empty() {
+            match &self.last_search {
+                Some(last) => last.pattern.clone(),
+                None => return self.error("E35: No previous regular expression"),
+            }
+        } else {
+            match Pattern::new(text, self.options.case_mode()) {
+                Ok(pattern) => pattern,
+                Err(error) => return self.error(error.to_string()),
+            }
+        };
+        let viewport = self.viewport();
+        let area = self.window_area();
+        let window = &mut self.window;
+        let layout = Layout::new(&self.buffers[window.buffer].doc, area.width);
+        let outcome = window.cursor.search(&layout, &pattern, direction, count);
+        window.follow_cursor(&layout, viewport);
+        self.last_search = Some(LastSearch { pattern, direction });
+        self.report_search(outcome, direction, text);
+    }
+
+    fn report_search(&mut self, outcome: SearchOutcome, direction: Direction, text: &str) {
+        match (outcome, direction) {
+            (SearchOutcome::Found, _) => {}
+            (SearchOutcome::Wrapped, Direction::Forward) => {
+                self.warn("search hit BOTTOM, continuing at TOP")
+            }
+            (SearchOutcome::Wrapped, Direction::Backward) => {
+                self.warn("search hit TOP, continuing at BOTTOM")
+            }
+            (SearchOutcome::NotFound, _) => self.error(format!("E486: Pattern not found: {text}")),
+        }
+    }
+
+    fn info(&mut self, text: impl Into<String>) {
+        self.say(text.into(), MessageKind::Info);
+    }
+
+    fn warn(&mut self, text: impl Into<String>) {
+        self.say(text.into(), MessageKind::Warning);
+    }
+
+    fn error(&mut self, text: impl Into<String>) {
+        self.say(text.into(), MessageKind::Error);
+    }
+
+    fn say(&mut self, text: String, kind: MessageKind) {
+        let message = Message { text, kind };
+        self.messages.push(message.clone());
+        self.message = Some(message);
     }
 
     /// Where the window's text goes: below the bufferline, above its statusline and the command line.
@@ -163,6 +419,35 @@ impl App {
         let (width, height) = self.size;
         Rect::new(0, 1, width, height.saturating_sub(3))
     }
+
+    fn viewport(&self) -> Viewport {
+        Viewport {
+            height: usize::from(self.window_area().height),
+            scrolloff: self.options.scrolloff,
+        }
+    }
+
+    /// The document of the current window, for tests to change as the network would.
+    #[cfg(test)]
+    pub(crate) fn doc_mut(&mut self) -> &mut Document {
+        &mut self.buffers[self.window.buffer].doc
+    }
+}
+
+fn opposite(direction: Direction) -> Direction {
+    match direction {
+        Direction::Forward => Direction::Backward,
+        Direction::Backward => Direction::Forward,
+    }
+}
+
+/// Adds `entry` to `history` as its newest, unless empty; an older identical entry moves up instead of repeating.
+fn remember(history: &mut Vec<String>, entry: &str) {
+    if entry.is_empty() {
+        return;
+    }
+    history.retain(|old| old != entry);
+    history.push(entry.to_owned());
 }
 
 /// What `dn` shows before anything is loaded, like Vim's intro screen.
@@ -172,7 +457,7 @@ fn intro() -> Document {
         format!("dn v{}", env!("CARGO_PKG_VERSION")),
         "a Neovim-flavoured client for dev-null.sh".to_owned(),
         String::new(),
-        "type  q  to exit".to_owned(),
+        "type  :q<Enter>  to exit".to_owned(),
     ];
     doc.push_back(
         "intro",

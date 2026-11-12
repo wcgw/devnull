@@ -19,6 +19,12 @@ pub enum Group {
     TabLineSel,
     /// The rest of the bufferline.
     TabLineFill,
+    /// Error messages.
+    ErrorMsg,
+    /// Warnings, such as a search wrapping around.
+    WarningMsg,
+    /// "Press ENTER" prompts.
+    MoreMsg,
 }
 
 impl Group {
@@ -33,6 +39,9 @@ impl Group {
             Self::StatusLine => Style::new().add_modifier(Modifier::REVERSED),
             Self::TabLineSel => Style::new().add_modifier(Modifier::BOLD),
             Self::TabLineFill => Style::new().fg(Color::DarkGray),
+            Self::ErrorMsg => Style::new().fg(Color::Red),
+            Self::WarningMsg => Style::new().fg(Color::Yellow),
+            Self::MoreMsg => Style::new().fg(Color::Green),
         }
     }
 }

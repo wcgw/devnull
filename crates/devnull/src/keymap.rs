@@ -297,6 +297,35 @@ impl Keymap {
             .bind(lhs, target, rhs.to_owned());
     }
 
+    /// Removes the user map of exactly `lhs` (Vim notation) from `mode`, returning whether there was one.
+    pub fn unmap(&mut self, mode: Mode, lhs: &str) -> bool {
+        let lhs = parse_keys(lhs, self.leader);
+        let Some(table) = self.user.get_mut(&mode) else {
+            return false;
+        };
+        if table.bindings.remove(&lhs).is_none() {
+            return false;
+        }
+        table.prefixes = table
+            .bindings
+            .keys()
+            .flat_map(|keys| (1..keys.len()).map(|end| keys[..end].to_vec()))
+            .collect();
+        true
+    }
+
+    /// The key `<leader>` stands for.
+    #[must_use]
+    pub fn leader(&self) -> Key {
+        self.leader
+    }
+
+    /// The count typed before the pending keys, if any.
+    #[must_use]
+    pub fn pending_count(&self) -> Option<usize> {
+        self.typed.count
+    }
+
     /// Makes `key` the `<leader>` of built-in bindings and of maps defined from now on, as setting `mapleader`
     /// before them does in Vim. Existing user maps keep the leader they were defined with.
     pub fn set_leader(&mut self, key: Key) {

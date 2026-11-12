@@ -207,3 +207,199 @@ fn an_untouched_view_shows_blocks_arriving_above() {
 
     assert_eq!(window_rows(&app)[0], "brand new");
 }
+
+/// The command line: the last row.
+fn cmdline(app: &App) -> String {
+    screen(app).rows.last().cloned().unwrap_or_default()
+}
+
+/// The current window's statusline: the row above the command line.
+fn statusline(app: &App) -> String {
+    let rows = screen(app).rows;
+    rows[rows.len() - 2].clone()
+}
+
+#[test]
+fn the_screen_has_a_bufferline_a_statusline_and_a_command_line() {
+    let mut app = app_with(&["one two", "three"], 30, 6);
+    let _ = press(&mut app, "jw");
+
+    insta::assert_snapshot!(screen(&app).rows.join("\n"), @r"
+ test
+one two
+three
+~
+ NORMAL  test        2,5  All
+");
+}
+
+#[test]
+fn colon_opens_the_command_line_and_escape_leaves_it() {
+    let mut app = app_with(&["one"], 30, 6);
+
+    let _ = press(&mut app, ":se");
+    assert_eq!(cmdline(&app), ":se");
+    assert_eq!(screen(&app).cursor, (3, 5));
+    assert!(statusline(&app).contains("COMMAND"));
+    let _ = press(&mut app, "<Esc>");
+    assert_eq!(cmdline(&app), "");
+    assert!(statusline(&app).contains("NORMAL"));
+}
+
+#[test]
+fn ex_commands_run_on_enter() {
+    let mut app = app_with(&["one"], 30, 6);
+
+    assert_eq!(press(&mut app, ":q<CR>"), [Effect::Quit]);
+    assert_eq!(press(&mut app, ":qa!<CR>"), [Effect::Quit]);
+}
+
+#[test]
+fn errors_show_until_the_next_key_and_messages_keeps_them() {
+    let mut app = app_with(&["one", "two"], 40, 8);
+
+    let _ = press(&mut app, ":frob<CR>");
+    assert_eq!(cmdline(&app), "E492: Not an editor command: frob");
+    let _ = press(&mut app, "j");
+    assert_eq!(cmdline(&app), "");
+
+    let _ = press(&mut app, ":messages<CR>");
+    let rows = screen(&app).rows;
+    assert_eq!(rows[rows.len() - 2], "E492: Not an editor command: frob");
+    assert_eq!(
+        rows[rows.len() - 1],
+        "Press ENTER or type command to continue"
+    );
+    let _ = press(&mut app, "<CR>");
+    assert_eq!(cmdline(&app), "");
+}
+
+#[test]
+fn the_command_line_edits_like_vim() {
+    let mut app = app_with(&["one"], 40, 6);
+
+    let _ = press(&mut app, ":set foo bar<BS><C-w>baz");
+    assert_eq!(cmdline(&app), ":set foo baz");
+    let _ = press(&mut app, "<Home><Right><Right><Del>x");
+    assert_eq!(cmdline(&app), ":sex foo baz");
+    let _ = press(&mut app, "<C-u>abc<Left>");
+    assert_eq!(screen(&app).cursor, (3, 5));
+    let _ = app.update(Msg::Paste("de\nignored".into()));
+    assert_eq!(cmdline(&app), ":abdec foo baz");
+    let _ = press(&mut app, "<End><C-u><BS>");
+    assert!(statusline(&app).contains("NORMAL"));
+}
+
+#[test]
+fn the_command_line_remembers_what_ran() {
+    let mut app = app_with(&["one"], 40, 6);
+    let _ = press(&mut app, ":set ic<CR>:set so=2<CR>");
+
+    let _ = press(&mut app, ":<Up>");
+    assert_eq!(cmdline(&app), ":set so=2");
+    let _ = press(&mut app, "<Up>");
+    assert_eq!(cmdline(&app), ":set ic");
+    let _ = press(&mut app, "<Down><Down>");
+    assert_eq!(cmdline(&app), ":");
+}
+
+#[test]
+fn set_changes_and_shows_options() {
+    let mut app = app_with(&["one"], 40, 6);
+
+    let _ = press(&mut app, ":set ic?<CR>");
+    assert_eq!(cmdline(&app), "noignorecase");
+    let _ = press(&mut app, ":set ignorecase<CR>:set ic?<CR>");
+    assert_eq!(cmdline(&app), "ignorecase");
+    let _ = press(&mut app, ":set timeoutlen=500<CR>:set tm?<CR>");
+    assert_eq!(cmdline(&app), "timeoutlen=500");
+    let _ = press(&mut app, ":set foo<CR>");
+    assert_eq!(cmdline(&app), "E518: Unknown option: foo");
+    let _ = press(&mut app, ":set so=x<CR>");
+    assert_eq!(cmdline(&app), "E521: Number required after =: so=x");
+}
+
+#[test]
+fn scrolloff_keeps_rows_of_context_around_the_cursor() {
+    let mut app = lines_app(20);
+    let _ = press(&mut app, ":set so=1<CR>");
+
+    let _ = press(&mut app, "3j");
+
+    assert_eq!(window_rows(&app)[0], "line 2");
+    assert_eq!(screen(&app).cursor, (0, 3));
+}
+
+#[test]
+fn maps_defined_on_the_command_line_apply_and_unmap_removes_them() {
+    let mut app = app_with(&["one", "two", "three"], 40, 7);
+
+    let _ = press(&mut app, ":nnoremap x jj<CR>x");
+    assert_eq!(screen(&app).cursor, (0, 3));
+    let _ = press(&mut app, ":nunmap x<CR>gg");
+    let _ = press(&mut app, "x");
+    assert_eq!(screen(&app).cursor, (0, 1));
+    let _ = press(&mut app, ":nunmap x<CR>");
+    assert_eq!(cmdline(&app), "E31: No such mapping");
+}
+
+#[test]
+fn a_map_can_run_an_ex_command() {
+    let mut app = app_with(&["one"], 40, 6);
+    let _ = press(&mut app, ":nnoremap <lt>leader>x :frob<lt>CR><CR>");
+
+    let _ = press(&mut app, "<Space>x");
+
+    assert_eq!(cmdline(&app), "E492: Not an editor command: frob");
+}
+
+#[test]
+fn slash_searches_and_n_and_big_n_repeat() {
+    let mut app = app_with(&["one fish", "two fish", "red"], 40, 7);
+
+    let _ = press(&mut app, "/fish<CR>");
+    assert_eq!(screen(&app).cursor, (4, 1));
+    let _ = press(&mut app, "n");
+    assert_eq!(screen(&app).cursor, (4, 2));
+    let _ = press(&mut app, "n");
+    assert_eq!(screen(&app).cursor, (4, 1));
+    assert_eq!(cmdline(&app), "search hit BOTTOM, continuing at TOP");
+    let _ = press(&mut app, "N");
+    assert_eq!(screen(&app).cursor, (4, 2));
+    assert_eq!(cmdline(&app), "search hit TOP, continuing at BOTTOM");
+    let _ = press(&mut app, "?one<CR>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+    let _ = press(&mut app, "/nope<CR>");
+    assert_eq!(cmdline(&app), "E486: Pattern not found: nope");
+    let _ = press(&mut app, "/(<CR>");
+    assert!(cmdline(&app).starts_with("invalid pattern"));
+}
+
+#[test]
+fn star_searches_the_word_and_n_repeats_it() {
+    let mut app = app_with(&["fish one", "fishy", "a fish"], 40, 7);
+
+    let _ = press(&mut app, "*");
+    assert_eq!(screen(&app).cursor, (2, 3));
+    let _ = press(&mut app, "n");
+    assert_eq!(screen(&app).cursor, (0, 1));
+}
+
+#[test]
+fn ignorecase_and_smartcase_apply_to_searches() {
+    let mut app = app_with(&["Fish fish"], 40, 6);
+
+    let _ = press(&mut app, ":set ic scs<CR>/fish<CR>");
+    assert_eq!(screen(&app).cursor, (5, 1));
+    let _ = press(&mut app, "/Fish<CR>");
+    assert_eq!(screen(&app).cursor, (0, 1));
+}
+
+#[test]
+fn pending_keys_show_at_the_right_of_the_command_line() {
+    let mut app = app_with(&["one"], 30, 6);
+
+    let _ = press(&mut app, "3g");
+
+    assert!(cmdline(&app).ends_with("3g"), "{:?}", cmdline(&app));
+}

@@ -13,6 +13,24 @@ pub(super) struct Window {
     top: Cursor,
 }
 
+/// How a window is shown: its height in rows, and the context (`'scrolloff'`) kept around the cursor.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Viewport {
+    pub(super) height: usize,
+    pub(super) scrolloff: usize,
+}
+
+impl Viewport {
+    fn height(self) -> usize {
+        self.height.max(1)
+    }
+
+    /// `'scrolloff'`, limited so it can always be honoured, as in Vim.
+    fn scrolloff(self) -> usize {
+        self.scrolloff.min((self.height() - 1) / 2)
+    }
+}
+
 impl Window {
     pub(super) fn new(buffer: usize) -> Self {
         Self {
@@ -22,24 +40,28 @@ impl Window {
         }
     }
 
-    /// The first row to show in a window `height` rows tall: where the view was, moved as little as possible to
-    /// keep the cursor in view.
-    pub(super) fn top(&self, layout: &Layout<'_>, height: usize) -> usize {
+    /// The first row to show: where the view was, moved as little as possible to keep the cursor in view with
+    /// `'scrolloff'` rows around it, without scrolling past the end for context alone.
+    pub(super) fn top(&self, layout: &Layout<'_>, viewport: Viewport) -> usize {
+        let (height, scrolloff) = (viewport.height(), viewport.scrolloff());
         let top = self.top.screen(layout).row;
         let cursor = self.cursor.screen(layout).row;
-        let height = height.max(1);
-        if cursor < top {
-            cursor
-        } else if cursor >= top + height {
-            cursor + 1 - height
+        if cursor < top + scrolloff {
+            cursor.saturating_sub(scrolloff)
+        } else if cursor + scrolloff >= top + height {
+            let with_context = cursor + scrolloff + 1 - height;
+            let last_page = layout.row_count().saturating_sub(height);
+            with_context
+                .min(last_page)
+                .max((cursor + 1).saturating_sub(height))
         } else {
             top
         }
     }
 
     /// Keeps the cursor in view after it moved, pinning the view to new text only when it had to scroll.
-    pub(super) fn follow_cursor(&mut self, layout: &Layout<'_>, height: usize) {
-        let top = self.top(layout, height);
+    pub(super) fn follow_cursor(&mut self, layout: &Layout<'_>, viewport: Viewport) {
+        let top = self.top(layout, viewport);
         self.set_top(layout, top);
     }
 
@@ -49,32 +71,32 @@ impl Window {
         }
     }
 
-    /// `<C-e>` and friends.
+    /// `<C-e>` and friends: moves the view, then the cursor only as far as it must to stay in view.
     pub(super) fn scroll(
         &mut self,
         layout: &Layout<'_>,
-        height: usize,
+        viewport: Viewport,
         scroll: Scroll,
         count: usize,
     ) {
-        let height = height.max(1);
-        let top = self.top(layout, height);
+        let height = viewport.height();
+        let top = self.top(layout, viewport);
         let last = layout.row_count().saturating_sub(1);
         let last_page = layout.row_count().saturating_sub(height);
         let half = (height / 2).max(1);
         let page = height.saturating_sub(2).max(1);
-        let (new_top, cursor_rows) = match scroll {
-            Scroll::LineDown => ((top + count).min(last), 0),
-            Scroll::LineUp => (top.saturating_sub(count), 0),
-            Scroll::HalfDown => ((top + half).min(last_page.max(top)), half),
-            Scroll::HalfUp => (top.saturating_sub(half), half),
-            Scroll::PageDown => ((top + page * count).min(last), 0),
-            Scroll::PageUp => (top.saturating_sub(page * count), 0),
+        let new_top = match scroll {
+            Scroll::LineDown => (top + count).min(last),
+            Scroll::LineUp => top.saturating_sub(count),
+            Scroll::HalfDown => (top + half).min(last_page.max(top)),
+            Scroll::HalfUp => top.saturating_sub(half),
+            Scroll::PageDown => (top + page * count).min(last),
+            Scroll::PageUp => top.saturating_sub(page * count),
         };
         self.set_top(layout, new_top);
         match scroll {
-            Scroll::HalfDown => self.cursor.apply(layout, Motion::Down, cursor_rows),
-            Scroll::HalfUp => self.cursor.apply(layout, Motion::Up, cursor_rows),
+            Scroll::HalfDown => self.cursor.apply(layout, Motion::Down, half),
+            Scroll::HalfUp => self.cursor.apply(layout, Motion::Up, half),
             Scroll::PageDown => self.cursor.apply(layout, Motion::GotoRow(new_top + 1), 1),
             Scroll::PageUp => {
                 let bottom = (new_top + height - 1).min(last);
@@ -82,48 +104,60 @@ impl Window {
             }
             Scroll::LineDown | Scroll::LineUp => {}
         }
-        // Push the cursor back into view, keeping its column, when the view left it behind.
-        let row = self.cursor.screen(layout).row;
-        let new_top = self.top.screen(layout).row;
-        if row < new_top {
-            self.cursor.apply(layout, Motion::Down, new_top - row);
-        } else if row >= new_top + height {
-            self.cursor
-                .apply(layout, Motion::Up, row + 1 - (new_top + height));
+        let scrolloff = viewport.scrolloff();
+        let (row, top) = (self.cursor.screen(layout).row, self.top.screen(layout).row);
+        let (first, last_shown) = (
+            top + if top > 0 { scrolloff } else { 0 },
+            top + height - 1 - scrolloff,
+        );
+        if row < first {
+            self.cursor.apply(layout, Motion::Down, first - row);
+        } else if row > last_shown {
+            self.cursor.apply(layout, Motion::Up, row - last_shown);
         }
     }
 
     /// `zt`, `zz`, `zb`.
-    pub(super) fn place(&mut self, layout: &Layout<'_>, height: usize, place: Place) {
-        let height = height.max(1);
+    pub(super) fn place(&mut self, layout: &Layout<'_>, viewport: Viewport, place: Place) {
+        let (height, scrolloff) = (viewport.height(), viewport.scrolloff());
         let row = self.cursor.screen(layout).row;
         let top = match place {
-            Place::Top => row,
+            Place::Top => row.saturating_sub(scrolloff),
             Place::Middle => row.saturating_sub((height - 1) / 2),
-            Place::Bottom => (row + 1).saturating_sub(height),
+            Place::Bottom => (row + 1 + scrolloff).saturating_sub(height),
         };
         self.set_top(layout, top);
     }
 
-    /// `H`, `M`, `L`: `count` rows in from the top or bottom (1 is the edge itself).
+    /// `H`, `M`, `L`: `count` rows in from the top or bottom (1 is the edge itself), and at least `'scrolloff'`
+    /// rows in unless that edge is the buffer's.
     pub(super) fn view_row(
         &mut self,
         layout: &Layout<'_>,
-        height: usize,
+        viewport: Viewport,
         place: Place,
         count: usize,
     ) {
-        let top = self.top(layout, height);
-        let shown = height
-            .max(1)
+        let top = self.top(layout, viewport);
+        let shown = viewport
+            .height()
             .min(layout.row_count().saturating_sub(top))
             .max(1);
+        let scrolloff = viewport.scrolloff();
         let offset = count.max(1) - 1;
         let row = match place {
-            Place::Top => top + offset.min(shown - 1),
+            Place::Top => {
+                top + offset
+                    .max(if top > 0 { scrolloff } else { 0 })
+                    .min(shown - 1)
+            }
             Place::Middle => top + (shown - 1) / 2,
-            Place::Bottom => top + (shown - 1).saturating_sub(offset),
+            Place::Bottom => {
+                let at_end = top + shown >= layout.row_count();
+                top + (shown - 1).saturating_sub(offset.max(if at_end { 0 } else { scrolloff }))
+            }
         };
         self.cursor.apply(layout, Motion::GotoRow(row + 1), 1);
+        self.follow_cursor(layout, viewport);
     }
 }
