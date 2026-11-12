@@ -114,7 +114,7 @@ fn a_generated_key_is_private_to_its_owner_and_reopens_as_the_same_key() {
 struct PrivateAgent {
     child: Child,
     socket: PathBuf,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 impl PrivateAgent {
@@ -130,21 +130,26 @@ impl PrivateAgent {
             .ok()?;
         for _ in 0..50 {
             if socket.exists() {
-                return Some(Self {
-                    child,
-                    socket,
-                    _dir: dir,
-                });
+                return Some(Self { child, socket, dir });
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         None
     }
 
+    /// Adds the private key `key` to the agent. `ssh-add` refuses a key others may read, and a checkout leaves the
+    /// fixtures readable (git keeps no mode bits but the executable one), so the agent gets a copy only the user may
+    /// read.
     fn add(&self, key: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let copy = self.dir.path().join("key");
+        std::fs::copy(key, &copy).expect("copy of the key");
+        std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600))
+            .expect("the copy made private");
         let status = Command::new("ssh-add")
             .arg("-q")
-            .arg(key)
+            .arg(&copy)
             .env("SSH_AUTH_SOCK", &self.socket)
             .status()
             .expect("ssh-add");
