@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
-use devnull_api::Draft;
 use devnull_api::body::{self, MAX_LENGTH};
 use devnull_api::model::{Commit, Preview};
+use devnull_api::{Answering, Draft};
 
 use super::actions::{Confirm, Pending};
 use super::feed::Source;
@@ -19,38 +19,6 @@ const SCISSORS: &str = "# ------------------------ >8 ------------------------";
 
 /// How much of the commit answered the editor's context quotes.
 const EXCERPT: usize = 60;
-
-/// What a draft is: a commit of its own, or a reply to or quote of a commit (by id).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) enum Answering {
-    Nothing,
-    Reply(String),
-    Quote(String),
-}
-
-impl Answering {
-    fn of(draft: &Draft) -> Self {
-        match draft {
-            Draft::Reply { to, .. } => Self::Reply(to.clone()),
-            Draft::Quote { of, .. } => Self::Quote(of.clone()),
-            _ => Self::Nothing,
-        }
-    }
-
-    fn draft(&self, body: String) -> Draft {
-        match self {
-            Self::Nothing => Draft::Commit { body },
-            Self::Reply(to) => Draft::Reply {
-                to: to.clone(),
-                body,
-            },
-            Self::Quote(of) => Draft::Quote {
-                of: of.clone(),
-                body,
-            },
-        }
-    }
-}
 
 /// A draft being written: in the editor, waiting for its preview, or for its confirmation.
 #[derive(Debug)]
@@ -99,7 +67,7 @@ impl App {
                 to: None,
                 context: format!("A new commit as @{me}."),
             },
-            Answering::Reply(_) | Answering::Quote(_) => {
+            _ => {
                 let commit = self
                     .commit_under_cursor()
                     .ok_or_else(|| "No commit under the cursor".to_owned())?;
@@ -187,9 +155,9 @@ impl App {
             }
         };
         let kind = match composing.answering {
-            Answering::Nothing => "commit",
             Answering::Reply(_) => "reply",
             Answering::Quote(_) => "quote",
+            _ => "commit",
         };
         let to = composing
             .to
@@ -199,7 +167,7 @@ impl App {
         let count = body::count(&preview.body);
         let mut shown = Document::new();
         shown.push_back("preview", preview_block(&preview));
-        let draft = composing.answering.draft(draft);
+        let draft = Draft::new(composing.answering.clone(), draft);
         self.mode = AppMode::Confirm(Confirm::new(
             format!("{kind} {count}/{MAX_LENGTH}{to}? [y]es/[e]dit/[n]o"),
             Pending::Publish { draft, composing },
@@ -213,7 +181,7 @@ impl App {
         match key {
             'y' => vec![Effect::Fetch(Request::Publish { draft })],
             'e' => {
-                let text = template(draft.body(), &composing);
+                let text = template(&draft.body, &composing);
                 self.composing = Some(composing);
                 vec![Effect::Edit { text }]
             }
@@ -239,8 +207,8 @@ impl App {
                 return Vec::new();
             }
         };
-        self.drafts.remove(&Answering::of(draft));
-        if let Draft::Reply { to, .. } = draft
+        self.drafts.remove(&draft.answering);
+        if let Answering::Reply(to) = &draft.answering
             && let Some(index) = self.feed_buffer(&Source::Thread(to.clone()))
         {
             let doc = &mut self.buffers[index].doc;

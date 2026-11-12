@@ -22,6 +22,7 @@ mod tests;
 
 use std::time::Duration;
 
+use devnull_api::Answering;
 use ratatui::layout::Rect;
 
 use crate::doc::{
@@ -1010,9 +1011,9 @@ impl App {
             Command::Nohlsearch => self.highlighting = false,
             Command::Pick { list, query } => return Ok(self.pick(list, &query)),
             Command::Star => return self.star(),
-            Command::Commit => return self.compose(composer::Answering::Nothing),
-            Command::Reply => return self.compose(composer::Answering::Reply(String::new())),
-            Command::Quote => return self.compose(composer::Answering::Quote(String::new())),
+            Command::Commit => return self.compose(Answering::Nothing),
+            Command::Reply => return self.compose(Answering::Reply(String::new())),
+            Command::Quote => return self.compose(Answering::Quote(String::new())),
             Command::Delete => return self.delete(),
             Command::Follow { handle, on } => return self.follow(handle, on),
             Command::Browse { link } => return self.browse(link),

@@ -10,7 +10,7 @@ use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 use super::*;
 use crate::model::{AccountKind, AccountPage, Lane, NotificationKind, Segment};
 use crate::signing::{Signer, canonical_message};
-use crate::{Category, Draft, OrganizationTab, People};
+use crate::{Answering, Category, Draft, OrganizationTab, People};
 
 fn fixture(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -645,23 +645,15 @@ async fn a_draft_is_published_as_a_commit_a_reply_or_a_quote() {
     }
 
     let commit = client
-        .publish(&Draft::Commit {
-            body: "hello".into(),
-        })
+        .publish(&Draft::new(Answering::Nothing, "hello"))
         .await
         .expect("commit");
     let reply = client
-        .publish(&Draft::Reply {
-            to: "p1".into(),
-            body: "agreed".into(),
-        })
+        .publish(&Draft::new(Answering::Reply("p1".into()), "agreed"))
         .await
         .expect("reply");
     let quote = client
-        .publish(&Draft::Quote {
-            of: "q1".into(),
-            body: "look".into(),
-        })
+        .publish(&Draft::new(Answering::Quote("q1".into()), "look"))
         .await
         .expect("quote");
 

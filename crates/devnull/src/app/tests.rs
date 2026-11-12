@@ -3255,9 +3255,7 @@ fn a_saved_draft_is_previewed_then_published_once_confirmed() {
     );
 
     let effects = press(&mut app, "y");
-    let draft = devnull_api::Draft::Commit {
-        body: "hello :wave:\n# not a comment".into(),
-    };
+    let draft = devnull_api::Draft::new(Answering::Nothing, "hello :wave:\n# not a comment");
     assert_eq!(
         fetches(&effects),
         [Request::Publish {
@@ -3337,10 +3335,7 @@ fn r_replies_and_capital_r_quotes_the_commit_under_the_cursor() {
     assert_eq!(
         fetches(&effects),
         [Request::Publish {
-            draft: devnull_api::Draft::Reply {
-                to: "c2".into(),
-                body: "agreed".into()
-            }
+            draft: devnull_api::Draft::new(Answering::Reply("c2".into()), "agreed")
         }]
     );
 
@@ -3380,10 +3375,7 @@ fn a_reply_published_shows_in_its_thread() {
     );
     let _ = press(&mut app, "y");
 
-    let draft = devnull_api::Draft::Reply {
-        to: "c1".into(),
-        body: "agreed".into(),
-    };
+    let draft = devnull_api::Draft::new(Answering::Reply("c1".into()), "agreed");
     let _ = arrive(
         &mut app,
         Fetched::Published {

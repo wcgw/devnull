@@ -34,39 +34,38 @@ fn segment(value: &str) -> Result<&str, ApiError> {
     }
 }
 
-/// A commit to publish: one of its own, a reply, or a quote.
+/// A commit to publish.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Draft {
-    /// A commit of its own.
-    Commit {
-        /// Its text.
-        body: String,
-    },
-    /// A reply.
-    Reply {
-        /// The id of the commit it replies to.
-        to: String,
-        /// Its text.
-        body: String,
-    },
-    /// A quote.
-    Quote {
-        /// The id of the commit it quotes.
-        of: String,
-        /// Its text.
-        body: String,
-    },
+pub struct Draft {
+    /// Its text.
+    pub body: String,
+    /// The commit it answers, if any.
+    pub answering: Answering,
 }
 
 impl Draft {
-    /// Its text.
+    /// `body`, answering what `answering` says.
     #[must_use]
-    pub fn body(&self) -> &str {
-        match self {
-            Self::Commit { body } | Self::Reply { body, .. } | Self::Quote { body, .. } => body,
+    pub fn new(answering: Answering, body: impl Into<String>) -> Self {
+        Self {
+            body: body.into(),
+            answering,
         }
     }
+}
+
+/// What a commit answers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Answering {
+    /// Nothing: it is a commit of its own.
+    #[default]
+    Nothing,
+    /// The commit with this id, as a reply.
+    Reply(String),
+    /// The commit with this id, as a quote.
+    Quote(String),
 }
 
 /// A category of notifications, as the inbox filters them.
@@ -582,12 +581,13 @@ impl Client {
     ///
     /// Not cancel safe: the commit may be published even when the response is lost.
     pub async fn publish(&self, draft: &Draft) -> Result<Commit, ApiError> {
-        let payload = match draft {
-            Draft::Commit { body } => serde_json::json!({ "body": body }),
-            Draft::Reply { to, body } => {
+        let body = &draft.body;
+        let payload = match &draft.answering {
+            Answering::Nothing => serde_json::json!({ "body": body }),
+            Answering::Reply(to) => {
                 serde_json::json!({ "body": body, "parent_id": segment(to)? })
             }
-            Draft::Quote { of, body } => {
+            Answering::Quote(of) => {
                 serde_json::json!({ "body": body, "quoted_commit_id": segment(of)? })
             }
         };
