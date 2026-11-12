@@ -1,11 +1,15 @@
+use super::search::{self, CaseMode, Direction, Pattern, SearchOutcome};
 use super::word::{self, Kind};
 use super::{Anchor, Document, Layout, Pos, ScreenPos, Target};
 
 /// The Normal-mode cursor of one window over a [`super::Document`].
+///
+/// Once moved, it stays on the same text as the document changes around it. Until then it stays at the top, so
+/// blocks arriving above an untouched view appear under it, the newest first.
 #[derive(Debug, Clone, Default)]
 pub struct Cursor {
     /// Where the cursor is; `None` until it first moves, meaning the start of the document.
-    anchor: Option<Anchor>,
+    pub(super) anchor: Option<Anchor>,
     /// Where vertical moves aim for (Vim's `curswant`), kept across rows too short to reach it. `None` means the
     /// cursor's current column.
     want: Option<Want>,
@@ -126,7 +130,7 @@ impl Cursor {
             Motion::RowEnd => Want::RowEnd,
             _ => {
                 if let Some(pos) = self.destination(layout, motion, count) {
-                    self.set(doc, pos);
+                    self.set(doc, doc.outside_closed_fold(pos));
                 }
                 return;
             }
@@ -149,14 +153,20 @@ impl Cursor {
     fn destination(&self, layout: &Layout<'_>, motion: Motion, count: usize) -> Option<Pos> {
         let doc = layout.doc();
         let pos = self.pos(doc);
-        let repeat = |step: &dyn Fn(Pos) -> Pos| (0..count).fold(pos, |pos, _| step(pos));
+        // Text motions step over a closed fold as one stop: they leave it from its far side and stop at its start.
+        let repeat = |forward: bool, step: &dyn Fn(Pos) -> Pos| {
+            (0..count).fold(pos, |pos, _| {
+                doc.outside_closed_fold(step(doc.leaving_closed_fold(pos, forward)))
+            })
+        };
         let block_steps = |steps: usize| isize::try_from(steps).unwrap_or(isize::MAX);
         Some(match motion {
             Motion::Down | Motion::Up | Motion::RowEnd => {
                 unreachable!("vertical motions keep the wanted column")
             }
+            Motion::Right | Motion::Left if doc.line(pos.line).is_image() => return None,
             Motion::Right => Pos {
-                col: (pos.col + count).min(doc.line(pos.line).len().saturating_sub(1)),
+                col: (pos.col + count).min(doc.line(pos.line).last_col()),
                 ..pos
             },
             Motion::Left => Pos {
@@ -176,13 +186,13 @@ impl Cursor {
             }
             Motion::LastRow => layout.first_non_blank(layout.row_count() - 1),
             Motion::WordForward | Motion::BigWordForward => {
-                repeat(&|p| word::forward(doc, p, motion.word_kind()))
+                repeat(true, &|p| word::forward(doc, p, motion.word_kind()))
             }
             Motion::WordBackward | Motion::BigWordBackward => {
-                repeat(&|p| word::backward(doc, p, motion.word_kind()))
+                repeat(false, &|p| word::backward(doc, p, motion.word_kind()))
             }
             Motion::WordEnd | Motion::BigWordEnd => {
-                repeat(&|p| word::end(doc, p, motion.word_kind()))
+                repeat(true, &|p| word::end(doc, p, motion.word_kind()))
             }
             Motion::FindForward(ch) => Pos {
                 col: find(doc, pos, ch, count, true)?,
@@ -212,12 +222,72 @@ impl Cursor {
                     col: 0,
                 }
             }
-            Motion::ParagraphForward => repeat(&|p| paragraph(doc, p, true)),
-            Motion::ParagraphBackward => repeat(&|p| paragraph(doc, p, false)),
+            Motion::ParagraphForward => repeat(true, &|p| paragraph(doc, p, true)),
+            Motion::ParagraphBackward => repeat(false, &|p| paragraph(doc, p, false)),
         })
     }
 
-    fn pos(&self, doc: &Document) -> Pos {
+    /// `/`, `?`, `n`, `N`: moves to the start of the `count`th match of `pattern` going `direction`, wrapping
+    /// around the ends of the document. Leaves the cursor in place when there is no match.
+    pub fn search(
+        &mut self,
+        layout: &Layout<'_>,
+        pattern: &Pattern,
+        direction: Direction,
+        count: usize,
+    ) -> SearchOutcome {
+        if layout.row_count() == 0 {
+            return SearchOutcome::NotFound;
+        }
+        let doc = layout.doc();
+        let mut pos = self.pos(doc);
+        let mut wrapped = false;
+        for _ in 0..count.max(1) {
+            let Some((next, wrap)) = search::next_match(doc, pattern, pos, direction) else {
+                return SearchOutcome::NotFound;
+            };
+            pos = next;
+            wrapped |= wrap;
+        }
+        self.set(doc, pos);
+        if wrapped {
+            SearchOutcome::Wrapped
+        } else {
+            SearchOutcome::Found
+        }
+    }
+
+    /// `*` and `#`: searches for the keyword under the cursor, or the first one after it on the line, as a whole
+    /// word. The cursor first moves to the keyword's start, so the search finds another occurrence. Returns the
+    /// pattern, for `n` and `N`, and the outcome; `None`, without moving, when there is no keyword.
+    pub fn search_word(
+        &mut self,
+        layout: &Layout<'_>,
+        direction: Direction,
+        count: usize,
+        case: CaseMode,
+    ) -> Option<(Pattern, SearchOutcome)> {
+        if layout.row_count() == 0 {
+            return None;
+        }
+        let doc = layout.doc();
+        let pos = self.pos(doc);
+        let keyword = word::keyword(doc, pos)?;
+        let line = doc.line(pos.line);
+        let text = &line.text[line.byte_offset(keyword.start)..line.byte_offset(keyword.end)];
+        let pattern = Pattern::whole_word(text, case);
+        self.set(
+            doc,
+            Pos {
+                col: keyword.start,
+                ..pos
+            },
+        );
+        let outcome = self.search(layout, &pattern, direction, count);
+        Some((pattern, outcome))
+    }
+
+    pub(super) fn pos(&self, doc: &Document) -> Pos {
         self.anchor
             .as_ref()
             .map_or_else(Pos::default, |anchor| doc.resolve(anchor))

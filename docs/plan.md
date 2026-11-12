@@ -299,7 +299,16 @@ from M1 even though graphics land in M6.
   counts); anchor preserved across inserts above, block replacement and removal, and re-wraps; target under the
   cursor; styled row segments for rendering. 32 tests. Deferred: image lines (with M6), `H M L` (need the window's
   viewport, M1.6), `; ,` (the keymap repeats the last `f t F T`, M1.5).
-- [ ] **M1.3** `/ ? n N *` search, `v V` + `y`, folds `zo zc za zR zM`. ⏸ review the document model.
+- [x] **M1.3** Image lines (fixed-height rows); `/ ? n N * #` search; `v V` + `y`; folds `zo zc za zR zM`. 50 tests.
+  ⏸ review the document model.
+  - Search uses Rust `regex` syntax, case-sensitive by default (`CaseMode` carries `'ignorecase'`/`'smartcase'` once
+    options exist, M1.5). Matches span wrap points, not line breaks.
+  - `V` selects screen rows; its yank joins the rows of a wrapped line without a break and ends with `\n`.
+  - Folds are declared by buffers per block (`Content { lines, folds }`), keep their state across block replacement,
+    and count as one stop for text motions.
+  - Known gaps: search landing in a closed fold doesn't open it yet (the window will, Vim's `'foldopen'`); `*` only
+    picks keywords, not Vim's fallback to any non-blank string; folds don't nest; fold state lives in the document,
+    not per window.
 - [ ] **M1.4** Runtime: tokio loop, Elm core, terminal setup/teardown with panic hook, focus events.
 - [ ] **M1.5** `keymap` trie (counts, pending keys, timeout), which-key popup; `ex` parser and command table
   (`:q :qa :map :nnoremap :set :hi :colorscheme :source :messages`).

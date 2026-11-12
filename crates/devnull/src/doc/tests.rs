@@ -6,7 +6,10 @@ use super::*;
 fn doc(blocks: &[(&str, &[&str])]) -> Document {
     let mut doc = Document::new();
     for (key, lines) in blocks {
-        doc.push_back(*key, lines.iter().map(|l| Line::text(*l)).collect());
+        doc.push_back(
+            *key,
+            lines.iter().map(|l| Line::text(*l)).collect::<Vec<_>>(),
+        );
     }
     doc
 }
@@ -514,5 +517,376 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
             vec![("ab", Group::Normal), ("cd", Group::Handle)],
             vec![("efgh", Group::Handle)]
         ]
+    );
+}
+
+#[test]
+fn an_image_line_takes_its_rows_whatever_the_width_and_the_cursor_walks_through_them() {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![
+            Line::text("above"),
+            Line::Image { rows: 3, cols: 16 },
+            Line::text("below"),
+        ],
+    );
+
+    for width in [8, 80] {
+        let layout = Layout::new(&doc, width);
+        assert_eq!(layout.row_count(), 5);
+        let mut cursor = Cursor::new();
+        cursor.apply(&layout, Motion::Right, 2);
+        assert_eq!(
+            walk(&layout, &mut cursor, Motion::Down, 4),
+            [at(1, 0), at(2, 0), at(3, 0), at(4, 2)]
+        );
+        assert_eq!(layout.segments(2).count(), 0);
+    }
+}
+
+#[test]
+fn on_an_image_h_and_l_stay_put_and_the_cursor_keeps_its_image_row_across_resizes() {
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![Line::text("above"), Line::Image { rows: 3, cols: 16 }],
+    );
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 2);
+
+    cursor.apply(&Layout::new(&doc, 80), Motion::Right, 1);
+    cursor.apply(&Layout::new(&doc, 80), Motion::Left, 1);
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(2, 0));
+    assert_eq!(cursor.screen(&Layout::new(&doc, 3)), at(3, 0));
+}
+
+#[test]
+fn slash_search_moves_to_the_next_match_wrapping_around_the_end() {
+    use SearchOutcome::{Found, Wrapped};
+
+    let doc = doc(&[
+        ("a", &["one fish two fish"]),
+        ("b", &["red fish blue fish"]),
+    ]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+    let fish = Pattern::new("fi.h", CaseMode::Sensitive).expect("valid pattern");
+
+    let mut hits = Vec::new();
+    for _ in 0..5 {
+        let outcome = cursor.search(&layout, &fish, Direction::Forward, 1);
+        hits.push((outcome, cursor.screen(&layout)));
+    }
+
+    assert_eq!(
+        hits,
+        [
+            (Found, at(0, 4)),
+            (Found, at(0, 13)),
+            (Found, at(1, 4)),
+            (Found, at(1, 14)),
+            (Wrapped, at(0, 4))
+        ]
+    );
+}
+
+#[test]
+fn backward_search_and_counts() {
+    let doc = doc(&[
+        ("a", &["one fish two fish"]),
+        ("b", &["red fish blue fish"]),
+    ]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+    let fish = Pattern::new("fish", CaseMode::Sensitive).expect("valid pattern");
+
+    assert_eq!(
+        cursor.search(&layout, &fish, Direction::Backward, 1),
+        SearchOutcome::Wrapped
+    );
+    assert_eq!(cursor.screen(&layout), at(1, 14));
+    assert_eq!(
+        cursor.search(&layout, &fish, Direction::Backward, 2),
+        SearchOutcome::Found
+    );
+    assert_eq!(cursor.screen(&layout), at(0, 13));
+}
+
+#[test]
+fn search_matches_across_wrap_points_and_reports_a_missing_pattern() {
+    let doc = doc(&[("a", &["the quick brown fox"])]);
+    let layout = Layout::new(&doc, 10);
+    let mut cursor = Cursor::new();
+    let phrase = Pattern::new("quick brown", CaseMode::Sensitive).expect("valid pattern");
+    let missing = Pattern::new("QUICK", CaseMode::Sensitive).expect("valid pattern");
+
+    assert_eq!(
+        cursor.search(&layout, &phrase, Direction::Forward, 1),
+        SearchOutcome::Found
+    );
+    assert_eq!(cursor.screen(&layout), at(0, 4));
+    assert_eq!(
+        cursor.search(&layout, &missing, Direction::Forward, 1),
+        SearchOutcome::NotFound
+    );
+    assert_eq!(cursor.screen(&layout), at(0, 4));
+}
+
+#[test]
+fn case_modes_follow_ignorecase_and_smartcase() {
+    let doc = doc(&[("a", &["Rust rust"])]);
+    let layout = Layout::new(&doc, 80);
+    let first_match = |pattern: &str, case| {
+        let mut cursor = Cursor::new();
+        cursor.apply(&layout, Motion::RowEnd, 1);
+        let pattern = Pattern::new(pattern, case).expect("valid pattern");
+        let _ = cursor.search(&layout, &pattern, Direction::Forward, 1);
+        cursor.screen(&layout).col
+    };
+
+    assert_eq!(first_match("rust", CaseMode::Sensitive), 5);
+    assert_eq!(first_match("rust", CaseMode::Insensitive), 0);
+    assert_eq!(first_match("rust", CaseMode::Smart), 0);
+    assert_eq!(first_match("Rust", CaseMode::Smart), 0);
+    assert!(Pattern::new("(", CaseMode::Sensitive).is_err());
+}
+
+#[test]
+fn star_searches_the_word_under_or_after_the_cursor_as_a_whole_word() {
+    let doc = doc(&[("a", &["  foo foobar", "foo. bar"])]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+
+    let (pattern, outcome) = cursor
+        .search_word(&layout, Direction::Forward, 1, CaseMode::Smart)
+        .expect("a word after the cursor");
+    assert_eq!(
+        (outcome, cursor.screen(&layout)),
+        (SearchOutcome::Found, at(1, 0))
+    );
+    assert_eq!(
+        cursor.search(&layout, &pattern, Direction::Forward, 1),
+        SearchOutcome::Wrapped
+    );
+    assert_eq!(cursor.screen(&layout), at(0, 2));
+
+    cursor.apply(&layout, Motion::Down, 1);
+    cursor.apply(&layout, Motion::FindForward(' '), 1);
+    let (_, outcome) = cursor
+        .search_word(&layout, Direction::Backward, 1, CaseMode::Smart)
+        .expect("bar");
+    assert_eq!(
+        (outcome, cursor.screen(&layout)),
+        (SearchOutcome::Wrapped, at(1, 5))
+    );
+}
+
+#[test]
+fn star_without_a_word_on_the_rest_of_the_line_does_nothing() {
+    let doc = doc(&[("a", &["word ...", "next"])]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::RowEnd, 1);
+
+    assert!(
+        cursor
+            .search_word(&layout, Direction::Forward, 1, CaseMode::Smart)
+            .is_none()
+    );
+    assert_eq!(cursor.screen(&layout), at(0, 7));
+}
+
+#[test]
+fn v_yanks_characters_inclusively_joining_wrapped_rows_and_breaking_lines() {
+    let doc = doc(&[("a", &["one two", "three"])]);
+    let layout = Layout::new(&doc, 4);
+    let mut cursor = Cursor::new();
+    let selection = Selection::start(&cursor, &layout, SelectionKind::Charwise);
+    cursor.apply(&layout, Motion::WordEnd, 1);
+    assert_eq!(selection.text(&cursor, &layout), "one");
+
+    cursor.apply(&layout, Motion::WordForward, 1);
+    let selection = Selection::start(&cursor, &layout, SelectionKind::Charwise);
+    cursor.apply(&layout, Motion::Down, 1);
+    cursor.apply(&layout, Motion::Right, 1);
+    assert_eq!(selection.text(&cursor, &layout), "two\nth");
+
+    cursor.apply(&layout, Motion::GotoRow(1), 1);
+    assert_eq!(selection.text(&cursor, &layout), "one t");
+}
+
+#[test]
+fn big_v_yanks_whole_screen_rows_as_lines() {
+    let doc = doc(&[("a", &["one two three", "four"])]);
+    let layout = Layout::new(&doc, 8);
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::Down, 1);
+    let selection = Selection::start(&cursor, &layout, SelectionKind::Rowwise);
+
+    assert_eq!(selection.text(&cursor, &layout), "three\n");
+    cursor.apply(&layout, Motion::Down, 1);
+    assert_eq!(selection.text(&cursor, &layout), "three\nfour\n");
+    cursor.apply(&layout, Motion::Up, 2);
+    assert_eq!(selection.text(&cursor, &layout), "one two three\n");
+}
+
+#[test]
+fn a_selection_survives_blocks_arriving_above() {
+    let mut doc = doc(&[("b", &["bravo"])]);
+    let mut cursor = Cursor::new();
+    let selection = Selection::start(&cursor, &Layout::new(&doc, 80), SelectionKind::Charwise);
+    cursor.apply(&Layout::new(&doc, 80), Motion::RowEnd, 1);
+
+    doc.push_front("a", vec![Line::text("alpha")]);
+
+    assert_eq!(selection.text(&cursor, &Layout::new(&doc, 80)), "bravo");
+}
+
+#[test]
+fn the_selection_highlights_cells_row_by_row() {
+    let doc = doc(&[("a", &["one two", "日本"])]);
+    let layout = Layout::new(&doc, 4);
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::Right, 2);
+    let selection = Selection::start(&cursor, &layout, SelectionKind::Charwise);
+    cursor.apply(&layout, Motion::Down, 2);
+
+    let cells: Vec<_> = (0..layout.row_count())
+        .map(|row| selection.cells(&cursor, &layout, row))
+        .collect();
+
+    assert_eq!(cells, [Some(2..4), Some(0..3), Some(0..4)]);
+    let rows = Selection::start(&cursor, &layout, SelectionKind::Rowwise);
+    assert_eq!(rows.cells(&cursor, &layout, 1), None);
+    assert_eq!(rows.cells(&cursor, &layout, 2), Some(0..4));
+}
+
+#[test]
+fn a_cursor_that_never_moved_stays_at_the_top_as_blocks_arrive() {
+    let mut doc = doc(&[("b", &["bravo"])]);
+    let cursor = Cursor::new();
+
+    doc.push_front("a", vec![Line::text("alpha")]);
+
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(0, 0));
+}
+
+/// A block "a" of `head`, three folded lines and `tail`, then a block "b".
+fn folded(closed: bool) -> Document {
+    let mut doc = Document::new();
+    let lines = ["head", "one", "two three", "four", "tail"]
+        .map(Line::text)
+        .to_vec();
+    let fold = Fold {
+        lines: 1..4,
+        summary: Line::text("+ 3 more lines"),
+        closed,
+    };
+    doc.push_back(
+        "a",
+        Content {
+            lines,
+            folds: vec![fold],
+        },
+    );
+    doc.push_back("b", vec![Line::text("next")]);
+    doc
+}
+
+fn texts(layout: &Layout<'_>) -> Vec<String> {
+    (0..layout.row_count())
+        .map(|row| layout.segments(row).map(|(text, _)| text).collect())
+        .collect()
+}
+
+#[test]
+fn a_closed_fold_is_one_summary_row_that_j_and_k_step_over() {
+    let doc = folded(true);
+    let layout = Layout::new(&doc, 80);
+    assert_eq!(texts(&layout), ["head", "+ 3 more lines", "tail", "next"]);
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::Right, 3);
+
+    assert_eq!(
+        walk(&layout, &mut cursor, Motion::Down, 2),
+        [at(1, 0), at(2, 3)]
+    );
+    assert_eq!(walk(&layout, &mut cursor, Motion::Up, 1), [at(1, 0)]);
+}
+
+#[test]
+fn zo_zc_and_za_open_close_and_toggle_the_fold_under_the_cursor() {
+    let mut doc = folded(true);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+
+    doc.fold(&cursor, FoldOp::Open);
+    assert_eq!(
+        texts(&Layout::new(&doc, 80)),
+        ["head", "one", "two three", "four", "tail", "next"]
+    );
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(1, 0));
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+    cursor.apply(&Layout::new(&doc, 80), Motion::RowEnd, 1);
+
+    doc.fold(&cursor, FoldOp::Close);
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(1, 0));
+    doc.fold(&cursor, FoldOp::Toggle);
+    assert_eq!(cursor.screen(&Layout::new(&doc, 80)), at(2, 8));
+    doc.fold(&cursor, FoldOp::Toggle);
+    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
+}
+
+#[test]
+fn zm_closes_and_zr_opens_every_fold() {
+    let mut doc = folded(false);
+    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+
+    doc.fold_all(false);
+    assert_eq!(Layout::new(&doc, 80).row_count(), 4);
+    doc.fold_all(true);
+    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+}
+
+#[test]
+fn a_fold_keeps_its_state_when_its_block_is_replaced() {
+    let mut doc = folded(true);
+    let mut cursor = Cursor::new();
+    cursor.apply(&Layout::new(&doc, 80), Motion::Down, 1);
+    doc.fold(&cursor, FoldOp::Open);
+
+    let lines = ["head", "one", "two", "four", "tail ★ 4"]
+        .map(Line::text)
+        .to_vec();
+    let fold = Fold {
+        lines: 1..4,
+        summary: Line::text("+ 3 more lines"),
+        closed: true,
+    };
+    doc.replace(
+        "a",
+        Content {
+            lines,
+            folds: vec![fold],
+        },
+    );
+
+    assert_eq!(Layout::new(&doc, 80).row_count(), 6);
+}
+
+#[test]
+fn word_motions_treat_a_closed_fold_as_one_stop() {
+    let doc = folded(true);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::new();
+
+    assert_eq!(
+        walk(&layout, &mut cursor, Motion::WordForward, 2),
+        [at(1, 0), at(2, 0)]
+    );
+    assert_eq!(
+        walk(&layout, &mut cursor, Motion::WordBackward, 2),
+        [at(1, 0), at(0, 0)]
     );
 }

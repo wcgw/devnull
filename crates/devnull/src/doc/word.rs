@@ -161,3 +161,28 @@ pub(super) fn backward(doc: &Document, pos: Pos, kind: Kind) -> Pos {
     }
     walk.pos
 }
+
+/// The grapheme range of the keyword (a run of letters, digits and `_`) under the cursor, or else the first one after
+/// it on the same line, as Vim's `*` picks it. `None` when the rest of the line has none.
+pub(super) fn keyword(doc: &Document, pos: Pos) -> Option<std::ops::Range<usize>> {
+    let len = doc.line(pos.line).len();
+    let is_word = |col| {
+        let walk = Walk {
+            doc,
+            kind: Kind::Small,
+            pos: Pos {
+                line: pos.line,
+                col,
+            },
+        };
+        walk.class() == Class::Word
+    };
+    let first = (pos.col..len).find(|&c| is_word(c))?;
+    let start = (0..first)
+        .rev()
+        .take_while(|&c| is_word(c))
+        .last()
+        .unwrap_or(first);
+    let end = (first..len).find(|&c| !is_word(c)).unwrap_or(len);
+    Some(start..end)
+}

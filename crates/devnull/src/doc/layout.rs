@@ -7,6 +7,7 @@ use crate::hl::Group;
 #[derive(Debug)]
 pub struct Layout<'d> {
     doc: &'d Document,
+    width: usize,
     rows: Vec<Row>,
     /// The first row of each logical line.
     first_row: Vec<usize>,
@@ -20,6 +21,8 @@ pub(super) struct Row {
     pub(super) start: usize,
     /// Last grapheme, exclusive. Equal to `start` only for an empty line.
     pub(super) end: usize,
+    /// Whether this row is the summary of a closed fold starting at `line` (with an empty range at 0).
+    pub(super) folded: bool,
 }
 
 /// A cell on screen, relative to the top-left of the whole laid-out document.
@@ -38,14 +41,33 @@ impl<'d> Layout<'d> {
         let width = usize::from(width.max(1));
         let mut rows = Vec::new();
         let mut first_row = Vec::with_capacity(doc.line_count());
-        for line in 0..doc.line_count() {
+        let mut line = 0;
+        while line < doc.line_count() {
+            if let Some(fold) = doc.fold_at(line, true) {
+                first_row.extend(fold.lines.clone().map(|_| rows.len()));
+                rows.push(Row {
+                    line,
+                    start: 0,
+                    end: 0,
+                    folded: true,
+                });
+                line = fold.lines.end;
+                continue;
+            }
             first_row.push(rows.len());
             wrap(doc.line(line), width, |start, end| {
-                rows.push(Row { line, start, end });
+                rows.push(Row {
+                    line,
+                    start,
+                    end,
+                    folded: false,
+                });
             });
+            line += 1;
         }
         Self {
             doc,
+            width,
             rows,
             first_row,
         }
@@ -80,8 +102,16 @@ impl<'d> Layout<'d> {
 
     /// The grapheme of `row` covering display column `cell`, or its last one when the row is narrower.
     pub(super) fn pos_at(&self, row: usize, cell: usize) -> Pos {
-        let Row { line, start, end } = self.rows[row];
-        let graphemes = &self.doc.line(line).graphemes[start..end];
+        let Row {
+            line, start, end, ..
+        } = self.rows[row];
+        // Empty for an empty line and for every row of an image, whose column is the row itself.
+        let graphemes = self
+            .doc
+            .line(line)
+            .graphemes
+            .get(start..end)
+            .unwrap_or_default();
         let mut left = 0;
         for (i, g) in graphemes.iter().enumerate() {
             if cell < left + g.width.max(1) {
@@ -98,9 +128,20 @@ impl<'d> Layout<'d> {
     /// The text shown on `row`, left to right, as runs of one highlight group. Spaces hanging off the row's edge
     /// are included; an empty row yields nothing.
     pub fn segments(&self, row: usize) -> impl Iterator<Item = (&'d str, Group)> + use<'d> {
-        let Row { line, start, end } = self.rows[row];
-        let shaped = self.doc.line(line);
-        let (from, to) = (shaped.byte_offset(start), shaped.byte_offset(end));
+        let Row {
+            line,
+            start,
+            end,
+            folded,
+        } = self.rows[row];
+        let (shaped, from, to) = if let Some(fold) = self.doc.fold_at(line, true).filter(|_| folded)
+        {
+            let summary = fold.summary;
+            (summary, 0, summary.byte_offset(summary.fitting(self.width)))
+        } else {
+            let shaped = self.doc.line(line);
+            (shaped, shaped.byte_offset(start), shaped.byte_offset(end))
+        };
         let mut run_start = 0;
         shaped.runs.iter().filter_map(move |run| {
             let (lo, hi) = (run_start.max(from), run.end.min(to));
@@ -112,14 +153,18 @@ impl<'d> Layout<'d> {
     /// The text shown on `row`, including spaces hanging off its edge.
     #[cfg(test)]
     pub(crate) fn row_text(&self, row: usize) -> &str {
-        let Row { line, start, end } = self.rows[row];
+        let Row {
+            line, start, end, ..
+        } = self.rows[row];
         let shaped = self.doc.line(line);
         &shaped.text[shaped.byte_offset(start)..shaped.byte_offset(end)]
     }
 
     /// The first non-blank grapheme of `row`, or its last one when it is all blank.
     pub(super) fn first_non_blank(&self, row: usize) -> Pos {
-        let Row { line, start, end } = self.rows[row];
+        let Row {
+            line, start, end, ..
+        } = self.rows[row];
         let shaped = self.doc.line(line);
         match (start..end).find(|&i| !shaped.is_blank(i)) {
             Some(col) => Pos { line, col },
@@ -129,7 +174,9 @@ impl<'d> Layout<'d> {
 
     /// The last grapheme of `row`, or its start when the row is empty.
     pub(super) fn row_end(&self, row: usize) -> Pos {
-        let Row { line, start, end } = self.rows[row];
+        let Row {
+            line, start, end, ..
+        } = self.rows[row];
         Pos {
             line,
             col: end.saturating_sub(1).max(start),
@@ -138,11 +185,22 @@ impl<'d> Layout<'d> {
 
     /// The display column where grapheme `col` of `row`'s line starts.
     pub(super) fn cell_of(&self, row: usize, col: usize) -> usize {
-        let Row { line, start, .. } = self.rows[row];
-        self.doc.line(line).graphemes[start..col]
-            .iter()
-            .map(|g| g.width)
-            .sum()
+        let Row {
+            line,
+            start,
+            folded,
+            ..
+        } = self.rows[row];
+        if folded {
+            return 0;
+        }
+        let graphemes = self
+            .doc
+            .line(line)
+            .graphemes
+            .get(start..col)
+            .unwrap_or_default();
+        graphemes.iter().map(|g| g.width).sum()
     }
 }
 
@@ -150,8 +208,13 @@ impl<'d> Layout<'d> {
 ///
 /// Rows break after the last whitespace that fits, or mid-word when a word alone is wider than the row. Whitespace
 /// that reaches the edge stays on its row, hanging past it, rather than starting the next one. An empty line is one
-/// empty row.
+/// empty row; an image is as many empty rows as it is tall.
 fn wrap(line: &Shaped, width: usize, mut emit: impl FnMut(usize, usize)) {
+    if let Some(rows) = line.fixed_rows {
+        // Row `i` is the empty range at `i`, so that column `i` lands on it (see `Shaped::fixed_rows`).
+        (0..rows).for_each(|i| emit(i, i));
+        return;
+    }
     let mut start = 0;
     let mut used = 0;
     // Where a row may end: just after the most recent whitespace of the current row.

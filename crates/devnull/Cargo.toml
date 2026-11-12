@@ -13,5 +13,6 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
+regex = "1"
 unicode-segmentation = "1"
 unicode-width = { version = "0.2", default-features = false }
