@@ -493,7 +493,7 @@ fn the_screen_has_a_bufferline_a_statusline_and_a_command_line() {
 one two
 three
 ~
- NORMAL  test        2,5  All
+ NORMAL  test      All  2:5
 ");
 }
 
@@ -1026,7 +1026,7 @@ fn with_one_statusline_for_all_a_line_separates_stacked_windows() {
     let _ = press(&mut app, "jj<C-w>j");
     assert_eq!(screen(&app).cursor, (0, 6));
     assert!(
-        screen(&app).rows[10].contains("1,1"),
+        screen(&app).rows[10].contains("1:1"),
         "the current window's"
     );
 }
@@ -1053,9 +1053,10 @@ fn side_by_side_statuslines_meet_under_the_separator_as_in_vim() {
 
     let _ = press(&mut app, "<C-w>v");
     assert_eq!(screen(&app).rows[6].chars().nth(10), Some(' '));
+    let line = app.style(Group::STATUS_LINE);
     assert_eq!(
         status(&app, 10),
-        status(&app, 9),
+        (line.fg, line.bg),
         "the current window's statusline, on the left, goes on"
     );
     let _ = press(&mut app, "<C-w>l");
@@ -1187,7 +1188,7 @@ fn statuslines(app: &App) -> usize {
     screen(app)
         .rows
         .iter()
-        .map(|row| row.matches("1,1").count())
+        .map(|row| row.matches("1:1").count())
         .sum()
 }
 
@@ -4943,7 +4944,7 @@ fn jumps_into_another_buffer_count_rows_with_the_folds_left_there() {
     let ruler = statusline(&app);
     let row = ruler
         .split_whitespace()
-        .find_map(|word| word.split_once(',').map(|(row, _)| row.to_owned()))
+        .find_map(|word| word.split_once(':').map(|(row, _)| row.to_owned()))
         .expect("a ruler");
 
     let _ = press(&mut app, ":e log/latest<CR>:ju<CR>");
@@ -4970,8 +4971,11 @@ fn a_narrow_statusline_keeps_the_ruler_and_shortens_the_name_from_the_left() {
         height: 12,
     });
 
-    // " NORMAL  log/following  @ada  1,1  All " is 39 cells: the handle goes, then the name's start.
-    assert_eq!(statusline(&app), " NORMAL  </following 1,1  All");
+    // " NORMAL  log/following  @ada  All  1:1 " is 41 cells: the handle goes, then the name's start.
+    assert_eq!(
+        statusline(&app),
+        " NORMAL \u{e0b4} <ollowing All \u{e0b6} 1:1"
+    );
 }
 
 #[test]
