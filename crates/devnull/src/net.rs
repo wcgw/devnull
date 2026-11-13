@@ -1,5 +1,5 @@
-//! The runtime's network side: the device key, the API client and device approval, each reporting back to the app
-//! as [`Msg::Net`].
+//! `dn`'s network side: the device key, the API client and device approval, each reporting back to the app as
+//! [`Msg::Net`]; pictures for the kit to show.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -10,12 +10,11 @@ use devnull_api::signing::{KeyError, Signer};
 use devnull_api::{ApiError, Client, ORIGIN};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use wcgw_kit::runtime::{Bytes, Inbox, Perform};
 
 use devnull_api::media::Media;
-use tokio::sync::Semaphore;
 
-use crate::app::{FetchError, Fetched, Msg, NetEvent, Prepared, Request};
-use crate::graphics::Picture;
+use crate::app::{Dn, FetchError, Fetched, Io, Msg, NetEvent, Request};
 
 /// What the device is called on dev-null.sh's device list.
 const DEVICE_NAME: &str = "dn";
@@ -32,19 +31,13 @@ pub(crate) struct Net {
     /// While approving: where pasted callback links go, and the task waiting for the browser.
     approval: Option<(mpsc::UnboundedSender<String>, JoinHandle<()>)>,
     /// Where results go.
-    later: mpsc::UnboundedSender<Msg>,
+    later: Inbox<Msg>,
     /// Downloads pictures.
     media: Option<Media>,
-    /// Pictures downloading at once: two, as the Go client.
-    picture_slots: Arc<Semaphore>,
 }
 
 impl Net {
-    pub(crate) fn new(
-        key: Option<PathBuf>,
-        agent: Option<PathBuf>,
-        later: mpsc::UnboundedSender<Msg>,
-    ) -> Self {
+    pub(crate) fn new(key: Option<PathBuf>, agent: Option<PathBuf>, later: Inbox<Msg>) -> Self {
         Self {
             key,
             agent,
@@ -52,7 +45,6 @@ impl Net {
             approval: None,
             later,
             media: Media::new(ORIGIN).ok(),
-            picture_slots: Arc::new(Semaphore::new(2)),
         }
     }
 
@@ -311,39 +303,6 @@ impl Net {
         });
     }
 
-    /// Downloads the picture at `source` and prepares it for `cols` × `rows` cells (for the kitty protocol as image
-    /// `kitty`, else as half blocks), answering with [`Msg::Picture`].
-    pub(crate) fn picture(&self, source: String, cols: u16, rows: u16, kitty: Option<u32>) {
-        let (media, slots, later) = (
-            self.media.clone(),
-            Arc::clone(&self.picture_slots),
-            self.later.clone(),
-        );
-        tokio::spawn(async move {
-            // Never closed: a permit always comes.
-            let _slot = slots.acquire_owned().await;
-            let result = match media {
-                None => Err("pictures cannot be downloaded".to_owned()),
-                Some(media) => match media.get(&source).await {
-                    Ok(bytes) => {
-                        // Decoding and scaling take a while: off the runtime's thread.
-                        tokio::task::spawn_blocking(move || prepare(&bytes, cols, rows, kitty))
-                            .await
-                            .unwrap_or_else(|_| Err("cannot prepare it".to_owned()))
-                    }
-                    Err(error) => Err(error.to_string()),
-                },
-            };
-            // Fails only once the runtime's loop has ended, when nobody needs the picture.
-            let _ = later.send(Msg::Picture {
-                source,
-                cols,
-                rows,
-                result,
-            });
-        });
-    }
-
     fn client(&self) -> Option<Client> {
         // Cloned out so the lock is never held across `.await`; a poisoned lock still holds a usable client.
         self.client
@@ -354,7 +313,7 @@ impl Net {
 }
 
 /// Connects with `signer`: the account answers, or the reason it did not.
-async fn finish(signer: Signer, slot: &Mutex<Option<Client>>, later: &mpsc::UnboundedSender<Msg>) {
+async fn finish(signer: Signer, slot: &Mutex<Option<Client>>, later: &Inbox<Msg>) {
     let client = match Client::new(ORIGIN, signer) {
         Ok(client) => client,
         Err(error) => return report(later, NetEvent::Failed(error.to_string())),
@@ -375,7 +334,7 @@ async fn approve(
     key: PathBuf,
     agent: Option<PathBuf>,
     slot: Arc<Mutex<Option<Client>>>,
-    later: mpsc::UnboundedSender<Msg>,
+    later: Inbox<Msg>,
     mut pasted: mpsc::UnboundedReceiver<String>,
 ) {
     let signer = match Signer::open(&key, agent.as_deref()) {
@@ -451,16 +410,6 @@ async fn follow(
     }
 }
 
-/// The picture in `bytes`, prepared for `cols` × `rows` cells: for the kitty protocol as image `kitty`, else as
-/// half blocks.
-fn prepare(bytes: &[u8], cols: u16, rows: u16, kitty: Option<u32>) -> Result<Prepared, String> {
-    let picture = Picture::decode(bytes).ok_or_else(|| "not a picture dn shows".to_owned())?;
-    Ok(match kitty {
-        Some(id) => Prepared::Kitty(picture.kitty(id, cols, rows)),
-        None => Prepared::HalfBlocks(picture.half_blocks(cols, rows)),
-    })
-}
-
 fn fetch_error(error: &ApiError) -> FetchError {
     match error {
         ApiError::NotApproved => FetchError::NotApproved,
@@ -475,25 +424,31 @@ fn failure(error: &ApiError) -> NetEvent {
     }
 }
 
-fn report(later: &mpsc::UnboundedSender<Msg>, event: NetEvent) {
+fn report(later: &Inbox<Msg>, event: NetEvent) {
     // Fails only once the runtime's loop has ended, when nobody needs the news.
     let _ = later.send(Msg::Net(event));
 }
 
-/// Opens `url` in the browser, without waiting for it.
-pub(crate) fn open_url(url: &str) -> std::io::Result<()> {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    let mut child = std::process::Command::new(opener)
-        .arg(url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    // Reaped on a thread of its own so it does not linger as a zombie.
-    std::thread::spawn(move || child.wait());
-    Ok(())
+impl Perform<Dn> for Net {
+    fn perform(&mut self, effect: Io) {
+        match effect {
+            Io::Connect => self.connect(),
+            Io::Unlock(passphrase) => self.unlock(passphrase),
+            Io::Enroll => self.enroll(),
+            Io::EnrollPasted(link) => self.paste(link),
+            Io::AcceptTerms(version) => self.accept_terms(version),
+            Io::Fetch(request) => self.fetch(request),
+        }
+    }
+
+    /// Downloads the picture at `source`, through the media proxy.
+    fn picture(&mut self, source: &str) -> Bytes {
+        let (media, source) = (self.media.clone(), source.to_owned());
+        Box::pin(async move {
+            match media {
+                None => Err("pictures cannot be downloaded".to_owned()),
+                Some(media) => media.get(&source).await.map_err(|error| error.to_string()),
+            }
+        })
+    }
 }

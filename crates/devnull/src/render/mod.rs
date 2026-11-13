@@ -12,8 +12,8 @@ pub use accounts::{account_block, organization_header, pinned_block, profile_hea
 pub use notifications::notification_block;
 
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
-use crate::graphics::{fit, natural};
 use crate::hl::Group;
+use wcgw_kit::gfx::{fit, natural};
 
 /// Lines of text shown before the rest of a long commit folds away.
 const SHOWN_LINES: usize = 6;

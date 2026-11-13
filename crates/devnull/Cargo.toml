@@ -28,6 +28,7 @@ unicode-width = { version = "0.2", default-features = false }
 wcgw-kit = { path = "../../../wcgw-kit/crates/wcgw-kit" }
 
 [dev-dependencies]
+wcgw-kit = { path = "../../../wcgw-kit/crates/wcgw-kit", features = ["testing"] }
 insta = "1"
 serde_json = "1"
 tempfile = "3"

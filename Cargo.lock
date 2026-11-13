@@ -3617,10 +3617,21 @@ name = "wcgw-kit"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "futures-util",
  "ratatui",
  "regex",
+ "tokio",
  "unicode-segmentation",
  "unicode-width",
+ "wcgw-kit-gfx",
+]
+
+[[package]]
+name = "wcgw-kit-gfx"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "image",
 ]
 
 [[package]]

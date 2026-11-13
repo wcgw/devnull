@@ -5,8 +5,10 @@ use devnull_api::model::{
 };
 use devnull_api::{Category, Draft, Log, OrganizationTab, People};
 
+use wcgw_kit::BufferId;
+
 use super::feed::{Feed, NOTICE, Source, notice, notice_lines};
-use super::{App, Buffer, Effect, Kind, NetEvent, threads};
+use super::{Dn, Effects, Kit, NetEvent, fetch, threads};
 use crate::doc::{Content, Cursor as DocCursor, Document};
 use crate::hl::Group;
 use crate::render::{account_block, commit_block, notification_block, parse_time};
@@ -287,88 +289,69 @@ fn inbox_page(inbox: &Inbox, now: u64) -> Page<(String, Content)> {
     Page::new(items, inbox.page.next.clone())
 }
 
-impl App {
-    /// The buffer showing `source`, if there is one.
-    pub(super) fn feed_buffer(&self, source: &Source) -> Option<usize> {
-        self.buffers
-            .iter()
-            .position(|buffer| matches!(&buffer.kind, Kind::Feed(feed) if feed.source == *source))
-    }
-
+impl Dn {
     /// The buffer showing `source`, created empty if there is none yet.
-    pub(super) fn feed_buffer_or_new(&mut self, source: Source) -> usize {
+    pub(super) fn feed_buffer_or_new(&mut self, kit: &mut Kit, source: Source) -> BufferId {
         self.feed_buffer(&source).unwrap_or_else(|| {
-            self.buffers.push(Buffer {
-                name: source.name(),
-                doc: Document::new(),
-                kind: Kind::Feed(Feed::new(source)),
-            });
-            self.buffers.len() - 1
+            let id = kit.add_buffer(source.name(), Document::new(), true);
+            self.feeds.insert(id, Feed::new(source));
+            id
         })
     }
 
     /// Shows `source` in the current window, loading it if needed; the cursor starts at `start` when the window
     /// never showed it.
-    pub(super) fn open_feed(&mut self, source: Source, start: DocCursor) -> Vec<Effect> {
-        let index = self.feed_buffer_or_new(source);
-        self.show_buffer_at(index, start)
+    pub(super) fn open_feed(&mut self, kit: &mut Kit, source: Source, start: DocCursor) -> Effects {
+        let id = self.feed_buffer_or_new(kit, source);
+        kit.show_buffer_at(id, start);
+        Vec::new()
     }
 
-    /// Asks for what buffer `index` shows, unless it has it or is getting it.
-    pub(super) fn load(&mut self, index: usize) -> Vec<Effect> {
-        let requests = match &mut self.buffers[index].kind {
-            Kind::Feed(feed) => feed.start(),
-            Kind::Status | Kind::Fixed | Kind::Help => Vec::new(),
+    /// Asks for what buffer `id` shows, unless it has it or is getting it.
+    pub(super) fn load(&mut self, kit: &mut Kit, id: BufferId) -> Effects {
+        let requests = match self.feeds.get_mut(&id) {
+            Some(feed) => feed.start(),
+            None => Vec::new(),
         };
-        self.ask(index, requests)
+        self.ask(kit, id, requests)
     }
 
-    /// `:e!`: asks for what buffer `index` shows again, keeping what is shown until it arrives. `None` when the
+    /// `:e!`: asks for what buffer `id` shows again, keeping what is shown until it arrives. `None` when the
     /// buffer shows nothing from the server.
-    pub(super) fn refresh(&mut self, index: usize) -> Option<Vec<Effect>> {
-        let requests = match &mut self.buffers[index].kind {
-            Kind::Feed(feed) => feed.refresh(),
-            Kind::Status | Kind::Fixed | Kind::Help => return None,
-        };
-        Some(self.ask(index, requests))
+    pub(super) fn refresh(&mut self, kit: &mut Kit, id: BufferId) -> Option<Effects> {
+        let requests = self.feeds.get_mut(&id)?.refresh();
+        Some(self.ask(kit, id, requests))
     }
 
-    /// Sends `requests` for buffer `index`, saying it is loading while it has nothing else to show.
-    fn ask(&mut self, index: usize, requests: Vec<Request>) -> Vec<Effect> {
-        let buffer = &mut self.buffers[index];
-        if let Kind::Feed(feed) = &buffer.kind
+    /// Sends `requests` for buffer `id`, saying it is loading while it has nothing else to show.
+    fn ask(&mut self, kit: &mut Kit, id: BufferId, requests: Vec<Request>) -> Effects {
+        if let Some(feed) = self.feeds.get(&id)
             && !feed.has_content()
         {
-            buffer.doc = notice(&format!("Loading {}…", buffer.name), crate::hl::TIME);
+            let buffer = kit.buffer_mut(id);
+            let doc = notice(&format!("Loading {}…", buffer.name()), crate::hl::TIME);
+            *buffer.doc_mut() = doc;
         }
-        requests.into_iter().map(Effect::Fetch).collect()
+        requests.into_iter().map(fetch).collect()
     }
 
     /// Asks for the next page of the current window's list when its cursor is within a window's height of the end.
-    pub(super) fn load_more(&mut self) -> Vec<Effect> {
-        let area = self.window_area();
-        let window = self.windows.current();
-        let index = window.buffer;
-        let buffer = &self.buffers[index];
-        if !matches!(&buffer.kind, Kind::Feed(feed) if feed.has_more()) {
+    pub(super) fn load_more(&mut self, kit: &mut Kit) -> Effects {
+        let id = kit.current_buffer();
+        if !self.feeds.get(&id).is_some_and(Feed::has_more) || !kit.cursor_near_end() {
             return Vec::new();
         }
-        let layout = window.layout(&self.buffers, area);
-        if window.cursor.screen(&layout).row + usize::from(area.height) < layout.row_count() {
-            return Vec::new();
-        }
-        let buffer = &mut self.buffers[index];
-        let Kind::Feed(feed) = &mut buffer.kind else {
+        let Some(feed) = self.feeds.get_mut(&id) else {
             return Vec::new();
         };
-        feed.more(&mut buffer.doc)
-            .map(Effect::Fetch)
+        feed.more(kit.buffer_mut(id).doc_mut())
+            .map(fetch)
             .into_iter()
             .collect()
     }
 
     /// An answer from the server; `now` (Unix seconds) is when it arrived, for ages.
-    pub(super) fn fetched(&mut self, fetched: Fetched, now: u64) -> Vec<Effect> {
+    pub(super) fn fetched(&mut self, kit: &mut Kit, fetched: Fetched, now: u64) -> Effects {
         let commits = |page: Page<Commit>| {
             let items = page
                 .items
@@ -379,23 +362,30 @@ impl App {
         };
         match fetched {
             Fetched::Log { log, after, result } => {
-                self.page_arrived(&Source::Log(log), after.is_some(), result.map(commits))
+                self.page_arrived(kit, &Source::Log(log), after.is_some(), result.map(commits))
             }
-            Fetched::Replies { id, after, result } => {
-                self.page_arrived(&Source::Thread(id), after.is_some(), result.map(commits))
-            }
-            Fetched::Thread { id, result } => self.head_arrived(
+            Fetched::Replies { id, after, result } => self.page_arrived(
+                kit,
                 &Source::Thread(id),
-                result.map(|thread| threads::head(&thread, now, self.cell_size)),
+                after.is_some(),
+                result.map(commits),
             ),
-            Fetched::Profile { handle, result } => self.profile_arrived(handle, result, now),
+            Fetched::Thread { id, result } => {
+                let cell = kit.cell_size();
+                self.head_arrived(
+                    kit,
+                    &Source::Thread(id),
+                    result.map(|thread| threads::head(&thread, now, cell)),
+                )
+            }
+            Fetched::Profile { handle, result } => self.profile_arrived(kit, handle, result, now),
             Fetched::Commits {
                 handle,
                 after,
                 result,
             } => {
                 let source = Source::Profile { handle, kind: None };
-                self.page_arrived(&source, after.is_some(), result.map(commits))
+                self.page_arrived(kit, &source, after.is_some(), result.map(commits))
             }
             Fetched::OrganizationCommits {
                 handle,
@@ -407,7 +397,7 @@ impl App {
                     OrganizationTab::Mentions => Source::Mentions(handle),
                     _ => Source::Profile { handle, kind: None },
                 };
-                self.page_arrived(&source, after.is_some(), result.map(commits))
+                self.page_arrived(kit, &source, after.is_some(), result.map(commits))
             }
             Fetched::People {
                 handle,
@@ -424,9 +414,9 @@ impl App {
                     Page::new(items, page.next)
                 };
                 let source = Source::People(handle, which);
-                self.page_arrived(&source, after.is_some(), result.map(accounts))
+                self.page_arrived(kit, &source, after.is_some(), result.map(accounts))
             }
-            Fetched::SearchProfiles { term, result } => self.found(&term, result),
+            Fetched::SearchProfiles { term, result } => self.found(kit, &term, result),
             Fetched::Notifications {
                 only,
                 after,
@@ -438,25 +428,26 @@ impl App {
                 }
                 let source = Source::Notifications(only);
                 self.page_arrived(
+                    kit,
                     &source,
                     after.is_some(),
                     result.map(|inbox| inbox_page(&inbox, now)),
                 )
             }
-            Fetched::Star { id, on, result } => self.starred(&id, on, result, now),
-            Fetched::Follow { handle, on, result } => self.followed(&handle, on, result),
-            Fetched::DeleteCommit { id, result } => self.deleted(&id, result),
-            Fetched::Preview { body, result } => self.previewed(body, result),
-            Fetched::Published { draft, result } => self.published(&draft, result, now),
+            Fetched::Star { id, on, result } => self.starred(kit, &id, on, result, now),
+            Fetched::Follow { handle, on, result } => self.followed(kit, &handle, on, result),
+            Fetched::DeleteCommit { id, result } => self.deleted(kit, &id, result),
+            Fetched::Preview { body, result } => self.previewed(kit, body, result),
+            Fetched::Published { draft, result } => self.published(kit, &draft, result, now),
             Fetched::Starred { after, result } => {
-                self.page_arrived(&Source::Starred, after.is_some(), result.map(commits))
+                self.page_arrived(kit, &Source::Starred, after.is_some(), result.map(commits))
             }
             Fetched::UnreadCount { result } => match result {
                 Ok(count) => {
                     self.unread = count;
                     Vec::new()
                 }
-                Err(FetchError::NotApproved) => self.net(NetEvent::NotApproved),
+                Err(FetchError::NotApproved) => self.net(kit, NetEvent::NotApproved),
                 // Asked for every poll: the next one tries again, without an error each time.
                 Err(FetchError::Failed(_)) => Vec::new(),
             },
@@ -466,23 +457,23 @@ impl App {
     /// The head of the feed of `source` arrived as blocks, or failed to.
     pub(super) fn head_arrived(
         &mut self,
+        kit: &mut Kit,
         source: &Source,
         result: Result<Vec<(String, Content)>, FetchError>,
-    ) -> Vec<Effect> {
-        let Some(index) = self.feed_buffer(source) else {
+    ) -> Effects {
+        let Some(id) = self.feed_buffer(source) else {
             return Vec::new();
         };
-        let buffer = &mut self.buffers[index];
-        let Kind::Feed(feed) = &mut buffer.kind else {
+        let Some(feed) = self.feeds.get_mut(&id) else {
             return Vec::new();
         };
         feed.head_answered();
         match result {
             Ok(blocks) => {
-                feed.head_arrived(&mut buffer.doc, blocks);
+                feed.head_arrived(kit.buffer_mut(id).doc_mut(), blocks);
                 Vec::new()
             }
-            Err(error) => self.failed(index, error),
+            Err(error) => self.failed(kit, id, error),
         }
     }
 
@@ -490,27 +481,27 @@ impl App {
     /// else the first.
     fn page_arrived(
         &mut self,
+        kit: &mut Kit,
         source: &Source,
         next_page: bool,
         result: Result<Page<(String, Content)>, FetchError>,
-    ) -> Vec<Effect> {
-        let Some(index) = self.feed_buffer(source) else {
+    ) -> Effects {
+        let Some(id) = self.feed_buffer(source) else {
             return Vec::new();
         };
-        let top_before = self.top_row(index);
-        let buffer = &mut self.buffers[index];
-        let Kind::Feed(feed) = &mut buffer.kind else {
+        let top_before = kit.top_row(id);
+        let Some(feed) = self.feeds.get_mut(&id) else {
             return Vec::new();
         };
-        feed.page_answered(&mut buffer.doc, next_page);
+        feed.page_answered(kit.buffer_mut(id).doc_mut(), next_page);
         let page = match result {
             Ok(page) => page,
-            Err(error) => return self.failed(index, error),
+            Err(error) => return self.failed(kit, id, error),
         };
-        let arrived = feed.page_arrived(&mut buffer.doc, next_page, page);
+        let arrived = feed.page_arrived(kit.buffer_mut(id).doc_mut(), next_page, page);
         let of_commits = !matches!(source, Source::People(..));
         if of_commits && arrived > 0 && top_before.is_some_and(|top| top > 0) {
-            self.info(format!(
+            kit.info(format!(
                 "{arrived} new commit{}",
                 if arrived == 1 { "" } else { "s" }
             ));
@@ -518,33 +509,25 @@ impl App {
         Vec::new()
     }
 
-    /// A request for buffer `index` failed: says why, also in the buffer while it has nothing else to show.
-    fn failed(&mut self, index: usize, error: FetchError) -> Vec<Effect> {
+    /// A request for buffer `id` failed: says why, also in the buffer while it has nothing else to show.
+    fn failed(&mut self, kit: &mut Kit, id: BufferId, error: FetchError) -> Effects {
         match error {
-            FetchError::NotApproved => self.net(NetEvent::NotApproved),
+            FetchError::NotApproved => self.net(kit, NetEvent::NotApproved),
             FetchError::Failed(reason) => {
-                let buffer = &mut self.buffers[index];
-                let text = format!("Cannot load {}: {reason}", buffer.name);
-                if matches!(&buffer.kind, Kind::Feed(feed) if !feed.has_content()) {
-                    buffer.doc = notice(&text, Group::ERROR_MSG);
-                } else if buffer.doc.contains(NOTICE) {
+                let has_content = self.feeds.get(&id).is_none_or(Feed::has_content);
+                let buffer = kit.buffer_mut(id);
+                let text = format!("Cannot load {}: {reason}", buffer.name());
+                if !has_content {
+                    *buffer.doc_mut() = notice(&text, Group::ERROR_MSG);
+                } else if buffer.doc().contains(NOTICE) {
                     // Such as "Loading…" above replies that arrived when their commit did not.
                     let _ = buffer
-                        .doc
+                        .doc_mut()
                         .replace(NOTICE, notice_lines(&text, Group::ERROR_MSG));
                 }
-                self.error(text);
+                kit.error(text);
                 Vec::new()
             }
         }
-    }
-
-    /// The first row shown by the current window when it shows buffer `index`.
-    fn top_row(&self, index: usize) -> Option<usize> {
-        let window = self.windows.current();
-        (window.buffer == index).then(|| {
-            let layout = window.layout(&self.buffers, self.window_area());
-            window.top(&layout, self.viewport())
-        })
     }
 }
