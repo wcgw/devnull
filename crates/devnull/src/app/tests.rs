@@ -660,10 +660,12 @@ fn ignorecase_and_smartcase_apply_to_searches() {
 }
 
 #[test]
-fn pending_keys_show_at_the_right_of_the_command_line() {
+fn pending_keys_show_at_the_right_of_the_command_line_with_showcmd() {
     let mut app = app_with(&["one"], 30, 6);
 
     let _ = press(&mut app, "3g");
+    assert_eq!(cmdline(&app), "", "noshowcmd by default, as the kit's");
+    let _ = press(&mut app, "<Esc>:set showcmd<CR>3g");
 
     assert!(cmdline(&app).ends_with("3g"), "{:?}", cmdline(&app));
 }
@@ -1277,7 +1279,13 @@ fn tab_completes_the_arguments_each_command_takes() {
     assert_eq!(completed(&app, "set gr"), ["graphics"]);
     assert_eq!(
         completed(&app, "set no"),
-        ["nohlsearch", "noignorecase", "noincsearch", "nosmartcase"],
+        [
+            "nohlsearch",
+            "noignorecase",
+            "noincsearch",
+            "noshowcmd",
+            "nosmartcase"
+        ],
         "the flags that turn off"
     );
     assert_eq!(
