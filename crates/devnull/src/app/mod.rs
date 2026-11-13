@@ -322,7 +322,7 @@ impl App {
         Self {
             size: (80, 24),
             focused: true,
-            keymap: Keymap::new(),
+            keymap: crate::keymap::keymap(),
             options: Options::default(),
             theme: crate::hl::theme(),
             buffers: vec![Buffer {
