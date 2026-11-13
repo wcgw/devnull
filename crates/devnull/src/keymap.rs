@@ -8,7 +8,7 @@ pub const COMMITTING: Topic = Topic::new(75, "Commits");
 /// `dn`'s default bindings: keys, the ex command each runs, what which-key says of it, and its `:help` topic.
 const DEFAULTS: [(&str, &str, &str, Topic); 17] = [
     ("gd", "profile", "author's profile", Topic::OPENING),
-    ("K", "hover", "hover card", Topic::OPENING),
+    ("K", "details", "details card", Topic::OPENING),
     ("gx", "browse link", "open link in browser", Topic::OPENING),
     ("gX", "browse", "open commit on the web", Topic::OPENING),
     ("<leader>/", "pick users", "find user", Topic::OPENING),

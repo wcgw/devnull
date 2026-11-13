@@ -43,8 +43,8 @@ pub(super) fn add(kit: &mut Kit) {
         }),
         Command::<Dn>::new("yanklink", 5, |_, kit, _| Dn::yank_link(kit))
             .help("yank the link :browse opens"),
-        Command::<Dn>::new("hover", 3, |dn, kit, _| dn.hover(kit))
-            .help("a card about what is under the cursor"),
+        Command::<Dn>::new("details", 3, |dn, kit, _| dn.hover(kit))
+            .help("a card about what is under the cursor; K again goes into it"),
         Command::<Dn>::new("star", 4, |dn, kit, _| dn.star(kit))
             .help("star the commit, or take the star back"),
         Command::<Dn>::new("commit", 4, |dn, kit, line| {

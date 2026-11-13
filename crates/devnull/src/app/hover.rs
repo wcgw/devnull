@@ -57,7 +57,7 @@ fn account_card(page: &AccountPage) -> Option<Vec<Line>> {
 }
 
 impl Dn {
-    /// `:hover`: the card of the link under the cursor, else of the account, else of the author of the commit; an
+    /// `:details` (`K`), as muttrs' and slackers': the card of the link under the cursor, else of the account, else of the author of the commit; an
     /// account's card waits for its profile to arrive.
     pub(super) fn hover(&mut self, kit: &mut Kit) -> Result<Effects, String> {
         self.hover_waiting = None;

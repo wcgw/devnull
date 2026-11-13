@@ -77,7 +77,7 @@ Defaults:
 | `<C-o>`, `<C-i>` (`<Tab>`) | Jumplist back/forward, across buffers | |
 | `<C-t>` | Back to where `<CR>`/`gd` left for another buffer (tag stack) | `:pop` |
 | `gd` | Profile of the commit's author | `:profile` |
-| `K` | Hover card (author, link card, poll) | `:hover` |
+| `K` | Details card (author, link card, poll) | `:details` |
 | `gx` / `gX` | Open URL under cursor / the commit on the web | `:browse` |
 | `]]`, `[[` | Next/previous commit | |
 | `zo zO zc zC za zA zR zM` | Folds: long commits, reply groups, notification groups; nested as in Vim | |
@@ -449,9 +449,9 @@ from M1 even though graphics land in M6.
 - [x] **M3.4** `gx` (link under the cursor), `gX` (commit on the web), `gy` (yank its link); `K` hover card.
   `:browse link` (`gx`) opens only a link; `:browse` (`gX`) and `:yanklink` (`gy`) take the commit under the cursor (a
   quote's, else the one holding it), else the account (`https://dev-null.sh/@handle`, as every captured `html_url`).
-  `:hover` (`K`) floats a card next to the cursor until the next key: a link card whole, an account's profile head
-  (fetched, its avatar too: asked for and drawn on the card since a fix after M6), or elsewhere in a commit, its
-  author's. Polls get theirs when polls are drawn. Checked live: `K` on a
+  `:details` (`K`; `:hover` until it was named as muttrs' and slackers') floats a card next to the cursor until the
+  next key: a link card whole, an account's profile head (fetched, its avatar too: asked for and drawn on the card
+  since a fix after M6), or elsewhere in a commit, its author's. Polls get theirs when polls are drawn. Checked live: `K` on a
   commit and `gy` (OSC 52); `gx`/`gX` only in tests, as they open the browser.
 - [x] **M3.5** The jumplist spans buffers: `<C-o>` from a thread returns to where `<CR>` was pressed. Entries carry
   their buffer, and showing another buffer is a jump (as starting to edit another file is in Vim), except from a
