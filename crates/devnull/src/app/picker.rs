@@ -1,15 +1,36 @@
 //! The user picker (`<leader>/`, `:pick users`): people and organizations, as dev-null.sh's search finds them once
-//! typing pauses.
+//! typing pauses; and a commit's links, for `:browse link` off any of them.
 
 use devnull_api::model::{AccountKind, ProfileSearch};
 use wcgw_kit::shell::{Choice, Pick, Picker};
 
-use super::{Dn, Effects, FetchError, Kit, NetEvent, Request, fetch};
+use super::{Dn, Effect, Effects, FetchError, Kit, NetEvent, Request, fetch};
 use crate::doc::{AccountRef, Target};
 use crate::hl::Group;
 
 /// What the user picker says while there is nothing to search for.
 const IDLE: &str = "Type to find people and organizations";
+
+/// `urls` to pick one of to open, as `:browse link` lists a commit's; `<C-y>` yanks one instead, as muttrs' and
+/// slackers' do.
+pub(super) fn links(urls: Vec<String>) -> Picker<Dn> {
+    let choices = urls
+        .into_iter()
+        .map(|url| Choice {
+            label: vec![(url.clone(), Group::NORMAL_FLOAT)],
+            text: url.clone(),
+            pick: Pick::Target(Target::Url(url)),
+        })
+        .collect();
+    Picker::list("Links", choices, "No links").verb("<C-y>", "yank", |_, kit, pick| {
+        let Pick::Target(Target::Url(url)) = pick else {
+            return Vec::new();
+        };
+        kit.close_picker();
+        kit.info(format!("Yanked {url}"));
+        vec![Effect::Copy(url)]
+    })
+}
 
 /// The user picker, its title saying what it searches.
 pub(super) fn users() -> Picker<Dn> {

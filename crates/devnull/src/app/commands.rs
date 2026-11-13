@@ -28,12 +28,12 @@ pub(super) fn add(kit: &mut Kit) {
         })
         .jumps()
         .help("a profile; alone, of the account under the cursor"),
-        Command::<Dn>::new("browse", 3, |_, kit, line| match line.args {
-            "" => Dn::browse(kit, false),
-            "link" => Dn::browse(kit, true),
+        Command::<Dn>::new("browse", 3, |dn, kit, line| match line.args {
+            "" => dn.browse(kit, false),
+            "link" => dn.browse(kit, true),
             args => Err(format!("E475: Invalid argument: {args}")),
         })
-        .help("the commit or account on the web; with link, the link")
+        .help("the commit or account on the web; with link, the link under the cursor, or one of the commit's")
         .complete(|_, _, before, _| {
             if before.is_empty() {
                 vec!["link".to_owned()]

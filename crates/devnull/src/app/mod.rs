@@ -266,10 +266,30 @@ impl Dn {
         }
     }
 
-    /// `:browse`: the commit or account under the cursor on the web; `:browse link`, the link under it.
-    fn browse(kit: &Kit, link: bool) -> Result<Effects, String> {
+    /// `:browse`: the commit or account under the cursor on the web; `:browse link`, the link under it, else one of
+    /// what holds it: the only one, or as picked (`<C-y>` yanks one), as muttrs' and slackers' do.
+    fn browse(&mut self, kit: &mut Kit, link: bool) -> Result<Effects, String> {
         let url = if link {
-            Self::link_under_cursor(kit).ok_or_else(|| "No link under the cursor".to_owned())?
+            match Self::link_under_cursor(kit) {
+                Some(url) => url,
+                None => {
+                    let mut urls: Vec<String> = Vec::new();
+                    for target in kit.targets_in_block_under_cursor() {
+                        if let Target::Url(url) | Target::LinkCard(LinkCard { url, .. }) = target
+                            && !urls.contains(url)
+                        {
+                            urls.push(url.clone());
+                        }
+                    }
+                    match <[String; 1]>::try_from(urls) {
+                        Ok([only]) => only,
+                        Err(urls) if urls.is_empty() => {
+                            return Err("No link under the cursor, nor in what holds it".to_owned());
+                        }
+                        Err(urls) => return Ok(kit.open_picker(self, picker::links(urls))),
+                    }
+                }
+            }
         } else {
             Self::web_page(kit).ok_or_else(|| "No commit or account under the cursor".to_owned())?
         };

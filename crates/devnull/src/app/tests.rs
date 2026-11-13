@@ -2830,7 +2830,7 @@ fn one_commit(text: &str, extra: serde_json::Value) -> Page<Commit> {
 }
 
 #[test]
-fn gx_opens_the_link_under_the_cursor_and_nothing_else() {
+fn gx_opens_the_link_under_the_cursor_else_the_commit_s_only_one() {
     let mut app = with_log(
         Log::Following,
         one_commit("see https://example.org/x", serde_json::json!({})),
@@ -2840,8 +2840,39 @@ fn gx_opens_the_link_under_the_cursor_and_nothing_else() {
         without_wakes(press(&mut app, "j$gx")),
         [Effect::OpenUrl("https://example.org/x".into())]
     );
-    assert_eq!(without_wakes(press(&mut app, "0gx")), []);
-    assert_eq!(cmdline(&app), "No link under the cursor");
+    assert_eq!(
+        without_wakes(press(&mut app, "0gx")),
+        [Effect::OpenUrl("https://example.org/x".into())],
+        "off it, the commit's only link, as in muttrs and slackers"
+    );
+
+    let mut app = with_log(Log::Following, one_commit("no link", serde_json::json!({})));
+    assert_eq!(without_wakes(press(&mut app, "jgx")), []);
+    assert_eq!(
+        cmdline(&app),
+        "No link under the cursor, nor in what holds it"
+    );
+}
+
+#[test]
+fn gx_off_a_link_lists_the_commit_s_to_open_or_yank() {
+    let mut app = with_log(
+        Log::Following,
+        one_commit(
+            "see https://example.org/x and https://example.org/y",
+            serde_json::json!({}),
+        ),
+    );
+
+    assert_eq!(without_wakes(press(&mut app, "j0gx")), []);
+    for text in ["Links", "https://example.org/x", "https://example.org/y"] {
+        assert!(shows(&app, text), "{text}: {:#?}", screen(&app).rows);
+    }
+    assert_eq!(
+        without_wakes(press(&mut app, "<C-y>")),
+        [Effect::Copy("https://example.org/x".into())]
+    );
+    assert!(!shows(&app, "Links"), "yanked, the list goes");
 }
 
 #[test]

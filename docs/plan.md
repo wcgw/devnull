@@ -78,7 +78,7 @@ Defaults:
 | `<C-t>` | Back to where `<CR>`/`gd` left for another buffer (tag stack) | `:pop` |
 | `gd` | Profile of the commit's author | `:profile` |
 | `K` | Details card (author, link card, poll) | `:details` |
-| `gx` / `gX` | Open URL under cursor / the commit on the web | `:browse` |
+| `gx` / `gX` | Open URL under cursor, else one of the commit's / the commit on the web | `:browse link` / `:browse` |
 | `]]`, `[[` | Next/previous commit | |
 | `zo zO zc zC za zA zR zM` | Folds: long commits, reply groups, notification groups; nested as in Vim | |
 | `c` | New commit | `:commit [@org]` |
