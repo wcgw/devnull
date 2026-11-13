@@ -192,6 +192,15 @@ impl From<super::Effect> for Effect {
     }
 }
 
+/// A picture prepared for the kitty protocol as `escapes`, sent in band.
+fn kitty_sent(escapes: impl Into<String>) -> Prepared {
+    Prepared::Kitty {
+        escapes: escapes.into(),
+        staged: None,
+        bytes: 0,
+    }
+}
+
 /// `dn` in the kit, driven as the app was.
 #[derive(Debug)]
 struct App(Harness<Dn>);
@@ -1267,7 +1276,10 @@ fn tab_completes_the_arguments_each_command_takes() {
         ["nohlsearch", "noignorecase", "noincsearch", "nosmartcase"],
         "the flags that turn off"
     );
-    assert_eq!(completed(&app, "se hls graphics="), ["halfblocks", "kitty"]);
+    assert_eq!(
+        completed(&app, "se hls graphics="),
+        ["halfblocks", "kitty", "off"]
+    );
     assert_eq!(app.ex_completions("set graphics=k").start, 13);
     assert_eq!(
         completed(&app, "colo tokyonight-"),
@@ -4524,7 +4536,7 @@ fn still_pictures_and_animations_the_terminal_runs_need_no_wake_ups() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(format!("frames of {id}"))),
+        result: Ok(kitty_sent(format!("frames of {id}"))),
     });
     assert_eq!(frame_wakes(&effects), []);
 }
@@ -4648,7 +4660,7 @@ fn with_kitty_graphics_a_picture_is_sent_once_and_shown_by_placeholders() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty("<sent>".into())),
+        result: Ok(kitty_sent("<sent>")),
     });
 
     assert_eq!(effects, [Effect::Graphics("<sent>".into())]);
@@ -4697,7 +4709,7 @@ fn switching_graphics_frees_what_was_sent_and_draws_pictures_again() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(String::new())),
+        result: Ok(kitty_sent(String::new())),
     });
 
     let effects = press(&mut app, ":set graphics=halfblocks<CR>");
@@ -4721,7 +4733,7 @@ fn quitting_frees_the_pictures_sent() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(String::new())),
+        result: Ok(kitty_sent(String::new())),
     });
 
     let effects = press(&mut app, ":qa<CR>");
