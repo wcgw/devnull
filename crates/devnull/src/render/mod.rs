@@ -53,7 +53,7 @@ pub fn focused_block(commit: &Commit, now: u64, cell: (u16, u16)) -> Content {
 #[must_use]
 pub fn deleted_block() -> Content {
     vec![
-        Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
+        Line::Text(vec![Span::new("Commit deleted", crate::hl::TIME)]),
         Line::text(""),
     ]
     .into()
@@ -107,7 +107,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
             description: card.description.clone(),
         });
         lines.push(Line::Text(vec![
-            Span::new(text, Group::Link).with_target(target),
+            Span::new(text, crate::hl::LINK).with_target(target),
         ]));
         if let Some(picture) = card.image_url.as_deref().filter(|url| !url.is_empty()) {
             // Its size is not known before it arrives: a box of the usual card shape.
@@ -135,7 +135,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
             text.push_str(&format!(": {description}"));
         }
         lines.push(Line::Text(vec![
-            Span::new(text, Group::Stats).with_target(Target::Url(image.url.clone())),
+            Span::new(text, crate::hl::STATS).with_target(Target::Url(image.url.clone())),
         ]));
     }
     lines.push(counts(commit));
@@ -161,7 +161,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
                     "… {hidden} more {}",
                     if hidden == 1 { "line" } else { "lines" }
                 ),
-                Group::Folded,
+                Group::FOLDED,
             )]),
             closed: true,
         });
@@ -177,7 +177,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
 fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
     let mut spans = Vec::new();
     if let Some(prefix) = prefix {
-        spans.push(Span::new(prefix, Group::Time));
+        spans.push(Span::new(prefix, crate::hl::TIME));
     }
     if let Some(author) = &commit.author {
         spans.extend(author_spans(author));
@@ -185,8 +185,8 @@ fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
     let age = parse_time(&commit.created_at)
         .map(|then| age(then, now))
         .unwrap_or_default();
-    spans.push(Span::new(format!(" · {age} · "), Group::Time));
-    spans.push(Span::new(commit.short_hash.clone(), Group::Hash));
+    spans.push(Span::new(format!(" · {age} · "), crate::hl::TIME));
+    spans.push(Span::new(commit.short_hash.clone(), crate::hl::HASH));
     Line::Text(spans)
 }
 
@@ -209,14 +209,14 @@ fn who(name: &str, handle: &str, kind: AccountKind, avatar: &str) -> Vec<Span> {
     let mut spans = Vec::new();
     if !avatar.is_empty() {
         spans.push(Span::picture(sized(avatar, AVATAR_PIXELS), AVATAR_COLS));
-        spans.push(Span::new(" ", Group::Normal));
+        spans.push(Span::new(" ", Group::NORMAL));
     }
     if !name.is_empty() {
-        spans.push(Span::new(name, Group::Author));
+        spans.push(Span::new(name, crate::hl::AUTHOR));
         if kind == AccountKind::Organization {
-            spans.push(Span::new(" (org)", Group::Time));
+            spans.push(Span::new(" (org)", crate::hl::TIME));
         }
-        spans.push(Span::new(" ", Group::Normal));
+        spans.push(Span::new(" ", Group::NORMAL));
     }
     spans.push(mention(handle, Some(kind)));
     spans
@@ -250,7 +250,7 @@ fn sized(url: &str, pixels: u32) -> String {
 
 /// `@handle`, referring to the account.
 fn mention(handle: &str, kind: Option<AccountKind>) -> Span {
-    Span::new(format!("@{handle}"), Group::Handle)
+    Span::new(format!("@{handle}"), crate::hl::HANDLE)
         .with_target(Target::Account(AccountRef::new(handle, kind)))
 }
 
@@ -260,14 +260,14 @@ fn quote(quoted: &Commit, now: u64) -> Vec<Line> {
     let mut lines = if quoted.is_deleted() {
         vec![Line::Text(vec![Span::new(
             format!("{BAR}Commit deleted"),
-            Group::Time,
+            crate::hl::TIME,
         )])]
     } else {
         let mut lines = vec![header(quoted, now, Some(BAR))];
         lines.extend(body_lines(quoted).into_iter().map(|line| {
             let Line::Text(spans) = line else { return line };
             Line::Text(
-                std::iter::once(Span::new(BAR, Group::Time))
+                std::iter::once(Span::new(BAR, crate::hl::TIME))
                     .chain(spans)
                     .collect(),
             )
@@ -291,12 +291,12 @@ fn counts(commit: &Commit) -> Line {
     if !commit.status.is_empty() && commit.status != "approved" {
         text.push_str(&format!(" · {}", commit.status));
     }
-    Line::Text(vec![Span::new(text, Group::Stats)])
+    Line::Text(vec![Span::new(text, crate::hl::STATS)])
 }
 
 /// `  ↳ Name @handle: first line`.
 fn reply_line(reply: &Commit) -> Line {
-    let mut spans = vec![Span::new("  ↳ ", Group::Time)];
+    let mut spans = vec![Span::new("  ↳ ", crate::hl::TIME)];
     if let Some(author) = &reply.author {
         spans.extend(author_spans(author));
     }
@@ -307,7 +307,7 @@ fn reply_line(reply: &Commit) -> Line {
             Line::Text(spans) => spans.into_iter().map(|span| span.text).collect(),
             Line::Image { .. } => String::new(),
         });
-    spans.push(Span::new(format!(": {first}"), Group::Normal));
+    spans.push(Span::new(format!(": {first}"), Group::NORMAL));
     Line::Text(spans)
 }
 
@@ -341,7 +341,7 @@ fn segment_lines(segments: &[Segment], mentions: &[Mention]) -> Vec<Line> {
                     current.extend(text_spans(piece, &mentioned));
                 }
             }
-            Segment::Code { code } => current.push(Span::new(code.clone(), Group::Code)),
+            Segment::Code { code } => current.push(Span::new(code.clone(), crate::hl::CODE)),
             Segment::Block {
                 language,
                 filename,
@@ -355,11 +355,11 @@ fn segment_lines(segments: &[Segment], mentions: &[Mention]) -> Vec<Line> {
                     (Some(name), None) | (None, Some(name)) => format!("── {name} ──"),
                     (None, None) => "──".to_owned(),
                 };
-                lines.push(Line::Text(vec![Span::new(title, Group::Time)]));
+                lines.push(Line::Text(vec![Span::new(title, crate::hl::TIME)]));
                 let code = plain_text(html);
                 lines.extend(
                     code.lines()
-                        .map(|line| Line::Text(vec![Span::new(line, Group::Code)])),
+                        .map(|line| Line::Text(vec![Span::new(line, crate::hl::CODE)])),
                 );
             }
             // A kind of segment this version does not know: leave it out rather than show it wrong.
@@ -379,7 +379,7 @@ fn text_spans(text: &str, mentioned: &[(String, AccountKind)]) -> Vec<Span> {
     let mut rest = text;
     let flush = |plain: &mut String, spans: &mut Vec<Span>| {
         if !plain.is_empty() {
-            spans.push(Span::new(std::mem::take(plain), Group::Normal));
+            spans.push(Span::new(std::mem::take(plain), Group::NORMAL));
         }
     };
     while let Some(ch) = rest.chars().next() {
@@ -402,7 +402,7 @@ fn text_spans(text: &str, mentioned: &[(String, AccountKind)]) -> Vec<Span> {
             let url =
                 rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '\'', '"']);
             flush(&mut plain, &mut spans);
-            spans.push(Span::new(url, Group::Link).with_target(Target::Url(url.to_owned())));
+            spans.push(Span::new(url, crate::hl::LINK).with_target(Target::Url(url.to_owned())));
             rest = &rest[url.len()..];
             continue;
         }

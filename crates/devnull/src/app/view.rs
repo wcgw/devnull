@@ -23,7 +23,7 @@ impl App {
         let screen = frame.area();
         frame
             .buffer_mut()
-            .set_style(screen, self.theme.style(Group::Normal));
+            .set_style(screen, self.theme.style(Group::NORMAL));
         let current = self.windows.current().buffer;
         // The listed buffers, or the current one alone while it is a status page such as `connect`.
         let shown = if matches!(self.buffers[current].kind, Kind::Status) {
@@ -35,9 +35,9 @@ impl App {
             .into_iter()
             .map(|index| {
                 let group = if index == current {
-                    Group::TabLineSel
+                    Group::TAB_LINE_SEL
                 } else {
-                    Group::TabLine
+                    Group::TAB_LINE
                 };
                 Span::styled(
                     format!(" {} ", self.buffers[index].name),
@@ -45,7 +45,7 @@ impl App {
                 )
             })
             .collect();
-        let bufferline = Line::from(tabs).style(self.theme.style(Group::TabLineFill));
+        let bufferline = Line::from(tabs).style(self.theme.style(Group::TAB_LINE_FILL));
         frame.render_widget(Paragraph::new(bufferline), Rect::new(0, 0, width, 1));
 
         let arrangement = self.windows.arrange(self.windows_area());
@@ -53,7 +53,7 @@ impl App {
             let rows = area.height.saturating_sub(1);
             let bar: Vec<Line<'_>> = (0..rows).map(|_| Line::from("│")).collect();
             frame.render_widget(
-                Paragraph::new(bar).style(self.theme.style(Group::WinSeparator)),
+                Paragraph::new(bar).style(self.theme.style(Group::WIN_SEPARATOR)),
                 Rect {
                     height: rows,
                     ..area
@@ -125,9 +125,9 @@ impl App {
         }
         if let Some(message) = &self.message {
             let group = match message.kind {
-                MessageKind::Info => Group::Normal,
-                MessageKind::Warning => Group::WarningMsg,
-                MessageKind::Error => Group::ErrorMsg,
+                MessageKind::Info => Group::NORMAL,
+                MessageKind::Warning => Group::WARNING_MSG,
+                MessageKind::Error => Group::ERROR_MSG,
             };
             frame.render_widget(
                 Paragraph::new(Span::styled(message.text.as_str(), self.theme.style(group))),
@@ -179,15 +179,15 @@ impl App {
                             .collect::<Vec<_>>(),
                     )
                 } else {
-                    Line::from(Span::styled("~", self.theme.style(Group::EndOfBuffer)))
+                    Line::from(Span::styled("~", self.theme.style(Group::END_OF_BUFFER)))
                 }
             })
             .collect();
         frame.render_widget(Paragraph::new(rows), area);
         self.draw_pictures(frame.buffer_mut(), &layout, top, area);
         let highlighted = match &typed {
-            Some((pattern, ..)) => Some((pattern, Group::IncSearch)),
-            None => self.searched().map(|pattern| (pattern, Group::CurSearch)),
+            Some((pattern, ..)) => Some((pattern, Group::INC_SEARCH)),
+            None => self.searched().map(|pattern| (pattern, Group::CUR_SEARCH)),
         };
         if let Some((pattern, current)) = highlighted {
             for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
@@ -195,7 +195,7 @@ impl App {
                     let group = if holds_cursor {
                         current
                     } else if self.options.hlsearch {
-                        Group::Search
+                        Group::SEARCH
                     } else {
                         continue;
                     };
@@ -211,7 +211,7 @@ impl App {
             if layout.is_folded(row) {
                 frame.buffer_mut().set_style(
                     Rect::new(area.x, y, area.width, 1),
-                    self.theme.style(Group::Folded),
+                    self.theme.style(Group::FOLDED),
                 );
             }
         }
@@ -222,7 +222,7 @@ impl App {
                     let width = to_u16(cells.len()).min(area.right().saturating_sub(x));
                     frame
                         .buffer_mut()
-                        .set_style(Rect::new(x, y, width, 1), self.theme.style(Group::Visual));
+                        .set_style(Rect::new(x, y, width, 1), self.theme.style(Group::VISUAL));
                 }
             }
         }
@@ -268,15 +268,15 @@ impl App {
     fn mode_label(&self) -> (&'static str, Group) {
         match &self.mode {
             AppMode::Normal | AppMode::MorePrompt { .. } | AppMode::Confirm(_) => {
-                ("NORMAL", Group::StatusLineModeNormal)
+                ("NORMAL", Group::STATUS_LINE_MODE_NORMAL)
             }
             AppMode::Visual(selection) => match selection.kind() {
-                SelectionKind::Charwise => ("VISUAL", Group::StatusLineModeVisual),
-                SelectionKind::Rowwise => ("V-LINE", Group::StatusLineModeVisual),
+                SelectionKind::Charwise => ("VISUAL", Group::STATUS_LINE_MODE_VISUAL),
+                SelectionKind::Rowwise => ("V-LINE", Group::STATUS_LINE_MODE_VISUAL),
             },
-            AppMode::Cmdline(_) => ("COMMAND", Group::StatusLineModeCommand),
+            AppMode::Cmdline(_) => ("COMMAND", Group::STATUS_LINE_MODE_COMMAND),
             // As Telescope's prompt, typed into.
-            AppMode::Picker(_) => ("INSERT", Group::StatusLineModeCommand),
+            AppMode::Picker(_) => ("INSERT", Group::STATUS_LINE_MODE_COMMAND),
         }
     }
 
@@ -318,8 +318,8 @@ impl App {
         let area = Rect::new(0, height - 1 - (rows + 2), width, rows + 2);
         let block = Block::bordered()
             .title(" Preview ")
-            .border_style(self.theme.style(Group::FloatBorder))
-            .style(self.theme.style(Group::NormalFloat));
+            .border_style(self.theme.style(Group::FLOAT_BORDER))
+            .style(self.theme.style(Group::NORMAL_FLOAT));
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
@@ -367,21 +367,21 @@ impl App {
             .collect();
         let block = Block::bordered()
             .title(format!(" {title} "))
-            .border_style(self.theme.style(Group::FloatBorder))
-            .style(self.theme.style(Group::NormalFloat));
+            .border_style(self.theme.style(Group::FLOAT_BORDER))
+            .style(self.theme.style(Group::NORMAL_FLOAT));
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
         for (i, (key, description)) in entries.iter().take(rows * columns).enumerate() {
             let (row, column) = (i / columns, i % columns);
             let group = if description == "+prefix" {
-                Group::WhichKeyGroup
+                Group::WHICH_KEY_GROUP
             } else {
-                Group::WhichKeyDesc
+                Group::WHICH_KEY_DESC
             };
             let line = Line::from(vec![
-                Span::styled(key.as_str(), self.theme.style(Group::WhichKey)),
-                Span::styled(" → ", self.theme.style(Group::WhichKeySeparator)),
+                Span::styled(key.as_str(), self.theme.style(Group::WHICH_KEY)),
+                Span::styled(" → ", self.theme.style(Group::WHICH_KEY_SEPARATOR)),
                 Span::styled(description.as_str(), self.theme.style(group)),
             ]);
             let x = inner.x + to_u16(column * entry_width);
@@ -404,9 +404,9 @@ impl App {
             .iter()
             .flat_map(|message| {
                 let group = if message.kind == MessageKind::Error {
-                    Group::ErrorMsg
+                    Group::ERROR_MSG
                 } else {
-                    Group::Normal
+                    Group::NORMAL
                 };
                 let style = self.theme.style(group);
                 wrapped(&message.text, usize::from(width.max(1)))
@@ -422,7 +422,7 @@ impl App {
         let prompt = "Press ENTER or type command to continue";
         rows.push(Line::from(Span::styled(
             prompt,
-            self.theme.style(Group::MoreMsg),
+            self.theme.style(Group::MORE_MSG),
         )));
         frame.render_widget(Paragraph::new(rows), area);
         let x = to_u16(prompt.width()).min(width.saturating_sub(1));
@@ -483,13 +483,13 @@ impl App {
         let top = cmdline - to_u16(rows);
         for (row, at) in (first..first + rows).enumerate() {
             let group = if shown.chosen == Some(at) {
-                Group::PmenuSel
+                Group::PMENU_SEL
             } else {
-                Group::Pmenu
+                Group::PMENU
             };
             let style = self
                 .theme
-                .style(Group::Pmenu)
+                .style(Group::PMENU)
                 .patch(self.theme.style(group));
             let text = format!(" {:<inner$} ", shown.candidates[at]);
             let area = Rect::new(x, top + to_u16(row), menu_width, 1);
@@ -502,9 +502,9 @@ impl App {
 /// How a window's statusline looks: whether it is the current window's.
 fn statusline_group(is_current: bool) -> Group {
     if is_current {
-        Group::StatusLine
+        Group::STATUS_LINE
     } else {
-        Group::StatusLineNC
+        Group::STATUS_LINE_NC
     }
 }
 

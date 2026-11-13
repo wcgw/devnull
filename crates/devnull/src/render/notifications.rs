@@ -29,15 +29,15 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
         _ => ("•", "did something"),
     };
     let mut first = vec![
-        Span::new(if new { "● " } else { "  " }, Group::Handle),
-        Span::new(format!("{icon} "), Group::Stats),
+        Span::new(if new { "● " } else { "  " }, crate::hl::HANDLE),
+        Span::new(format!("{icon} "), crate::hl::STATS),
     ];
     let moderation = matches!(
         kind,
         NotificationKind::Approved | NotificationKind::Rejected
     );
     if moderation {
-        first.push(Span::new(verb, Group::Normal));
+        first.push(Span::new(verb, Group::NORMAL));
     } else {
         if let Some(actor) = &notification.actor {
             first.extend(who(
@@ -50,14 +50,14 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
         let others = notification.actors_count.saturating_sub(1);
         if others > 0 {
             let s = if others == 1 { "" } else { "s" };
-            first.push(Span::new(format!(" and {others} other{s}"), Group::Normal));
+            first.push(Span::new(format!(" and {others} other{s}"), Group::NORMAL));
         }
-        first.push(Span::new(format!(" {verb}"), Group::Normal));
+        first.push(Span::new(format!(" {verb}"), Group::NORMAL));
     }
     let age = parse_time(&notification.created_at)
         .map(|then| age(then, now))
         .unwrap_or_default();
-    first.push(Span::new(format!(" · {age}"), Group::Time));
+    first.push(Span::new(format!(" · {age}"), crate::hl::TIME));
     let mut lines = vec![Line::Text(first)];
     if let Some(commit) = &notification.commit {
         // The account's own commit is quoted; a reply, quote or mention is shown as written.
@@ -67,14 +67,14 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
     if !notification.reason.is_empty() {
         lines.push(Line::Text(vec![Span::new(
             format!("{INDENT}reason: {}", notification.reason),
-            Group::Time,
+            crate::hl::TIME,
         )]));
     }
     let mut folds = Vec::new();
     if notification.actors.len() > 1 {
         let start = lines.len();
         for actor in &notification.actors {
-            let mut spans = vec![Span::new(INDENT, Group::Normal)];
+            let mut spans = vec![Span::new(INDENT, Group::NORMAL)];
             spans.extend(who(
                 &actor.name,
                 &actor.handle,
@@ -92,7 +92,7 @@ pub fn notification_block(notification: &Notification, new: bool, now: u64) -> C
             lines: start..lines.len(),
             summary: Line::Text(vec![Span::new(
                 format!("{INDENT}▸ {} {noun}", notification.event_count),
-                Group::Folded,
+                Group::FOLDED,
             )]),
             closed: true,
         });
@@ -122,13 +122,13 @@ fn excerpt(commit: &Commit, own: bool) -> Vec<Line> {
     };
     let indent = |spans: Vec<Span>| {
         Line::Text(
-            std::iter::once(Span::new(lead.clone(), Group::Time))
+            std::iter::once(Span::new(lead.clone(), crate::hl::TIME))
                 .chain(spans)
                 .collect(),
         )
     };
     if commit.is_deleted() {
-        return vec![indent(vec![Span::new("Commit deleted", Group::Time)])];
+        return vec![indent(vec![Span::new("Commit deleted", crate::hl::TIME)])];
     }
     let body = body_lines(commit);
     let more = body.len() > EXCERPT_LINES;
@@ -141,7 +141,7 @@ fn excerpt(commit: &Commit, own: bool) -> Vec<Line> {
         })
         .collect();
     if more {
-        lines.push(indent(vec![Span::new("…", Group::Time)]));
+        lines.push(indent(vec![Span::new("…", crate::hl::TIME)]));
     }
     lines
 }

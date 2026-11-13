@@ -659,6 +659,7 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "unicode-width",
+ "wcgw-kit",
 ]
 
 [[package]]
@@ -3609,6 +3610,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b1f9c3798725016c6ee5f2f57869ec0831e8bbc0ab0310a86e787e97f41389e"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wcgw-kit"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
 ]
 
 [[package]]

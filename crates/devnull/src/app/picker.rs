@@ -263,9 +263,9 @@ impl App {
             .map(|index| {
                 let name = self.buffers[index].name.clone();
                 let group = if index == current {
-                    Group::Time
+                    crate::hl::TIME
                 } else {
-                    Group::NormalFloat
+                    Group::NORMAL_FLOAT
                 };
                 Choice {
                     label: vec![(name.clone(), group)],
@@ -381,13 +381,13 @@ impl App {
         let account = |name: &str, handle: &str, kind: AccountKind| {
             let mut label = Vec::new();
             if !name.is_empty() {
-                label.push((name.to_owned(), Group::Author));
+                label.push((name.to_owned(), crate::hl::AUTHOR));
                 if kind == AccountKind::Organization {
-                    label.push((" (org)".to_owned(), Group::Time));
+                    label.push((" (org)".to_owned(), crate::hl::TIME));
                 }
-                label.push((" ".to_owned(), Group::NormalFloat));
+                label.push((" ".to_owned(), Group::NORMAL_FLOAT));
             }
-            label.push((format!("@{handle}"), Group::Handle));
+            label.push((format!("@{handle}"), crate::hl::HANDLE));
             Choice {
                 label,
                 text: String::new(),
@@ -432,8 +432,8 @@ impl App {
         };
         let block = Block::bordered()
             .title(title)
-            .border_style(self.theme.style(Group::FloatBorder))
-            .style(self.theme.style(Group::NormalFloat));
+            .border_style(self.theme.style(Group::FLOAT_BORDER))
+            .style(self.theme.style(Group::NORMAL_FLOAT));
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
@@ -454,7 +454,7 @@ impl App {
         let lines: Vec<TextLine<'_>> = if picker.shown.is_empty() {
             vec![TextLine::from(vec![
                 TextSpan::raw("  "),
-                TextSpan::styled(picker.hint, self.theme.style(Group::Time)),
+                TextSpan::styled(picker.hint, self.theme.style(crate::hl::TIME)),
             ])]
         } else {
             picker
@@ -469,7 +469,7 @@ impl App {
                     for (text, group) in &picker.choices[*index].label {
                         for ch in text.chars() {
                             let group = if matched.contains(&at) {
-                                Group::PmenuMatch
+                                Group::PMENU_MATCH
                             } else {
                                 *group
                             };
@@ -488,7 +488,7 @@ impl App {
             if row < list.height {
                 frame.buffer_mut().set_style(
                     Rect::new(list.x, list.y + row, list.width, 1),
-                    self.theme.style(Group::Visual),
+                    self.theme.style(Group::VISUAL),
                 );
             }
         }

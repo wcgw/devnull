@@ -108,27 +108,27 @@ fn document(keymap: &Keymap) -> Document {
         .unwrap_or(0)
         + 2;
     let row = |listed: &Listed, mode: Option<Mode>| {
-        let mut spans = vec![Span::new("  ", Group::Normal)];
+        let mut spans = vec![Span::new("  ", Group::NORMAL)];
         if let Some(mode) = mode {
             spans.push(Span::new(
                 format!("{} ", mode_letter(mode)),
-                Group::WhichKeySeparator,
+                Group::WHICH_KEY_SEPARATOR,
             ));
         }
-        spans.push(Span::new(pad(&listed.keys, keys_width), Group::WhichKey));
+        spans.push(Span::new(pad(&listed.keys, keys_width), Group::WHICH_KEY));
         if let Some(command) = &listed.command {
             let description = pad(&listed.description, description_width);
-            spans.push(Span::new(description, Group::WhichKeyDesc));
-            spans.push(Span::new(format!(":{command}"), Group::Code));
+            spans.push(Span::new(description, Group::WHICH_KEY_DESC));
+            spans.push(Span::new(format!(":{command}"), crate::hl::CODE));
         } else {
-            spans.push(Span::new(listed.description.clone(), Group::WhichKeyDesc));
+            spans.push(Span::new(listed.description.clone(), Group::WHICH_KEY_DESC));
         }
         vec![Line::Text(spans)]
     };
     let heading = |title: &str| {
         vec![
             Line::text(""),
-            Line::Text(vec![Span::new(title.to_owned(), Group::WhichKeyGroup)]),
+            Line::Text(vec![Span::new(title.to_owned(), Group::WHICH_KEY_GROUP)]),
         ]
     };
 
@@ -136,7 +136,7 @@ fn document(keymap: &Keymap) -> Document {
     doc.push_back(
         "title",
         vec![
-            Line::Text(vec![Span::new("Key bindings", Group::WhichKeyGroup)]),
+            Line::Text(vec![Span::new("Key bindings", Group::WHICH_KEY_GROUP)]),
             Line::text(format!(
                 "<leader> is {}. Keys that run a command show it, to type after : or use in :map.",
                 keymap.leader()

@@ -408,10 +408,10 @@ fn the_target_under_the_cursor_is_the_one_of_the_span_it_sits_in() {
     doc.push_back(
         "a",
         vec![Line::Text(vec![
-            Span::new("hi ", Group::Normal),
-            Span::new("@ada", Group::Normal).with_target(Target::Buffer("@ada".into())),
-            Span::new(" 🦀 ", Group::Normal),
-            Span::new("dev-null.sh", Group::Normal)
+            Span::new("hi ", Group::NORMAL),
+            Span::new("@ada", Group::NORMAL).with_target(Target::Buffer("@ada".into())),
+            Span::new(" 🦀 ", Group::NORMAL),
+            Span::new("dev-null.sh", Group::NORMAL)
                 .with_target(Target::Url("https://dev-null.sh".into())),
         ])],
     );
@@ -443,8 +443,8 @@ fn text_without_a_target_of_its_own_refers_to_its_block_s() {
     let mut doc = Document::new();
     let lines = vec![
         Line::Text(vec![
-            Span::new("by ", Group::Normal),
-            Span::new("@ada", Group::Normal).with_target(Target::Buffer("@ada".into())),
+            Span::new("by ", Group::NORMAL),
+            Span::new("@ada", Group::NORMAL).with_target(Target::Buffer("@ada".into())),
         ]),
         Line::text(""),
     ];
@@ -580,8 +580,8 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
     doc.push_back(
         "a",
         vec![Line::Text(vec![
-            Span::new("plain ", Group::Normal),
-            Span::new("@handle", Group::Handle),
+            Span::new("plain ", Group::NORMAL),
+            Span::new("@handle", crate::hl::HANDLE),
         ])],
     );
     let layout = Layout::new(&doc, 9);
@@ -593,8 +593,8 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
     assert_eq!(
         rows,
         [
-            vec![("plain ", Group::Normal)],
-            vec![("@handle", Group::Handle)]
+            vec![("plain ", Group::NORMAL)],
+            vec![("@handle", crate::hl::HANDLE)]
         ]
     );
 
@@ -602,8 +602,8 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
     doc.push_back(
         "a",
         vec![Line::Text(vec![
-            Span::new("ab", Group::Normal),
-            Span::new("cdefgh", Group::Handle),
+            Span::new("ab", Group::NORMAL),
+            Span::new("cdefgh", crate::hl::HANDLE),
         ])],
     );
     let layout = Layout::new(&doc, 4);
@@ -613,8 +613,8 @@ fn rows_come_out_as_styled_segments_split_at_span_and_row_boundaries() {
     assert_eq!(
         rows,
         [
-            vec![("ab", Group::Normal), ("cd", Group::Handle)],
-            vec![("efgh", Group::Handle)]
+            vec![("ab", Group::NORMAL), ("cd", crate::hl::HANDLE)],
+            vec![("efgh", crate::hl::HANDLE)]
         ]
     );
 }
@@ -1404,9 +1404,9 @@ fn a_picture_in_a_line_of_text_takes_its_cells_and_says_where_it_starts() {
     doc.push_back(
         "a",
         vec![Line::Text(vec![
-            Span::new("ab", Group::Normal),
+            Span::new("ab", Group::NORMAL),
             Span::picture("face.png", 2),
-            Span::new("cd", Group::Normal),
+            Span::new("cd", Group::NORMAL),
         ])],
     );
     let layout = Layout::new(&doc, 80);
@@ -1432,7 +1432,7 @@ fn a_picture_wrapped_onto_the_next_row_belongs_to_that_row() {
     doc.push_back(
         "a",
         vec![Line::Text(vec![
-            Span::new("abcd efgh ", Group::Normal),
+            Span::new("abcd efgh ", Group::NORMAL),
             Span::picture("face.png", 2),
         ])],
     );

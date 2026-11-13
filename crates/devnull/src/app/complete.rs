@@ -3,7 +3,7 @@
 use super::feed::Source;
 use super::{App, AppMode, options};
 use crate::ex;
-use crate::hl::{self, Group};
+use crate::hl;
 use crate::keymap::Mode;
 
 /// What `<Tab>` may put in place of the end of a command line: from char `start` on, one of `candidates`, sorted.
@@ -67,7 +67,7 @@ impl App {
                 let value = word.chars().skip(offset).collect::<String>();
                 return completions(start + offset, &value, values);
             }
-            ("colorscheme", []) => hl::colorscheme_names().map(str::to_owned).collect(),
+            ("colorscheme", []) => self.theme.colorscheme_names(),
             ("edit", []) => self
                 .buffers
                 .iter()
@@ -80,8 +80,10 @@ impl App {
                 .into_iter()
                 .map(|index| self.buffers[index].name.clone())
                 .collect(),
-            ("highlight", []) => groups().chain(names(&["clear", "link"])).collect(),
-            ("highlight", ["link"] | ["link", _]) => groups().collect(),
+            ("highlight", []) => groups(&self.theme)
+                .chain(names(&["clear", "link"]))
+                .collect(),
+            ("highlight", ["link"] | ["link", _]) => groups(&self.theme).collect(),
             ("help", []) => [Mode::Normal, Mode::Visual]
                 .into_iter()
                 .flat_map(|mode| self.keymap.listing(mode))
@@ -96,8 +98,8 @@ impl App {
 }
 
 /// The names of the highlight groups, as `:hi` takes them.
-fn groups() -> impl Iterator<Item = String> {
-    Group::ALL.iter().map(|group| group.name().to_owned())
+fn groups(theme: &hl::Theme) -> impl Iterator<Item = String> + '_ {
+    theme.groups().iter().map(|group| group.name().to_owned())
 }
 
 /// Those of `candidates` that complete `word`, from char `start` on: sorted, each once.

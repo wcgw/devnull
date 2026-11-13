@@ -47,7 +47,7 @@ pub fn profile_header(profile: &Profile) -> Content {
     .into_iter()
     .flatten()
     .collect();
-    lines.extend(joined(counts, Group::Stats));
+    lines.extend(joined(counts, crate::hl::STATS));
     let relationship: Vec<&str> = [
         profile.follows_you.then_some("Follows you"),
         profile.is_following.then_some("Following"),
@@ -58,7 +58,7 @@ pub fn profile_header(profile: &Profile) -> Content {
     if !relationship.is_empty() {
         lines.push(Line::Text(vec![Span::new(
             relationship.join(" · "),
-            Group::Time,
+            crate::hl::TIME,
         )]));
     }
     if let Some(streaks) = profile.streaks.filter(|streaks| streaks.longest > 0) {
@@ -68,7 +68,7 @@ pub fn profile_header(profile: &Profile) -> Content {
                 "Streak {} {days} · longest {}",
                 streaks.current, streaks.longest
             ),
-            Group::Time,
+            crate::hl::TIME,
         )]));
     }
     lines.push(Line::text(""));
@@ -105,17 +105,17 @@ pub fn organization_header(page: &OrganizationPage) -> Content {
             Some(format!("@{}/mentions", organization.handle)),
         )])
         .collect();
-    lines.extend(joined(counts, Group::Stats));
+    lines.extend(joined(counts, crate::hl::STATS));
     if !organization.admins.is_empty() {
-        let mut spans = vec![Span::new("Admins:", Group::Time)];
+        let mut spans = vec![Span::new("Admins:", crate::hl::TIME)];
         for admin in &organization.admins {
-            spans.push(Span::new(" ", Group::Normal));
+            spans.push(Span::new(" ", Group::NORMAL));
             spans.push(mention(&admin.handle, Some(AccountKind::User)));
         }
         lines.push(Line::Text(spans));
     }
     if page.is_following {
-        lines.push(Line::Text(vec![Span::new("Following", Group::Time)]));
+        lines.push(Line::Text(vec![Span::new("Following", crate::hl::TIME)]));
     }
     lines.push(Line::text(""));
     Content {
@@ -134,7 +134,7 @@ pub fn pinned_block(commit: &Commit, now: u64) -> Content {
     let mut content = commit_block(commit, now);
     content
         .lines
-        .insert(0, Line::Text(vec![Span::new("📌 Pinned", Group::Time)]));
+        .insert(0, Line::Text(vec![Span::new("📌 Pinned", crate::hl::TIME)]));
     for fold in &mut content.folds {
         fold.lines = fold.lines.start + 1..fold.lines.end + 1;
     }
@@ -165,7 +165,7 @@ pub fn account_block(account: &Account) -> Content {
     if !relationship.is_empty() {
         spans.push(Span::new(
             format!(" · {}", relationship.join(" · ")),
-            Group::Time,
+            crate::hl::TIME,
         ));
     }
     let mut lines = vec![Line::Text(spans)];
@@ -217,11 +217,11 @@ fn details(plain: &[&str], website: &str) -> Option<Line> {
     let mut spans = Vec::new();
     for (i, (text, target)) in parts.into_iter().enumerate() {
         if i > 0 {
-            spans.push(Span::new(" · ", Group::Time));
+            spans.push(Span::new(" · ", crate::hl::TIME));
         }
         spans.push(match target {
-            Some(target) => Span::new(text, Group::Link).with_target(target),
-            None => Span::new(text, Group::Time),
+            Some(target) => Span::new(text, crate::hl::LINK).with_target(target),
+            None => Span::new(text, crate::hl::TIME),
         });
     }
     Some(Line::Text(spans))

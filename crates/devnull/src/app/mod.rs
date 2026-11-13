@@ -324,7 +324,7 @@ impl App {
             focused: true,
             keymap: Keymap::new(),
             options: Options::default(),
-            theme: Theme::default(),
+            theme: crate::hl::theme(),
             buffers: vec![Buffer {
                 name: name.into(),
                 doc,
@@ -1025,7 +1025,7 @@ impl App {
             Command::HighlightClear => self.theme.clear(),
             Command::HighlightLink { from, to } => self.theme.link(&from, to.as_deref())?,
             Command::Colorscheme(None) => self.info(self.theme.name().to_owned()),
-            Command::Colorscheme(Some(name)) => self.theme = Theme::named(&name)?,
+            Command::Colorscheme(Some(name)) => self.theme.colorscheme(&name)?,
             Command::Source(path) => return Ok(vec![Effect::Source(path)]),
             Command::Connect(link) => return self.connect(link),
             Command::Edit(None) => {

@@ -12,7 +12,6 @@ use ratatui::style::{Color, Style};
 use super::{App, Effect, Wake, WakePurpose};
 use crate::doc::{Layout, PictureRow};
 use crate::graphics::{self, Graphics, HalfBlock, HalfBlockFrame};
-use crate::hl::Group;
 
 /// The narrowest picture that says, while it is not drawn, that it is loading or unavailable.
 const STATUS_COLS: u16 = 12;
@@ -188,7 +187,7 @@ impl Pictures {
                     area.y,
                     text,
                     usize::from(area.width),
-                    theme.style(Group::Time),
+                    theme.style(crate::hl::TIME),
                 );
             }
             _ => {}

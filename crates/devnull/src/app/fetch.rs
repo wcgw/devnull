@@ -339,7 +339,7 @@ impl App {
         if let Kind::Feed(feed) = &buffer.kind
             && !feed.has_content()
         {
-            buffer.doc = notice(&format!("Loading {}…", buffer.name), Group::Time);
+            buffer.doc = notice(&format!("Loading {}…", buffer.name), crate::hl::TIME);
         }
         requests.into_iter().map(Effect::Fetch).collect()
     }
@@ -526,12 +526,12 @@ impl App {
                 let buffer = &mut self.buffers[index];
                 let text = format!("Cannot load {}: {reason}", buffer.name);
                 if matches!(&buffer.kind, Kind::Feed(feed) if !feed.has_content()) {
-                    buffer.doc = notice(&text, Group::ErrorMsg);
+                    buffer.doc = notice(&text, Group::ERROR_MSG);
                 } else if buffer.doc.contains(NOTICE) {
                     // Such as "Loading…" above replies that arrived when their commit did not.
                     let _ = buffer
                         .doc
-                        .replace(NOTICE, notice_lines(&text, Group::ErrorMsg));
+                        .replace(NOTICE, notice_lines(&text, Group::ERROR_MSG));
                 }
                 self.error(text);
                 Vec::new()

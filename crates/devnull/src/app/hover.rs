@@ -44,11 +44,14 @@ fn link_card(card: &LinkCard) -> Vec<Line> {
     if !card.title.is_empty() {
         lines.push(Line::Text(vec![Span::new(
             card.title.clone(),
-            Group::Author,
+            crate::hl::AUTHOR,
         )]));
     }
     if !card.site.is_empty() {
-        lines.push(Line::Text(vec![Span::new(card.site.clone(), Group::Time)]));
+        lines.push(Line::Text(vec![Span::new(
+            card.site.clone(),
+            crate::hl::TIME,
+        )]));
     }
     lines.extend(
         card.description
@@ -62,7 +65,7 @@ fn link_card(card: &LinkCard) -> Vec<Line> {
 
 fn link(url: &str) -> Line {
     Line::Text(vec![
-        Span::new(url, Group::Link).with_target(Target::Url(url.to_owned())),
+        Span::new(url, crate::hl::LINK).with_target(Target::Url(url.to_owned())),
     ])
 }
 
@@ -98,7 +101,7 @@ impl App {
             _ => return Err("E349: No identifier under cursor".to_owned()),
         };
         self.hover = Some(Hover {
-            doc: notice(&format!("Loading @{}…", account.handle), Group::Time),
+            doc: notice(&format!("Loading @{}…", account.handle), crate::hl::TIME),
             waiting: Some(account.handle.clone()),
         });
         Ok(vec![Effect::Fetch(Request::Profile {
@@ -186,8 +189,8 @@ impl App {
         let x = cursor.x.min(width.saturating_sub(card_width));
         let area = Rect::new(x, y, card_width, card_height);
         let block = Block::bordered()
-            .border_style(self.theme.style(Group::FloatBorder))
-            .style(self.theme.style(Group::NormalFloat));
+            .border_style(self.theme.style(Group::FLOAT_BORDER))
+            .style(self.theme.style(Group::NORMAL_FLOAT));
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
@@ -198,8 +201,8 @@ impl App {
                         .segments(row)
                         .map(|(text, group)| {
                             // Plain text takes the card's colours, not the window's.
-                            let group = if group == Group::Normal {
-                                Group::NormalFloat
+                            let group = if group == Group::NORMAL {
+                                Group::NORMAL_FLOAT
                             } else {
                                 group
                             };

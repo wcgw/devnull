@@ -412,7 +412,7 @@ fn pending_keys_show_at_the_right_of_the_command_line() {
 
 /// The background a cell of plain text gets: the theme's, else the terminal's own.
 fn plain_bg(app: &App) -> Option<Color> {
-    app.style(crate::hl::Group::Normal)
+    app.style(crate::hl::Group::NORMAL)
         .bg
         .or(Some(Color::Reset))
 }
@@ -446,7 +446,7 @@ fn the_selection_is_highlighted() {
     // A cell is highlighted when patching it with the Visual style changes nothing.
     let highlighted = |x| {
         let style = style_at(&app, x, 1);
-        style.patch(app.style(Group::Visual)) == style
+        style.patch(app.style(Group::VISUAL)) == style
     };
     assert!(highlighted(0));
     assert!(highlighted(1));
@@ -1089,8 +1089,8 @@ fn the_matches_show_in_a_menu_above_the_command_line_the_chosen_one_marked() {
         )
         .bg
     };
-    assert_eq!(cell(moon), app.style(Group::PmenuSel).bg);
-    assert_eq!(cell(day), app.style(Group::Pmenu).bg);
+    assert_eq!(cell(moon), app.style(Group::PMENU_SEL).bg);
+    assert_eq!(cell(day), app.style(Group::PMENU).bg);
     let _ = press(&mut app, "x");
     assert!(
         !screen(&app)
@@ -1106,10 +1106,10 @@ fn colorscheme_shows_and_switches_the_colorscheme() {
     let mut app = app_with(&["one"], 40, 6);
 
     let _ = press(&mut app, ":colorscheme<CR>");
-    assert_eq!(cmdline(&app), "tokyonight-night");
-    let night = style_at(&app, 0, 1).fg;
+    assert_eq!(cmdline(&app), "tokyonight-moon");
+    let moon = style_at(&app, 0, 1).fg;
     let _ = press(&mut app, ":colo tokyonight-day<CR>");
-    assert_ne!(style_at(&app, 0, 1).fg, night);
+    assert_ne!(style_at(&app, 0, 1).fg, moon);
     let _ = press(&mut app, ":colo nope<CR>");
     assert_eq!(cmdline(&app), "E185: Cannot find color scheme 'nope'");
 }
@@ -1123,7 +1123,7 @@ fn hi_restyles_a_group_on_screen_and_hi_clear_restores_it() {
     assert_eq!(style_at(&app, 10, 1).bg, Some(Color::Rgb(0, 0, 0)));
     let _ = press(&mut app, ":hi Normal<CR>");
     assert!(
-        cmdline(&app).starts_with("Normal         xxx guifg=#c0caf5 guibg=#000000"),
+        cmdline(&app).starts_with("Normal         xxx guifg=#c8d3f5 guibg=#000000"),
         "{:?}",
         cmdline(&app)
     );
@@ -1139,8 +1139,8 @@ fn the_statusline_mode_has_its_own_colours() {
     let _ = press(&mut app, "v");
     let visual = style_at(&app, 1, 4);
 
-    assert_eq!(normal.bg, app.style(Group::StatusLineModeNormal).bg);
-    assert_eq!(visual.bg, app.style(Group::StatusLineModeVisual).bg);
+    assert_eq!(normal.bg, app.style(Group::STATUS_LINE_MODE_NORMAL).bg);
+    assert_eq!(visual.bg, app.style(Group::STATUS_LINE_MODE_VISUAL).bg);
 }
 
 #[test]
@@ -3857,7 +3857,7 @@ fn a_commit_published_as_someone_else_than_asked_says_so() {
     let (_, height) = app.size();
     assert_eq!(
         style_at(&app, 0, height - 1).fg,
-        app.style(Group::ErrorMsg).fg,
+        app.style(Group::ERROR_MSG).fg,
         "said as an error"
     );
 }
@@ -4652,35 +4652,34 @@ fn star_without_a_keyword_ahead_searches_the_non_blank_word_under_the_cursor() {
 fn hi_link_draws_a_group_as_another_until_it_is_unlinked_or_restyled() {
     use crate::hl::Group;
     let mut app = app_with(&["one"], 40, 6);
-    let own = app.style(Group::Handle);
+    let own = app.style(crate::hl::HANDLE);
 
     let _ = press(&mut app, ":hi link DevnullHandle ErrorMsg<CR>");
-    assert_eq!(app.style(Group::Handle), app.style(Group::ErrorMsg));
+    assert_eq!(app.style(crate::hl::HANDLE), app.style(Group::ERROR_MSG));
     let _ = press(&mut app, ":hi DevnullHandle<CR>");
     assert_eq!(cmdline(&app), "DevnullHandle  xxx links to ErrorMsg");
 
     let _ = press(&mut app, ":hi link DevnullHandle NONE<CR>");
-    assert_eq!(app.style(Group::Handle), own);
+    assert_eq!(app.style(crate::hl::HANDLE), own);
 
     let _ = press(
         &mut app,
         ":hi link DevnullHandle ErrorMsg<CR>:hi DevnullHandle gui=bold<CR>",
     );
     assert_ne!(
-        app.style(Group::Handle),
-        app.style(Group::ErrorMsg),
+        app.style(crate::hl::HANDLE),
+        app.style(Group::ERROR_MSG),
         "restyling a linked group unlinks it"
     );
 
     let _ = press(&mut app, ":hi link DevnullHash ErrorMsg<CR>:hi clear<CR>");
-    assert_ne!(app.style(Group::Hash), app.style(Group::ErrorMsg));
+    assert_ne!(app.style(crate::hl::HASH), app.style(Group::ERROR_MSG));
     let _ = press(&mut app, ":hi link Nope ErrorMsg<CR>");
     assert_eq!(cmdline(&app), "E411: Highlight group not found: Nope");
 }
 
 #[test]
 fn groups_linked_in_a_loop_still_draw() {
-    use crate::hl::Group;
     let mut app = app_with(&["one"], 40, 6);
 
     let _ = press(
@@ -4688,7 +4687,7 @@ fn groups_linked_in_a_loop_still_draw() {
         ":hi link DevnullHash DevnullHandle<CR>:hi link DevnullHandle DevnullHash<CR>",
     );
 
-    let _ = app.style(Group::Hash);
+    let _ = app.style(crate::hl::HASH);
     let _ = screen(&app);
 }
 
@@ -4701,17 +4700,17 @@ fn hlsearch_shows_the_last_search_s_matches_and_noh_hides_them_until_the_next() 
 
     assert_eq!(
         style_at(&app, 4, 1).bg,
-        app.style(Group::CurSearch).bg,
+        app.style(Group::CUR_SEARCH).bg,
         "under the cursor"
     );
-    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Search).bg);
+    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::SEARCH).bg);
     assert_eq!(style_at(&app, 0, 2).bg, plain_bg(&app));
     let _ = press(&mut app, ":noh<CR>");
     assert_eq!(style_at(&app, 4, 2).bg, plain_bg(&app));
     let _ = press(&mut app, "n");
     assert_eq!(
         style_at(&app, 4, 1).bg,
-        app.style(Group::Search).bg,
+        app.style(Group::SEARCH).bg,
         "back, the cursor on the other match"
     );
     let _ = press(&mut app, ":set nohls<CR>");
@@ -4735,7 +4734,7 @@ fn incsearch_shows_where_a_search_being_typed_goes_and_escape_goes_back() {
         .expect("scrolled to the match");
     assert_eq!(
         style_at(&app, 2, at as u16).bg,
-        app.style(Group::IncSearch).bg
+        app.style(Group::INC_SEARCH).bg
     );
     let _ = press(&mut app, "<Esc>");
     assert!(shows(&app, "line 1"), "back where it was");
@@ -4753,7 +4752,7 @@ fn a_match_is_highlighted_whole_and_on_the_rows_it_wraps_to_only() {
     assert_eq!(style_at(&app, 5, 1).bg, plain_bg(&app));
     assert_eq!(
         style_at(&app, 3, 2).bg,
-        app.style(Group::CurSearch).bg,
+        app.style(Group::CUR_SEARCH).bg,
         "the whole match"
     );
 }
@@ -4770,7 +4769,7 @@ fn star_shows_the_matches_again_after_noh_and_noincsearch_keeps_the_view() {
     assert!(shows(&app, "line 1") && !shows(&app, "a needle here"));
 
     let _ = press(&mut app, "<Esc>/line<CR>:noh<CR>*");
-    assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::Search).bg);
+    assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::SEARCH).bg);
 }
 
 #[test]
@@ -4793,7 +4792,7 @@ fn the_buffer_picker_shows_which_letters_matched() {
             u16::try_from(y).expect("y"),
         )
     };
-    let matched = app.style(Group::PmenuMatch).fg;
+    let matched = app.style(Group::PMENU_MATCH).fg;
     // l, g, the f of "following", then its l.
     assert_eq!([0, 2, 4, 6].map(|dx| style(dx).fg), [matched; 4]);
     assert_ne!(style(1).fg, matched);

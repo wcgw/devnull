@@ -65,9 +65,9 @@ pub enum Line {
 }
 
 impl Line {
-    /// A line of plain text in [`Group::Normal`], with no target.
+    /// A line of plain text in [`Group::NORMAL`], with no target.
     pub fn text(text: impl Into<String>) -> Self {
-        Self::Text(vec![Span::new(text, Group::Normal)])
+        Self::Text(vec![Span::new(text, Group::NORMAL)])
     }
 }
 
@@ -153,7 +153,7 @@ impl Span {
     pub fn picture(source: impl Into<String>, cols: u16) -> Self {
         Self {
             picture: Some(source.into()),
-            ..Self::new("\u{2800}".repeat(usize::from(cols)), Group::Normal)
+            ..Self::new("\u{2800}".repeat(usize::from(cols)), Group::NORMAL)
         }
     }
 
