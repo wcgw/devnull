@@ -119,7 +119,7 @@ impl Dn {
             .unwrap_or_default();
         let text = template(&body, &composing);
         self.composing = Some(composing);
-        Ok(vec![Effect::Edit { text }])
+        Ok(vec![Effect::Edit(wcgw_kit::Edit::new(text))])
     }
 
     /// The editor closed, with what it saved or why there is nothing: an empty draft aborts, others are kept, counted
@@ -209,7 +209,7 @@ impl Dn {
             'e' => {
                 let text = template(&draft.body, &composing);
                 self.composing = Some(composing);
-                vec![Effect::Edit { text }]
+                vec![Effect::Edit(wcgw_kit::Edit::new(text))]
             }
             _ => {
                 kit.info("Kept as a draft");

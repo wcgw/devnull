@@ -157,7 +157,7 @@ impl From<super::Effect> for Effect {
                 kitty,
             },
             K::Graphics(sent) => Self::Graphics(sent),
-            K::Edit { text } => Self::Edit { text },
+            K::Edit(edit) => Self::Edit { text: edit.text },
             K::OpenUrl(url) => Self::OpenUrl(url),
             K::Wake { after, token } => Self::Wake {
                 after,
@@ -183,6 +183,7 @@ impl From<super::Effect> for Effect {
             },
             K::After { msg, .. } => panic!("dn sends nothing else later: {msg:?}"),
             K::CaptureMouse(on) => panic!("dn leaves the mouse alone, yet asked for {on}"),
+            K::Shell(shell) => panic!("dn runs no shell commands, yet asked for {shell:?}"),
             K::Notify { title, .. } => panic!("dn notifies nothing, yet asked to say {title}"),
             K::App(Io::Connect) => Self::Connect,
             K::App(Io::Unlock(passphrase)) => Self::Unlock(passphrase),
