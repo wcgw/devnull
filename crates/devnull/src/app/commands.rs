@@ -59,7 +59,7 @@ pub(super) fn add(kit: &mut Kit) {
             dn.compose(kit, Answering::Quote(String::new()), author(line.args)?)
         })
         .help("quote the commit"),
-        Command::<Dn>::new("delete", 1, |dn, kit, _| dn.delete(kit)).help("delete your own commit"),
+        Command::<Dn>::new("delete", 3, |dn, kit, _| dn.delete(kit)).help("delete your own commit"),
         Command::<Dn>::new("follow", 3, |dn, kit, line| {
             dn.follow(kit, handle(line.args), true)
         })

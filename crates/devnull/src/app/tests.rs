@@ -3812,6 +3812,16 @@ fn following_someone_whose_profile_is_open_refreshes_it() {
 }
 
 #[test]
+fn delete_takes_three_letters_as_in_muttrs() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let _ = press(&mut app, ":d<CR>");
+    assert_eq!(cmdline(&app), "E492: Not an editor command: d");
+    let _ = press(&mut app, ":del<CR>");
+    assert_eq!(cmdline(&app), "Delete commit c1? (y/n)");
+}
+
+#[test]
 fn dd_deletes_your_own_commit_once_confirmed() {
     let mut app = with_log(Log::Following, page_of(1, 2, None));
 
