@@ -1,17 +1,275 @@
 //! The app's behaviour, observed the way a user does: keys in, screen out.
+//!
+//! The tests drive `dn` in the kit through a facade with the shape `dn`'s app had before the kit: one message and
+//! one effect type for both, so they read as they did.
 
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
+use std::time::Duration;
+use wcgw_kit::app::{Wake as KitWake, WakePurpose as KitPurpose};
+use wcgw_kit::shell::{Completions, Prepared};
+use wcgw_kit::testing::Harness;
 
 use super::*;
 use devnull_api::model::AccountKind;
 use devnull_api::model::{Commit, Cursor, Page};
-use devnull_api::{Category, Log, OrganizationTab, People};
+use devnull_api::{Answering, Category, Log, OrganizationTab, People};
 
 use crate::doc::{Content, Document, Fold, Line};
 use crate::hl::Group;
 use crate::key::{Key, parse_keys};
+
+/// What a wake-up is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WakePurpose {
+    KeyTimeout,
+    WhichKey,
+    Poll,
+    Search,
+    Frame,
+}
+
+/// A wake-up: the kit's, or `dn`'s poll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Wake {
+    purpose: WakePurpose,
+    token: Token,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Token {
+    Kit(KitWake),
+    Poll(u64),
+}
+
+/// The kit's messages and `dn`'s, as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Msg {
+    Key(Key),
+    Paste(String),
+    Edited(Result<String, String>),
+    Picture {
+        source: String,
+        cols: u16,
+        rows: u16,
+        result: Result<Prepared, String>,
+    },
+    FocusGained,
+    FocusLost,
+    Wake(Wake),
+    Net(NetEvent),
+    Fetched {
+        fetched: Fetched,
+        now: u64,
+    },
+    Sourced {
+        path: String,
+        contents: Result<String, String>,
+    },
+    Resize {
+        width: u16,
+        height: u16,
+    },
+}
+
+/// The kit's effects and `dn`'s, as one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Effect {
+    Quit,
+    Copy(String),
+    Source(String),
+    Connect,
+    Unlock(String),
+    Enroll,
+    EnrollPasted(String),
+    AcceptTerms(String),
+    Picture {
+        source: String,
+        cols: u16,
+        rows: u16,
+        kitty: Option<u32>,
+    },
+    Graphics(String),
+    Edit {
+        text: String,
+    },
+    OpenUrl(String),
+    Fetch(Request),
+    Wake {
+        after: std::time::Duration,
+        token: Wake,
+    },
+}
+
+impl From<Msg> for wcgw_kit::Msg<super::Msg> {
+    fn from(msg: Msg) -> Self {
+        use wcgw_kit::Msg as K;
+        match msg {
+            Msg::Key(key) => K::Key(key),
+            Msg::Paste(text) => K::Paste(text),
+            Msg::Edited(saved) => K::Edited(saved),
+            Msg::Picture {
+                source,
+                cols,
+                rows,
+                result,
+            } => K::Picture {
+                source,
+                cols,
+                rows,
+                result,
+            },
+            Msg::FocusGained => K::FocusGained,
+            Msg::FocusLost => K::FocusLost,
+            Msg::Wake(Wake {
+                token: Token::Kit(token),
+                ..
+            }) => K::Wake(token),
+            Msg::Wake(Wake {
+                token: Token::Poll(generation),
+                ..
+            }) => K::App(super::Msg::Poll { generation }),
+            Msg::Net(event) => K::App(super::Msg::Net(event)),
+            Msg::Fetched { fetched, now } => K::App(super::Msg::Fetched { fetched, now }),
+            Msg::Sourced { path, contents } => K::Sourced { path, contents },
+            Msg::Resize { width, height } => K::Resize { width, height },
+        }
+    }
+}
+
+impl From<super::Effect> for Effect {
+    fn from(effect: super::Effect) -> Self {
+        use wcgw_kit::Effect as K;
+        match effect {
+            K::Quit => Self::Quit,
+            K::Copy(text) => Self::Copy(text),
+            K::Source(path) => Self::Source(path),
+            K::Picture {
+                source,
+                cols,
+                rows,
+                kitty,
+            } => Self::Picture {
+                source,
+                cols,
+                rows,
+                kitty,
+            },
+            K::Graphics(sent) => Self::Graphics(sent),
+            K::Edit(edit) => Self::Edit { text: edit.text },
+            K::OpenUrl(url) => Self::OpenUrl(url),
+            K::Wake { after, token } => Self::Wake {
+                after,
+                token: Wake {
+                    purpose: match token.purpose() {
+                        KitPurpose::KeyTimeout => WakePurpose::KeyTimeout,
+                        KitPurpose::WhichKey => WakePurpose::WhichKey,
+                        KitPurpose::Search => WakePurpose::Search,
+                        _ => WakePurpose::Frame,
+                    },
+                    token: Token::Kit(token),
+                },
+            },
+            K::After {
+                after,
+                msg: super::Msg::Poll { generation },
+            } => Self::Wake {
+                after,
+                token: Wake {
+                    purpose: WakePurpose::Poll,
+                    token: Token::Poll(generation),
+                },
+            },
+            K::After { msg, .. } => panic!("dn sends nothing else later: {msg:?}"),
+            K::CaptureMouse(on) => panic!("dn leaves the mouse alone, yet asked for {on}"),
+            K::Shell(shell) => panic!("dn runs no shell commands, yet asked for {shell:?}"),
+            K::Notify { title, .. } => panic!("dn notifies nothing, yet asked to say {title}"),
+            K::App(Io::Connect) => Self::Connect,
+            K::App(Io::Unlock(passphrase)) => Self::Unlock(passphrase),
+            K::App(Io::Enroll) => Self::Enroll,
+            K::App(Io::EnrollPasted(link)) => Self::EnrollPasted(link),
+            K::App(Io::AcceptTerms(version)) => Self::AcceptTerms(version),
+            K::App(Io::Fetch(request)) => Self::Fetch(request),
+        }
+    }
+}
+
+/// A picture prepared for the kitty protocol as `escapes`, sent in band.
+fn kitty_sent(escapes: impl Into<String>) -> Prepared {
+    Prepared::Kitty {
+        escapes: escapes.into(),
+        staged: None,
+        bytes: 0,
+    }
+}
+
+/// `dn` in the kit, driven as the app was.
+#[derive(Debug)]
+struct App(Harness<Dn>);
+
+impl App {
+    /// A fresh session, connecting.
+    fn new() -> Self {
+        let (dn, kit) = Dn::session();
+        Self(Harness::new(dn, kit, 80, 24))
+    }
+
+    /// A fresh session showing `doc` as a buffer called `name`.
+    fn with_buffer(name: &str, doc: Document) -> Self {
+        Self(Harness::new(Dn::new(), Dn::kit(name, doc, true), 80, 24))
+    }
+
+    fn update(&mut self, msg: Msg) -> Vec<Effect> {
+        self.0
+            .update(msg.into())
+            .into_iter()
+            .map(Effect::from)
+            .collect()
+    }
+
+    fn start(&mut self) -> Vec<Effect> {
+        let Harness { app, kit, .. } = &mut self.0;
+        kit.start(app).into_iter().map(Effect::from).collect()
+    }
+
+    fn render(&self, frame: &mut ratatui::Frame<'_>) {
+        self.0.kit.render(&self.0.app, frame);
+    }
+
+    fn size(&self) -> (u16, u16) {
+        self.0.kit.size()
+    }
+
+    fn is_focused(&self) -> bool {
+        self.0.kit.is_focused()
+    }
+
+    fn style(&self, group: Group) -> ratatui::style::Style {
+        self.0.kit.style(group)
+    }
+
+    fn doc_mut(&mut self) -> &mut Document {
+        self.0.kit.current_doc_mut()
+    }
+
+    fn set_graphics(&mut self, graphics: wcgw_kit::gfx::Graphics) -> Vec<Effect> {
+        self.0
+            .kit
+            .set_graphics(graphics)
+            .into_iter()
+            .map(Effect::from)
+            .collect()
+    }
+
+    fn set_cell_size(&mut self, width: u16, height: u16) {
+        self.0.kit.set_cell_size(width, height);
+    }
+
+    fn ex_completions(&self, line: &str) -> Completions {
+        self.0.kit.ex_completions(&self.0.app, line)
+    }
+}
 
 /// An app showing one buffer of `lines`, in a `width` × `height` terminal.
 fn app_with(lines: &[&str], width: u16, height: u16) -> App {
@@ -235,7 +493,7 @@ fn the_screen_has_a_bufferline_a_statusline_and_a_command_line() {
 one two
 three
 ~
- NORMAL  test        2,5  All
+ NORMAL  test      All  2:5
 ");
 }
 
@@ -402,17 +660,19 @@ fn ignorecase_and_smartcase_apply_to_searches() {
 }
 
 #[test]
-fn pending_keys_show_at_the_right_of_the_command_line() {
+fn pending_keys_show_at_the_right_of_the_command_line_with_showcmd() {
     let mut app = app_with(&["one"], 30, 6);
 
     let _ = press(&mut app, "3g");
+    assert_eq!(cmdline(&app), "", "noshowcmd by default, as the kit's");
+    let _ = press(&mut app, "<Esc>:set showcmd<CR>3g");
 
     assert!(cmdline(&app).ends_with("3g"), "{:?}", cmdline(&app));
 }
 
 /// The background a cell of plain text gets: the theme's, else the terminal's own.
 fn plain_bg(app: &App) -> Option<Color> {
-    app.style(crate::hl::Group::Normal)
+    app.style(crate::hl::Group::NORMAL)
         .bg
         .or(Some(Color::Reset))
 }
@@ -446,7 +706,7 @@ fn the_selection_is_highlighted() {
     // A cell is highlighted when patching it with the Visual style changes nothing.
     let highlighted = |x| {
         let style = style_at(&app, x, 1);
-        style.patch(app.style(Group::Visual)) == style
+        style.patch(app.style(Group::VISUAL)) == style
     };
     assert!(highlighted(0));
     assert!(highlighted(1));
@@ -727,6 +987,8 @@ fn which_key_marks_groups_of_further_keys() {
 #[test]
 fn split_stacks_two_windows_on_the_same_buffer_with_their_own_cursors() {
     let mut app = app_with(&["one", "two", "three"], 30, 12);
+    // A statusline each, as Vim's default has it; see the next test for the kit's.
+    let _ = press(&mut app, ":set laststatus=2<CR>");
 
     let _ = press(&mut app, ":sp<CR>");
     let rows = screen(&app).rows;
@@ -749,6 +1011,29 @@ fn split_stacks_two_windows_on_the_same_buffer_with_their_own_cursors() {
 }
 
 #[test]
+fn with_one_statusline_for_all_a_line_separates_stacked_windows() {
+    let mut app = app_with(&["one", "two", "three"], 30, 12);
+
+    let _ = press(&mut app, ":sp<CR>");
+
+    let rows = screen(&app).rows;
+    assert_eq!(rows[1..4], ["one", "two", "three"]);
+    assert_eq!(rows[5], "─".repeat(30), "{rows:#?}");
+    assert_eq!(rows[6..9], ["one", "two", "three"]);
+    assert!(
+        rows[10].contains("NORMAL") && rows[10].contains("test"),
+        "{rows:#?}"
+    );
+    assert_eq!(statuslines(&app), 1);
+    let _ = press(&mut app, "jj<C-w>j");
+    assert_eq!(screen(&app).cursor, (0, 6));
+    assert!(
+        screen(&app).rows[10].contains("1:1"),
+        "the current window's"
+    );
+}
+
+#[test]
 fn vsplit_puts_windows_side_by_side_with_a_separator() {
     let mut app = app_with(&["one", "two"], 21, 8);
 
@@ -765,13 +1050,15 @@ fn vsplit_puts_windows_side_by_side_with_a_separator() {
 #[test]
 fn side_by_side_statuslines_meet_under_the_separator_as_in_vim() {
     let mut app = app_with(&["one", "two"], 21, 8);
+    let _ = press(&mut app, ":set laststatus=2<CR>");
     let status = |app: &App, x: u16| (style_at(app, x, 6).fg, style_at(app, x, 6).bg);
 
     let _ = press(&mut app, "<C-w>v");
     assert_eq!(screen(&app).rows[6].chars().nth(10), Some(' '));
+    let line = app.style(Group::STATUS_LINE);
     assert_eq!(
         status(&app, 10),
-        status(&app, 9),
+        (line.fg, line.bg),
         "the current window's statusline, on the left, goes on"
     );
     let _ = press(&mut app, "<C-w>l");
@@ -802,6 +1089,7 @@ fn cursor_line(app: &App) -> String {
 #[test]
 fn help_lists_the_key_bindings_in_a_window_above() {
     let mut app = app_with(&["one"], 80, 30);
+    let _ = press(&mut app, ":set laststatus=2<CR>");
 
     let _ = press(&mut app, ":help<CR>");
 
@@ -888,6 +1176,7 @@ fn close_and_only_remove_windows_but_never_the_last() {
 #[test]
 fn q_closes_a_window_and_quits_only_with_the_last() {
     let mut app = app_with(&["one"], 60, 12);
+    let _ = press(&mut app, ":set laststatus=2<CR>");
     let _ = press(&mut app, ":vs<CR>");
     assert_eq!(statuslines(&app), 2);
 
@@ -901,7 +1190,7 @@ fn statuslines(app: &App) -> usize {
     screen(app)
         .rows
         .iter()
-        .map(|row| row.matches("1,1").count())
+        .map(|row| row.matches("1:1").count())
         .sum()
 }
 
@@ -990,10 +1279,19 @@ fn tab_completes_the_arguments_each_command_takes() {
     assert_eq!(completed(&app, "set gr"), ["graphics"]);
     assert_eq!(
         completed(&app, "set no"),
-        ["nohlsearch", "noignorecase", "noincsearch", "nosmartcase"],
+        [
+            "nohlsearch",
+            "noignorecase",
+            "noincsearch",
+            "noshowcmd",
+            "nosmartcase"
+        ],
         "the flags that turn off"
     );
-    assert_eq!(completed(&app, "se hls graphics="), ["halfblocks", "kitty"]);
+    assert_eq!(
+        completed(&app, "se hls graphics="),
+        ["halfblocks", "kitty", "off"]
+    );
     assert_eq!(app.ex_completions("set graphics=k").start, 13);
     assert_eq!(
         completed(&app, "colo tokyonight-"),
@@ -1089,8 +1387,8 @@ fn the_matches_show_in_a_menu_above_the_command_line_the_chosen_one_marked() {
         )
         .bg
     };
-    assert_eq!(cell(moon), app.style(Group::PmenuSel).bg);
-    assert_eq!(cell(day), app.style(Group::Pmenu).bg);
+    assert_eq!(cell(moon), app.style(Group::PMENU_SEL).bg);
+    assert_eq!(cell(day), app.style(Group::PMENU).bg);
     let _ = press(&mut app, "x");
     assert!(
         !screen(&app)
@@ -1106,10 +1404,10 @@ fn colorscheme_shows_and_switches_the_colorscheme() {
     let mut app = app_with(&["one"], 40, 6);
 
     let _ = press(&mut app, ":colorscheme<CR>");
-    assert_eq!(cmdline(&app), "tokyonight-night");
-    let night = style_at(&app, 0, 1).fg;
+    assert_eq!(cmdline(&app), "tokyonight-moon");
+    let moon = style_at(&app, 0, 1).fg;
     let _ = press(&mut app, ":colo tokyonight-day<CR>");
-    assert_ne!(style_at(&app, 0, 1).fg, night);
+    assert_ne!(style_at(&app, 0, 1).fg, moon);
     let _ = press(&mut app, ":colo nope<CR>");
     assert_eq!(cmdline(&app), "E185: Cannot find color scheme 'nope'");
 }
@@ -1123,7 +1421,7 @@ fn hi_restyles_a_group_on_screen_and_hi_clear_restores_it() {
     assert_eq!(style_at(&app, 10, 1).bg, Some(Color::Rgb(0, 0, 0)));
     let _ = press(&mut app, ":hi Normal<CR>");
     assert!(
-        cmdline(&app).starts_with("Normal         xxx guifg=#c0caf5 guibg=#000000"),
+        cmdline(&app).starts_with("Normal         xxx guifg=#c8d3f5 guibg=#000000"),
         "{:?}",
         cmdline(&app)
     );
@@ -1139,8 +1437,8 @@ fn the_statusline_mode_has_its_own_colours() {
     let _ = press(&mut app, "v");
     let visual = style_at(&app, 1, 4);
 
-    assert_eq!(normal.bg, app.style(Group::StatusLineModeNormal).bg);
-    assert_eq!(visual.bg, app.style(Group::StatusLineModeVisual).bg);
+    assert_eq!(normal.bg, app.style(Group::STATUS_LINE_MODE_NORMAL).bg);
+    assert_eq!(visual.bg, app.style(Group::STATUS_LINE_MODE_VISUAL).bg);
 }
 
 #[test]
@@ -2541,7 +2839,31 @@ fn one_commit(text: &str, extra: serde_json::Value) -> Page<Commit> {
 }
 
 #[test]
-fn gx_opens_the_link_under_the_cursor_and_nothing_else() {
+fn a_commit_is_laid_out_no_wider_than_textwidth_however_wide_the_window() {
+    let mut app = with_log(
+        Log::Following,
+        one_commit(&"words ".repeat(60), serde_json::json!({})),
+    );
+    let _ = app.update(Msg::Resize {
+        width: 200,
+        height: 20,
+    });
+
+    let widest = screen(&app)
+        .rows
+        .iter()
+        .filter(|row| row.contains("words"))
+        .map(|row| unicode_width::UnicodeWidthStr::width(row.trim_end()))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        (101..=120).contains(&widest),
+        "as wide as 'textwidth', 120, in a window of 200: {widest}"
+    );
+}
+
+#[test]
+fn gx_opens_the_link_under_the_cursor_else_the_commit_s_only_one() {
     let mut app = with_log(
         Log::Following,
         one_commit("see https://example.org/x", serde_json::json!({})),
@@ -2551,8 +2873,39 @@ fn gx_opens_the_link_under_the_cursor_and_nothing_else() {
         without_wakes(press(&mut app, "j$gx")),
         [Effect::OpenUrl("https://example.org/x".into())]
     );
-    assert_eq!(without_wakes(press(&mut app, "0gx")), []);
-    assert_eq!(cmdline(&app), "No link under the cursor");
+    assert_eq!(
+        without_wakes(press(&mut app, "0gx")),
+        [Effect::OpenUrl("https://example.org/x".into())],
+        "off it, the commit's only link, as in muttrs and slackers"
+    );
+
+    let mut app = with_log(Log::Following, one_commit("no link", serde_json::json!({})));
+    assert_eq!(without_wakes(press(&mut app, "jgx")), []);
+    assert_eq!(
+        cmdline(&app),
+        "No link under the cursor, nor in what holds it"
+    );
+}
+
+#[test]
+fn gx_off_a_link_lists_the_commit_s_to_open_or_yank() {
+    let mut app = with_log(
+        Log::Following,
+        one_commit(
+            "see https://example.org/x and https://example.org/y",
+            serde_json::json!({}),
+        ),
+    );
+
+    assert_eq!(without_wakes(press(&mut app, "j0gx")), []);
+    for text in ["Links", "https://example.org/x", "https://example.org/y"] {
+        assert!(shows(&app, text), "{text}: {:#?}", screen(&app).rows);
+    }
+    assert_eq!(
+        without_wakes(press(&mut app, "<C-y>")),
+        [Effect::Copy("https://example.org/x".into())]
+    );
+    assert!(!shows(&app, "Links"), "yanked, the list goes");
 }
 
 #[test]
@@ -2654,7 +3007,7 @@ fn k_on_a_mention_shows_the_account_s_card_until_the_next_key() {
 #[test]
 fn k_shows_the_account_s_avatar_in_its_card() {
     let mut app = with_log(Log::Following, mentioning_lin());
-    let _ = app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    let _ = app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
     let _ = press(&mut app, "j$K");
     let profile = serde_json::from_value(serde_json::json!({
         "data": { "id": "u2", "handle": "lin", "name": "Lin", "avatar_url": "https://example.org/lin.png",
@@ -2676,7 +3029,7 @@ fn k_shows_the_account_s_avatar_in_its_card() {
     else {
         panic!("the avatar asked for: {asked:?}");
     };
-    let red = crate::graphics::HalfBlock {
+    let red = wcgw_kit::gfx::HalfBlock {
         upper: Some((255, 0, 0)),
         lower: Some((255, 0, 0)),
     };
@@ -2736,6 +3089,11 @@ fn k_on_a_link_card_shows_it_whole() {
         without_wakes(press(&mut app, "gx")),
         [Effect::OpenUrl("https://example.org/post".into())],
         "a link card is a link"
+    );
+    assert_eq!(
+        without_wakes(press(&mut app, "gy")),
+        [Effect::Copy("https://example.org/post".into())],
+        "gy yanks what gx opens"
     );
     assert_eq!(
         press(&mut app, "<CR>"),
@@ -3034,7 +3392,7 @@ fn the_picker_moves_with_ctrl_n_and_ctrl_p_and_escape_leaves_it() {
 #[test]
 fn the_user_picker_searches_once_typing_pauses_and_opens_who_is_picked() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    let _ = press(&mut app, "<Space>/");
+    let _ = press(&mut app, "<Space>ff");
     assert!(shows(&app, "Type to find people and organizations"));
 
     let first = press(&mut app, "a");
@@ -3076,7 +3434,7 @@ fn the_user_picker_searches_once_typing_pauses_and_opens_who_is_picked() {
 #[test]
 fn answers_to_an_older_search_are_ignored() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    let _ = press(&mut app, "<Space>/ad");
+    let _ = press(&mut app, "<Space>ffad");
 
     let found = serde_json::from_value(
         serde_json::json!({ "users": [{ "id": "u1", "handle": "a", "name": "Old" }] }),
@@ -3487,6 +3845,16 @@ fn following_someone_whose_profile_is_open_refreshes_it() {
 }
 
 #[test]
+fn delete_takes_three_letters_as_in_muttrs() {
+    let mut app = with_log(Log::Following, page_of(1, 2, None));
+
+    let _ = press(&mut app, ":d<CR>");
+    assert_eq!(cmdline(&app), "E492: Not an editor command: d");
+    let _ = press(&mut app, ":del<CR>");
+    assert_eq!(cmdline(&app), "Delete commit c1? (y/n)");
+}
+
+#[test]
 fn dd_deletes_your_own_commit_once_confirmed() {
     let mut app = with_log(Log::Following, page_of(1, 2, None));
 
@@ -3857,7 +4225,7 @@ fn a_commit_published_as_someone_else_than_asked_says_so() {
     let (_, height) = app.size();
     assert_eq!(
         style_at(&app, 0, height - 1).fg,
-        app.style(Group::ErrorMsg).fg,
+        app.style(Group::ERROR_MSG).fg,
         "said as an error"
     );
 }
@@ -3991,7 +4359,7 @@ fn with_picture() -> Page<Commit> {
 
 /// A connected app on following, drawing pictures as `graphics` does, and the effects of `page` arriving: tall enough
 /// that the window has room for `with_picture`'s 48 × 12.
-fn pictured(graphics: crate::graphics::Graphics, page: Page<Commit>) -> (App, Vec<Effect>) {
+fn pictured(graphics: wcgw_kit::gfx::Graphics, page: Page<Commit>) -> (App, Vec<Effect>) {
     let mut app = with_log(Log::Following, page_of(1, 0, None));
     let _ = app.update(Msg::Resize {
         width: 60,
@@ -4026,8 +4394,8 @@ fn pictures(effects: &[Effect]) -> Vec<(String, u16, u16, Option<u32>)> {
 }
 
 /// A still picture of `cells`, drawn with half blocks.
-fn still(cells: Vec<Vec<crate::graphics::HalfBlock>>) -> Prepared {
-    Prepared::HalfBlocks(vec![crate::graphics::HalfBlockFrame {
+fn still(cells: Vec<Vec<wcgw_kit::gfx::HalfBlock>>) -> Prepared {
+    Prepared::HalfBlocks(vec![wcgw_kit::gfx::HalfBlockFrame {
         cells,
         delay: Duration::ZERO,
     }])
@@ -4035,7 +4403,7 @@ fn still(cells: Vec<Vec<crate::graphics::HalfBlock>>) -> Prepared {
 
 #[test]
 fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
-    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
 
     assert_eq!(
         pictures(&effects),
@@ -4049,7 +4417,7 @@ fn a_picture_in_view_is_asked_for_once_and_drawn_with_half_blocks() {
     assert_eq!(loading, 1, "said once, in its first row");
     assert_eq!(pictures(&press(&mut app, "j")), [], "asked for once");
 
-    let red = crate::graphics::HalfBlock {
+    let red = wcgw_kit::gfx::HalfBlock {
         upper: Some((255, 0, 0)),
         lower: Some((0, 0, 255)),
     };
@@ -4077,10 +4445,10 @@ fn animated(frames: &[((u8, u8, u8), u64)]) -> Prepared {
     Prepared::HalfBlocks(
         frames
             .iter()
-            .map(|&(colour, delay)| crate::graphics::HalfBlockFrame {
+            .map(|&(colour, delay)| wcgw_kit::gfx::HalfBlockFrame {
                 cells: vec![
                     vec![
-                        crate::graphics::HalfBlock {
+                        wcgw_kit::gfx::HalfBlock {
                             upper: Some(colour),
                             lower: Some(colour),
                         };
@@ -4124,7 +4492,7 @@ fn picture_arrives(app: &mut App, prepared: Prepared) -> Vec<Effect> {
 
 #[test]
 fn an_animation_drawn_with_half_blocks_moves_on_after_each_frame_s_delay() {
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let red = Some(Color::Rgb(255, 0, 0));
     let blue = Some(Color::Rgb(0, 0, 255));
 
@@ -4157,7 +4525,7 @@ fn animations_in_view_move_on_each_after_its_own_delay() {
             "author": { "id": "u", "handle": "ada", "name": "Ada", "avatar_url": "https://example.org/ada.png" },
         }),
     );
-    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, page);
     let asked = pictures(&effects);
     let Some((avatar, cols, rows, _)) = asked
         .iter()
@@ -4165,10 +4533,10 @@ fn animations_in_view_move_on_each_after_its_own_delay() {
     else {
         panic!("an avatar: {asked:?}");
     };
-    let frames = |colour, delay| crate::graphics::HalfBlockFrame {
+    let frames = |colour, delay| wcgw_kit::gfx::HalfBlockFrame {
         cells: vec![
             vec![
-                crate::graphics::HalfBlock {
+                wcgw_kit::gfx::HalfBlock {
                     upper: Some(colour),
                     lower: None
                 };
@@ -4208,7 +4576,7 @@ fn animations_in_view_move_on_each_after_its_own_delay() {
 
 #[test]
 fn an_animation_out_of_view_waits_until_it_is_back() {
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
     let [(_, token)] = frame_wakes(&effects)[..] else {
         panic!("one wake-up: {effects:?}");
@@ -4231,10 +4599,10 @@ fn an_animation_out_of_view_waits_until_it_is_back() {
 
 #[test]
 fn still_pictures_and_animations_the_terminal_runs_need_no_wake_ups() {
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50)]));
     assert_eq!(frame_wakes(&effects), [], "one frame");
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let still = animated(&[((255, 0, 0), 0), ((0, 0, 255), 0)]);
     assert_eq!(
         frame_wakes(&picture_arrives(&mut app, still)),
@@ -4242,7 +4610,7 @@ fn still_pictures_and_animations_the_terminal_runs_need_no_wake_ups() {
         "no time to move"
     );
 
-    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::Kitty, with_picture());
     let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
         panic!("one picture with an id: {effects:?}");
     };
@@ -4250,14 +4618,14 @@ fn still_pictures_and_animations_the_terminal_runs_need_no_wake_ups() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(format!("frames of {id}"))),
+        result: Ok(kitty_sent(format!("frames of {id}"))),
     });
     assert_eq!(frame_wakes(&effects), []);
 }
 
 #[test]
 fn a_wake_up_for_pictures_since_forgotten_is_ignored() {
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));
     let [(_, stale)] = frame_wakes(&effects)[..] else {
         panic!("one wake-up: {effects:?}");
@@ -4278,7 +4646,7 @@ fn a_wake_up_for_pictures_since_forgotten_is_ignored() {
 fn a_picture_taller_than_the_window_shrinks_to_fit_it() {
     // 60 × 12: nine rows of text area, so the 48 × 12 picture shrinks, keeping its shape.
     let mut app = with_log(Log::Following, page_of(1, 0, None));
-    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
 
     let effects = press(&mut app, ":e!<CR>");
     let effects = [
@@ -4326,7 +4694,7 @@ fn thread_with_picture(
 #[test]
 fn a_commit_s_own_buffer_shows_its_picture_at_its_own_size_or_as_large_as_the_window_allows() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
     let _ = app.update(Msg::Resize {
         width: 100,
         height: 30,
@@ -4338,7 +4706,7 @@ fn a_commit_s_own_buffer_shows_its_picture_at_its_own_size_or_as_large_as_the_wi
     );
 
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
     let _ = app.update(Msg::Resize {
         width: 60,
         height: 24,
@@ -4350,7 +4718,7 @@ fn a_commit_s_own_buffer_shows_its_picture_at_its_own_size_or_as_large_as_the_wi
     );
 
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
     app.set_cell_size(20, 40);
     let _ = app.update(Msg::Resize {
         width: 100,
@@ -4365,7 +4733,7 @@ fn a_commit_s_own_buffer_shows_its_picture_at_its_own_size_or_as_large_as_the_wi
 
 #[test]
 fn with_kitty_graphics_a_picture_is_sent_once_and_shown_by_placeholders() {
-    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::Kitty, with_picture());
     let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
         panic!("one picture with an id: {effects:?}");
     };
@@ -4374,13 +4742,13 @@ fn with_kitty_graphics_a_picture_is_sent_once_and_shown_by_placeholders() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty("<sent>".into())),
+        result: Ok(kitty_sent("<sent>")),
     });
 
     assert_eq!(effects, [Effect::Graphics("<sent>".into())]);
     let rows = screen(&app).rows;
     assert!(rows[3].starts_with('\u{10EEEE}'), "{rows:#?}");
-    let (r, g, b) = crate::graphics::image_colour(id);
+    let (r, g, b) = wcgw_kit::gfx::image_colour(id);
     assert_eq!(style_at(&app, 0, 3).fg, Some(Color::Rgb(r, g, b)));
 }
 
@@ -4391,7 +4759,7 @@ fn a_picture_out_of_view_is_asked_for_once_scrolled_to() {
     // Not c1: that one is in the page already.
     last.id = "c9".into();
     page.items.push(last);
-    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, page);
     assert_eq!(pictures(&effects), []);
 
     let effects = press(&mut app, "G");
@@ -4401,7 +4769,7 @@ fn a_picture_out_of_view_is_asked_for_once_scrolled_to() {
 
 #[test]
 fn a_picture_that_cannot_be_had_says_so_in_its_place() {
-    let (mut app, _) = pictured(crate::graphics::Graphics::HalfBlocks, with_picture());
+    let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
 
     let _ = app.update(Msg::Picture {
         source: "https://example.org/p.png".into(),
@@ -4415,7 +4783,7 @@ fn a_picture_that_cannot_be_had_says_so_in_its_place() {
 
 #[test]
 fn switching_graphics_frees_what_was_sent_and_draws_pictures_again() {
-    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::Kitty, with_picture());
     let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
         panic!("one picture: {effects:?}");
     };
@@ -4423,12 +4791,12 @@ fn switching_graphics_frees_what_was_sent_and_draws_pictures_again() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(String::new())),
+        result: Ok(kitty_sent(String::new())),
     });
 
     let effects = press(&mut app, ":set graphics=halfblocks<CR>");
 
-    assert!(effects.contains(&Effect::Graphics(crate::graphics::kitty_delete(id))));
+    assert!(effects.contains(&Effect::Graphics(wcgw_kit::gfx::kitty_delete(id))));
     assert_eq!(
         pictures(&effects),
         [("https://example.org/p.png".to_owned(), 48, 12, None)]
@@ -4439,7 +4807,7 @@ fn switching_graphics_frees_what_was_sent_and_draws_pictures_again() {
 
 #[test]
 fn quitting_frees_the_pictures_sent() {
-    let (mut app, effects) = pictured(crate::graphics::Graphics::Kitty, with_picture());
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::Kitty, with_picture());
     let [(_, cols, rows, Some(id))] = pictures(&effects)[..] else {
         panic!("one picture: {effects:?}");
     };
@@ -4447,7 +4815,7 @@ fn quitting_frees_the_pictures_sent() {
         source: "https://example.org/p.png".into(),
         cols,
         rows,
-        result: Ok(Prepared::Kitty(String::new())),
+        result: Ok(kitty_sent(String::new())),
     });
 
     let effects = press(&mut app, ":qa<CR>");
@@ -4455,7 +4823,7 @@ fn quitting_frees_the_pictures_sent() {
     assert_eq!(
         effects,
         [
-            Effect::Graphics(crate::graphics::kitty_delete(id)),
+            Effect::Graphics(wcgw_kit::gfx::kitty_delete(id)),
             Effect::Quit
         ]
     );
@@ -4470,7 +4838,7 @@ fn an_avatar_beside_a_name_is_asked_for_and_drawn_in_its_cells() {
         None,
     );
 
-    let (mut app, effects) = pictured(crate::graphics::Graphics::HalfBlocks, page);
+    let (mut app, effects) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, page);
 
     assert_eq!(
         pictures(&effects),
@@ -4480,7 +4848,7 @@ fn an_avatar_beside_a_name_is_asked_for_and_drawn_in_its_cells() {
         screen(&app).rows[1].contains(" Ada @ada"),
         "the name shows while the avatar loads"
     );
-    let face = crate::graphics::HalfBlock {
+    let face = wcgw_kit::gfx::HalfBlock {
         upper: Some((1, 2, 3)),
         lower: Some((4, 5, 6)),
     };
@@ -4505,7 +4873,7 @@ fn an_avatar_further_along_a_row_is_drawn_where_it_is() {
     .expect("notification");
     let (mut app, _) = starting();
     let _ = net(&mut app, NetEvent::Connected(me("ada", true)));
-    app.set_graphics(crate::graphics::Graphics::HalfBlocks);
+    app.set_graphics(wcgw_kit::gfx::Graphics::HalfBlocks);
     let _ = press(&mut app, "<Space>n");
     let inbox =
         devnull_api::model::Inbox::new(Page::new(vec![follow], None), "2026-11-12T15:13:40Z");
@@ -4518,7 +4886,7 @@ fn an_avatar_further_along_a_row_is_drawn_where_it_is() {
         },
     );
 
-    let face = crate::graphics::HalfBlock {
+    let face = wcgw_kit::gfx::HalfBlock {
         upper: Some((1, 2, 3)),
         lower: Some((4, 5, 6)),
     };
@@ -4608,7 +4976,7 @@ fn jumps_into_another_buffer_count_rows_with_the_folds_left_there() {
     let ruler = statusline(&app);
     let row = ruler
         .split_whitespace()
-        .find_map(|word| word.split_once(',').map(|(row, _)| row.to_owned()))
+        .find_map(|word| word.split_once(':').map(|(row, _)| row.to_owned()))
         .expect("a ruler");
 
     let _ = press(&mut app, ":e log/latest<CR>:ju<CR>");
@@ -4635,8 +5003,11 @@ fn a_narrow_statusline_keeps_the_ruler_and_shortens_the_name_from_the_left() {
         height: 12,
     });
 
-    // " NORMAL  log/following  @ada  1,1  All " is 39 cells: the handle goes, then the name's start.
-    assert_eq!(statusline(&app), " NORMAL  </following 1,1  All");
+    // " NORMAL  log/following  @ada  All  1:1 " is 41 cells: the handle goes, then the name's start.
+    assert_eq!(
+        statusline(&app),
+        " NORMAL \u{e0b4} <ollowing All \u{e0b6} 1:1"
+    );
 }
 
 #[test]
@@ -4652,35 +5023,34 @@ fn star_without_a_keyword_ahead_searches_the_non_blank_word_under_the_cursor() {
 fn hi_link_draws_a_group_as_another_until_it_is_unlinked_or_restyled() {
     use crate::hl::Group;
     let mut app = app_with(&["one"], 40, 6);
-    let own = app.style(Group::Handle);
+    let own = app.style(crate::hl::HANDLE);
 
     let _ = press(&mut app, ":hi link DevnullHandle ErrorMsg<CR>");
-    assert_eq!(app.style(Group::Handle), app.style(Group::ErrorMsg));
+    assert_eq!(app.style(crate::hl::HANDLE), app.style(Group::ERROR_MSG));
     let _ = press(&mut app, ":hi DevnullHandle<CR>");
     assert_eq!(cmdline(&app), "DevnullHandle  xxx links to ErrorMsg");
 
     let _ = press(&mut app, ":hi link DevnullHandle NONE<CR>");
-    assert_eq!(app.style(Group::Handle), own);
+    assert_eq!(app.style(crate::hl::HANDLE), own);
 
     let _ = press(
         &mut app,
         ":hi link DevnullHandle ErrorMsg<CR>:hi DevnullHandle gui=bold<CR>",
     );
     assert_ne!(
-        app.style(Group::Handle),
-        app.style(Group::ErrorMsg),
+        app.style(crate::hl::HANDLE),
+        app.style(Group::ERROR_MSG),
         "restyling a linked group unlinks it"
     );
 
     let _ = press(&mut app, ":hi link DevnullHash ErrorMsg<CR>:hi clear<CR>");
-    assert_ne!(app.style(Group::Hash), app.style(Group::ErrorMsg));
+    assert_ne!(app.style(crate::hl::HASH), app.style(Group::ERROR_MSG));
     let _ = press(&mut app, ":hi link Nope ErrorMsg<CR>");
     assert_eq!(cmdline(&app), "E411: Highlight group not found: Nope");
 }
 
 #[test]
 fn groups_linked_in_a_loop_still_draw() {
-    use crate::hl::Group;
     let mut app = app_with(&["one"], 40, 6);
 
     let _ = press(
@@ -4688,7 +5058,7 @@ fn groups_linked_in_a_loop_still_draw() {
         ":hi link DevnullHash DevnullHandle<CR>:hi link DevnullHandle DevnullHash<CR>",
     );
 
-    let _ = app.style(Group::Hash);
+    let _ = app.style(crate::hl::HASH);
     let _ = screen(&app);
 }
 
@@ -4701,17 +5071,17 @@ fn hlsearch_shows_the_last_search_s_matches_and_noh_hides_them_until_the_next() 
 
     assert_eq!(
         style_at(&app, 4, 1).bg,
-        app.style(Group::CurSearch).bg,
+        app.style(Group::CUR_SEARCH).bg,
         "under the cursor"
     );
-    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::Search).bg);
+    assert_eq!(style_at(&app, 4, 2).bg, app.style(Group::SEARCH).bg);
     assert_eq!(style_at(&app, 0, 2).bg, plain_bg(&app));
     let _ = press(&mut app, ":noh<CR>");
     assert_eq!(style_at(&app, 4, 2).bg, plain_bg(&app));
     let _ = press(&mut app, "n");
     assert_eq!(
         style_at(&app, 4, 1).bg,
-        app.style(Group::Search).bg,
+        app.style(Group::SEARCH).bg,
         "back, the cursor on the other match"
     );
     let _ = press(&mut app, ":set nohls<CR>");
@@ -4735,7 +5105,7 @@ fn incsearch_shows_where_a_search_being_typed_goes_and_escape_goes_back() {
         .expect("scrolled to the match");
     assert_eq!(
         style_at(&app, 2, at as u16).bg,
-        app.style(Group::IncSearch).bg
+        app.style(Group::INC_SEARCH).bg
     );
     let _ = press(&mut app, "<Esc>");
     assert!(shows(&app, "line 1"), "back where it was");
@@ -4753,7 +5123,7 @@ fn a_match_is_highlighted_whole_and_on_the_rows_it_wraps_to_only() {
     assert_eq!(style_at(&app, 5, 1).bg, plain_bg(&app));
     assert_eq!(
         style_at(&app, 3, 2).bg,
-        app.style(Group::CurSearch).bg,
+        app.style(Group::CUR_SEARCH).bg,
         "the whole match"
     );
 }
@@ -4770,7 +5140,7 @@ fn star_shows_the_matches_again_after_noh_and_noincsearch_keeps_the_view() {
     assert!(shows(&app, "line 1") && !shows(&app, "a needle here"));
 
     let _ = press(&mut app, "<Esc>/line<CR>:noh<CR>*");
-    assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::Search).bg);
+    assert_eq!(style_at(&app, 0, 1).bg, app.style(Group::SEARCH).bg);
 }
 
 #[test]
@@ -4793,7 +5163,7 @@ fn the_buffer_picker_shows_which_letters_matched() {
             u16::try_from(y).expect("y"),
         )
     };
-    let matched = app.style(Group::PmenuMatch).fg;
+    let matched = app.style(Group::PMENU_MATCH).fg;
     // l, g, the f of "following", then its l.
     assert_eq!([0, 2, 4, 6].map(|dx| style(dx).fg), [matched; 4]);
     assert_ne!(style(1).fg, matched);

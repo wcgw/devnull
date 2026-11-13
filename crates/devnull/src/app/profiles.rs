@@ -4,7 +4,7 @@
 use devnull_api::model::{AccountKind, AccountPage};
 
 use super::feed::Source;
-use super::{App, Effect, FetchError, Kind};
+use super::{Dn, Effects, FetchError, Kit};
 use crate::doc::{AccountRef, Content, Cursor, Target};
 use crate::render::{organization_header, pinned_block, profile_header};
 
@@ -24,22 +24,26 @@ fn head(page: &AccountPage, now: u64) -> Vec<(String, Content)> {
     }
 }
 
-impl App {
+impl Dn {
     /// Shows the profile of `account` in the current window, loading it if needed.
-    pub(super) fn open_profile(&mut self, account: AccountRef) -> Vec<Effect> {
+    pub(super) fn open_profile(&mut self, kit: &mut Kit, account: AccountRef) -> Effects {
         let source = Source::Profile {
             handle: account.handle,
             kind: account.kind,
         };
-        self.open_feed(source, Cursor::new())
+        self.open_feed(kit, source, Cursor::new())
     }
 
     /// `:profile`: the profile of `handle` (`@` or not), or without one, of the account under the cursor or of the
     /// author of the commit under it.
-    pub(super) fn profile(&mut self, handle: Option<String>) -> Result<Vec<Effect>, String> {
+    pub(super) fn profile(
+        &mut self,
+        kit: &mut Kit,
+        handle: Option<String>,
+    ) -> Result<Effects, String> {
         let account = match handle {
             Some(handle) => AccountRef::new(handle.trim_start_matches('@'), None),
-            None => match self.target_under_cursor() {
+            None => match kit.target_under_cursor() {
                 Some(Target::Account(account)) => account,
                 Some(Target::Commit {
                     author: Some(author),
@@ -48,7 +52,7 @@ impl App {
                 _ => return Err("No account under the cursor".to_owned()),
             },
         };
-        Ok(self.open_profile(account))
+        Ok(self.open_profile(kit, account))
     }
 
     /// The connected account's own profile, as `:e profile` names it.
@@ -63,28 +67,29 @@ impl App {
     /// asked for if they were waiting for that.
     pub(super) fn profile_arrived(
         &mut self,
+        kit: &mut Kit,
         handle: String,
         result: Result<AccountPage, FetchError>,
         now: u64,
-    ) -> Vec<Effect> {
+    ) -> Effects {
         let kind = match &result {
             Ok(AccountPage::Person(_)) => Some(AccountKind::User),
             Ok(AccountPage::Organization(_)) => Some(AccountKind::Organization),
             _ => None,
         };
-        let mut effects = self.hover_arrived(&handle, &result);
+        let mut effects = self.hover_arrived(kit, &handle, &result);
         let source = Source::Profile { handle, kind: None };
-        effects.extend(self.head_arrived(&source, result.map(|page| head(&page, now))));
+        effects.extend(self.head_arrived(kit, &source, result.map(|page| head(&page, now))));
         // Only once it arrived: after a failure, loading would ask for the profile again straight away.
         if let Some(kind) = kind
-            && let Some(index) = self.feed_buffer(&source)
+            && let Some(id) = self.feed_buffer(&source)
         {
-            if let Kind::Feed(feed) = &mut self.buffers[index].kind
+            if let Some(feed) = self.feeds.get_mut(&id)
                 && let Source::Profile { kind: known, .. } = &mut feed.source
             {
                 *known = Some(kind);
             }
-            effects.extend(self.load(index));
+            effects.extend(self.load(kit, id));
         }
         effects
     }

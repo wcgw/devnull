@@ -12,8 +12,9 @@ pub use accounts::{account_block, organization_header, pinned_block, profile_hea
 pub use notifications::notification_block;
 
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
-use crate::graphics::{fit, natural};
 use crate::hl::Group;
+use wcgw_kit::gfx::{fit, natural};
+use wcgw_kit::jiff::Timestamp;
 
 /// Lines of text shown before the rest of a long commit folds away.
 const SHOWN_LINES: usize = 6;
@@ -53,7 +54,7 @@ pub fn focused_block(commit: &Commit, now: u64, cell: (u16, u16)) -> Content {
 #[must_use]
 pub fn deleted_block() -> Content {
     vec![
-        Line::Text(vec![Span::new("Commit deleted", Group::Time)]),
+        Line::Text(vec![Span::new("Commit deleted", crate::hl::TIME)]),
         Line::text(""),
     ]
     .into()
@@ -107,7 +108,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
             description: card.description.clone(),
         });
         lines.push(Line::Text(vec![
-            Span::new(text, Group::Link).with_target(target),
+            Span::new(text, crate::hl::LINK).with_target(target),
         ]));
         if let Some(picture) = card.image_url.as_deref().filter(|url| !url.is_empty()) {
             // Its size is not known before it arrives: a box of the usual card shape.
@@ -135,7 +136,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
             text.push_str(&format!(": {description}"));
         }
         lines.push(Line::Text(vec![
-            Span::new(text, Group::Stats).with_target(Target::Url(image.url.clone())),
+            Span::new(text, crate::hl::STATS).with_target(Target::Url(image.url.clone())),
         ]));
     }
     lines.push(counts(commit));
@@ -161,7 +162,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
                     "… {hidden} more {}",
                     if hidden == 1 { "line" } else { "lines" }
                 ),
-                Group::Folded,
+                Group::FOLDED,
             )]),
             closed: true,
         });
@@ -177,7 +178,7 @@ fn block(commit: &Commit, now: u64, shown: Shown) -> Content {
 fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
     let mut spans = Vec::new();
     if let Some(prefix) = prefix {
-        spans.push(Span::new(prefix, Group::Time));
+        spans.push(Span::new(prefix, crate::hl::TIME));
     }
     if let Some(author) = &commit.author {
         spans.extend(author_spans(author));
@@ -185,8 +186,8 @@ fn header(commit: &Commit, now: u64, prefix: Option<&str>) -> Line {
     let age = parse_time(&commit.created_at)
         .map(|then| age(then, now))
         .unwrap_or_default();
-    spans.push(Span::new(format!(" · {age} · "), Group::Time));
-    spans.push(Span::new(commit.short_hash.clone(), Group::Hash));
+    spans.push(Span::new(format!(" · {age} · "), crate::hl::TIME));
+    spans.push(Span::new(commit.short_hash.clone(), crate::hl::HASH));
     Line::Text(spans)
 }
 
@@ -209,14 +210,14 @@ fn who(name: &str, handle: &str, kind: AccountKind, avatar: &str) -> Vec<Span> {
     let mut spans = Vec::new();
     if !avatar.is_empty() {
         spans.push(Span::picture(sized(avatar, AVATAR_PIXELS), AVATAR_COLS));
-        spans.push(Span::new(" ", Group::Normal));
+        spans.push(Span::new(" ", Group::NORMAL));
     }
     if !name.is_empty() {
-        spans.push(Span::new(name, Group::Author));
+        spans.push(Span::new(name, crate::hl::AUTHOR));
         if kind == AccountKind::Organization {
-            spans.push(Span::new(" (org)", Group::Time));
+            spans.push(Span::new(" (org)", crate::hl::TIME));
         }
-        spans.push(Span::new(" ", Group::Normal));
+        spans.push(Span::new(" ", Group::NORMAL));
     }
     spans.push(mention(handle, Some(kind)));
     spans
@@ -250,7 +251,7 @@ fn sized(url: &str, pixels: u32) -> String {
 
 /// `@handle`, referring to the account.
 fn mention(handle: &str, kind: Option<AccountKind>) -> Span {
-    Span::new(format!("@{handle}"), Group::Handle)
+    Span::new(format!("@{handle}"), crate::hl::HANDLE)
         .with_target(Target::Account(AccountRef::new(handle, kind)))
 }
 
@@ -260,14 +261,14 @@ fn quote(quoted: &Commit, now: u64) -> Vec<Line> {
     let mut lines = if quoted.is_deleted() {
         vec![Line::Text(vec![Span::new(
             format!("{BAR}Commit deleted"),
-            Group::Time,
+            crate::hl::TIME,
         )])]
     } else {
         let mut lines = vec![header(quoted, now, Some(BAR))];
         lines.extend(body_lines(quoted).into_iter().map(|line| {
             let Line::Text(spans) = line else { return line };
             Line::Text(
-                std::iter::once(Span::new(BAR, Group::Time))
+                std::iter::once(Span::new(BAR, crate::hl::TIME))
                     .chain(spans)
                     .collect(),
             )
@@ -291,12 +292,12 @@ fn counts(commit: &Commit) -> Line {
     if !commit.status.is_empty() && commit.status != "approved" {
         text.push_str(&format!(" · {}", commit.status));
     }
-    Line::Text(vec![Span::new(text, Group::Stats)])
+    Line::Text(vec![Span::new(text, crate::hl::STATS)])
 }
 
 /// `  ↳ Name @handle: first line`.
 fn reply_line(reply: &Commit) -> Line {
-    let mut spans = vec![Span::new("  ↳ ", Group::Time)];
+    let mut spans = vec![Span::new("  ↳ ", crate::hl::TIME)];
     if let Some(author) = &reply.author {
         spans.extend(author_spans(author));
     }
@@ -307,7 +308,7 @@ fn reply_line(reply: &Commit) -> Line {
             Line::Text(spans) => spans.into_iter().map(|span| span.text).collect(),
             Line::Image { .. } => String::new(),
         });
-    spans.push(Span::new(format!(": {first}"), Group::Normal));
+    spans.push(Span::new(format!(": {first}"), Group::NORMAL));
     Line::Text(spans)
 }
 
@@ -341,7 +342,7 @@ fn segment_lines(segments: &[Segment], mentions: &[Mention]) -> Vec<Line> {
                     current.extend(text_spans(piece, &mentioned));
                 }
             }
-            Segment::Code { code } => current.push(Span::new(code.clone(), Group::Code)),
+            Segment::Code { code } => current.push(Span::new(code.clone(), crate::hl::CODE)),
             Segment::Block {
                 language,
                 filename,
@@ -355,11 +356,11 @@ fn segment_lines(segments: &[Segment], mentions: &[Mention]) -> Vec<Line> {
                     (Some(name), None) | (None, Some(name)) => format!("── {name} ──"),
                     (None, None) => "──".to_owned(),
                 };
-                lines.push(Line::Text(vec![Span::new(title, Group::Time)]));
+                lines.push(Line::Text(vec![Span::new(title, crate::hl::TIME)]));
                 let code = plain_text(html);
                 lines.extend(
                     code.lines()
-                        .map(|line| Line::Text(vec![Span::new(line, Group::Code)])),
+                        .map(|line| Line::Text(vec![Span::new(line, crate::hl::CODE)])),
                 );
             }
             // A kind of segment this version does not know: leave it out rather than show it wrong.
@@ -379,7 +380,7 @@ fn text_spans(text: &str, mentioned: &[(String, AccountKind)]) -> Vec<Span> {
     let mut rest = text;
     let flush = |plain: &mut String, spans: &mut Vec<Span>| {
         if !plain.is_empty() {
-            spans.push(Span::new(std::mem::take(plain), Group::Normal));
+            spans.push(Span::new(std::mem::take(plain), Group::NORMAL));
         }
     };
     while let Some(ch) = rest.chars().next() {
@@ -402,7 +403,7 @@ fn text_spans(text: &str, mentioned: &[(String, AccountKind)]) -> Vec<Span> {
             let url =
                 rest[..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '\'', '"']);
             flush(&mut plain, &mut spans);
-            spans.push(Span::new(url, Group::Link).with_target(Target::Url(url.to_owned())));
+            spans.push(Span::new(url, crate::hl::LINK).with_target(Target::Url(url.to_owned())));
             rest = &rest[url.len()..];
             continue;
         }
@@ -458,30 +459,17 @@ fn plain_text(html: &str) -> String {
     text
 }
 
-/// How long ago `then` was at `now` (both Unix seconds), as the web says it: `now`, `5m`, `3h`, `2d`, then the date
-/// (`Oct 1`, with the year when it is not this year's).
+/// How long ago `then` was at `now` (both Unix seconds), as every wcgw app says it: `now`, `5m`, `3h`, `2d`, `6w`,
+/// `1y` (the kit's `when::ago`).
 #[must_use]
 pub fn age(then: u64, now: u64) -> String {
-    let seconds = now.saturating_sub(then);
-    match seconds {
-        0..60 => "now".to_owned(),
-        60..3600 => format!("{}m", seconds / 60),
-        3600..86_400 => format!("{}h", seconds / 3600),
-        86_400..604_800 => format!("{}d", seconds / 86_400),
-        _ => {
-            const MONTHS: [&str; 12] = [
-                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-            ];
-            let (year, month, day) = civil(then / 86_400);
-            let (this_year, ..) = civil(now / 86_400);
-            let date = format!("{} {day}", MONTHS[usize::from(month - 1)]);
-            if year == this_year {
-                date
-            } else {
-                format!("{date}, {year}")
-            }
-        }
-    }
+    let at = |seconds: u64| {
+        i64::try_from(seconds)
+            .ok()
+            .and_then(|seconds| Timestamp::from_second(seconds).ok())
+            .unwrap_or_default()
+    };
+    wcgw_kit::when::ago(at(then), at(now))
 }
 
 /// Unix seconds for an RFC 3339 UTC time such as `2026-11-12T15:13:40.000000Z`; `None` when it is not one.
@@ -514,24 +502,4 @@ fn days_from_civil(year: u64, month: u64, day: u64) -> Option<u64> {
     let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     (era * 146_097 + day_of_era).checked_sub(719_468)
-}
-
-/// The date of day `days` since 1970-01-01, as (year, month, day).
-fn civil(days: u64) -> (u64, u8, u8) {
-    let days = days + 719_468;
-    let era = days / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = u8::try_from(day_of_year - (153 * month_index + 2) / 5 + 1).unwrap_or(1);
-    let month = u8::try_from(if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    })
-    .unwrap_or(1);
-    let year = year_of_era + era * 400 + u64::from(month <= 2);
-    (year, month, day)
 }

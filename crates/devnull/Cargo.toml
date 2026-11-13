@@ -24,8 +24,11 @@ regex = "1"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "fs"] }
 unicode-segmentation = "1"
 unicode-width = { version = "0.2", default-features = false }
+# The shared Neovim look & feel, at its release tag (its D18).
+wcgw-kit = { git = "https://github.com/wcgw/wcgw-kit", tag = "v0.1.0" }
 
 [dev-dependencies]
+wcgw-kit = { git = "https://github.com/wcgw/wcgw-kit", tag = "v0.1.0", features = ["testing"] }
 insta = "1"
 serde_json = "1"
 tempfile = "3"

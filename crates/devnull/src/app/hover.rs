@@ -1,41 +1,17 @@
 //! `K`: a card about what is under the cursor, floating next to it until the next key.
 
 use devnull_api::model::AccountPage;
-use ratatui::Frame;
-use ratatui::layout::{Position, Rect};
-use ratatui::text::{Line as TextLine, Span as TextSpan};
-use ratatui::widgets::{Block, Clear, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 use super::feed::{Source, notice};
-use super::{App, Effect, FetchError, NetEvent, Request};
-use crate::doc::{Document, Layout, Line, LinkCard, Span, Target};
-use crate::hl::Group;
+use super::{Dn, Effects, FetchError, Kit, NetEvent, Request, fetch};
+use crate::doc::{Document, Line, LinkCard, Span, Target};
 use crate::render::{organization_header, profile_header};
 
-/// The widest a card's text is, in cells, before it wraps.
-const MAX_WIDTH: u16 = 60;
-
-/// A card shown by `K`.
-#[derive(Debug)]
-pub(super) struct Hover {
-    /// What the card says.
-    doc: Document,
-    /// The handle whose profile the card waits for, if any.
-    waiting: Option<String>,
-}
-
-impl Hover {
-    /// What the card says.
-    pub(super) fn doc(&self) -> &Document {
-        &self.doc
-    }
-
-    fn new(lines: Vec<Line>) -> Self {
-        let mut doc = Document::new();
-        doc.push_back("card", lines);
-        Self { doc, waiting: None }
-    }
+/// A card of `lines`.
+fn card(lines: Vec<Line>) -> Document {
+    let mut doc = Document::new();
+    doc.push_back("card", lines);
+    doc
 }
 
 /// A link card: title, site, what the page is about, and the link.
@@ -44,11 +20,14 @@ fn link_card(card: &LinkCard) -> Vec<Line> {
     if !card.title.is_empty() {
         lines.push(Line::Text(vec![Span::new(
             card.title.clone(),
-            Group::Author,
+            crate::hl::AUTHOR,
         )]));
     }
     if !card.site.is_empty() {
-        lines.push(Line::Text(vec![Span::new(card.site.clone(), Group::Time)]));
+        lines.push(Line::Text(vec![Span::new(
+            card.site.clone(),
+            crate::hl::TIME,
+        )]));
     }
     lines.extend(
         card.description
@@ -62,7 +41,7 @@ fn link_card(card: &LinkCard) -> Vec<Line> {
 
 fn link(url: &str) -> Line {
     Line::Text(vec![
-        Span::new(url, Group::Link).with_target(Target::Url(url.to_owned())),
+        Span::new(url, crate::hl::LINK).with_target(Target::Url(url.to_owned())),
     ])
 }
 
@@ -77,17 +56,18 @@ fn account_card(page: &AccountPage) -> Option<Vec<Line>> {
     Some(content.lines)
 }
 
-impl App {
-    /// `:hover`: the card of the link under the cursor, else of the account, else of the author of the commit; an
+impl Dn {
+    /// `:details` (`K`), as muttrs' and slackers': the card of the link under the cursor, else of the account, else of the author of the commit; an
     /// account's card waits for its profile to arrive.
-    pub(super) fn hover(&mut self) -> Result<Vec<Effect>, String> {
-        let account = match self.target_under_cursor() {
+    pub(super) fn hover(&mut self, kit: &mut Kit) -> Result<Effects, String> {
+        self.hover_waiting = None;
+        let account = match kit.target_under_cursor() {
             Some(Target::Url(url)) => {
-                self.hover = Some(Hover::new(vec![link(&url)]));
+                kit.show_hover(card(vec![link(&url)]));
                 return Ok(Vec::new());
             }
-            Some(Target::LinkCard(card)) => {
-                self.hover = Some(Hover::new(link_card(&card)));
+            Some(Target::LinkCard(link_card_of)) => {
+                kit.show_hover(card(link_card(&link_card_of)));
                 return Ok(Vec::new());
             }
             Some(Target::Account(account)) => account,
@@ -97,11 +77,12 @@ impl App {
             }) => author,
             _ => return Err("E349: No identifier under cursor".to_owned()),
         };
-        self.hover = Some(Hover {
-            doc: notice(&format!("Loading @{}…", account.handle), Group::Time),
-            waiting: Some(account.handle.clone()),
-        });
-        Ok(vec![Effect::Fetch(Request::Profile {
+        kit.show_hover(notice(
+            &format!("Loading @{}…", account.handle),
+            crate::hl::TIME,
+        ));
+        self.hover_waiting = Some(account.handle.clone());
+        Ok(vec![fetch(Request::Profile {
             handle: account.handle,
             kind: account.kind,
         })])
@@ -111,23 +92,24 @@ impl App {
     /// profile buffer will.
     pub(super) fn hover_arrived(
         &mut self,
+        kit: &mut Kit,
         handle: &str,
         result: &Result<AccountPage, FetchError>,
-    ) -> Vec<Effect> {
-        let Some(hover) = self
-            .hover
-            .as_mut()
-            .filter(|hover| hover.waiting.as_deref() == Some(handle))
-        else {
+    ) -> Effects {
+        if self.hover_waiting.as_deref() != Some(handle) {
+            return Vec::new();
+        }
+        self.hover_waiting = None;
+        let Some(hover) = kit.hover_mut() else {
             return Vec::new();
         };
         if let Ok(page) = result
             && let Some(lines) = account_card(page)
         {
-            *hover = Hover::new(lines);
+            *hover = card(lines);
             return Vec::new();
         }
-        self.hover = None;
+        kit.close_hover();
         let source = Source::Profile {
             handle: handle.to_owned(),
             kind: None,
@@ -136,80 +118,12 @@ impl App {
             return Vec::new();
         }
         match result {
-            Err(FetchError::NotApproved) => self.net(NetEvent::NotApproved),
+            Err(FetchError::NotApproved) => self.net(kit, NetEvent::NotApproved),
             Err(FetchError::Failed(reason)) => {
-                self.error(format!("Cannot load @{handle}: {reason}"));
+                kit.error(format!("Cannot load @{handle}: {reason}"));
                 Vec::new()
             }
             Ok(_) => Vec::new(),
         }
-    }
-
-    /// Draws the card, if any, just below the cursor at `cursor`, or above it when there is more room there.
-    pub(super) fn render_hover(&self, frame: &mut Frame<'_>, cursor: Position) {
-        let Some(hover) = &self.hover else { return };
-        let (width, height) = self.size;
-        let max_inner = MAX_WIDTH.min(width.saturating_sub(2));
-        // Rows between the bufferline and the command line.
-        let (first, last) = (1, height.saturating_sub(2));
-        if max_inner < 4 || last < first + 2 {
-            return;
-        }
-        let natural = Layout::new(&hover.doc, max_inner);
-        let inner_width = (0..natural.row_count())
-            .map(|row| {
-                natural
-                    .segments(row)
-                    .map(|(text, _)| text.width())
-                    .sum::<usize>()
-            })
-            .max()
-            .unwrap_or(1)
-            .clamp(1, usize::from(max_inner));
-        let inner_width = u16::try_from(inner_width).unwrap_or(max_inner);
-        let layout = Layout::new(&hover.doc, inner_width);
-        let needed = u16::try_from(layout.row_count())
-            .unwrap_or(u16::MAX)
-            .saturating_add(2);
-        let below = (last + 1).saturating_sub(cursor.y + 1);
-        let above = cursor.y.saturating_sub(first);
-        let (y, card_height) = if needed <= below || below >= above {
-            (cursor.y + 1, needed.min(below))
-        } else {
-            let card_height = needed.min(above);
-            (cursor.y - card_height, card_height)
-        };
-        if card_height < 3 {
-            return;
-        }
-        let card_width = inner_width + 2;
-        let x = cursor.x.min(width.saturating_sub(card_width));
-        let area = Rect::new(x, y, card_width, card_height);
-        let block = Block::bordered()
-            .border_style(self.theme.style(Group::FloatBorder))
-            .style(self.theme.style(Group::NormalFloat));
-        let inner = block.inner(area);
-        frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
-        let rows: Vec<TextLine<'_>> = (0..layout.row_count().min(usize::from(inner.height)))
-            .map(|row| {
-                TextLine::from(
-                    layout
-                        .segments(row)
-                        .map(|(text, group)| {
-                            // Plain text takes the card's colours, not the window's.
-                            let group = if group == Group::Normal {
-                                Group::NormalFloat
-                            } else {
-                                group
-                            };
-                            TextSpan::styled(text, self.theme.style(group))
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(rows), inner);
-        self.draw_pictures(frame.buffer_mut(), &layout, 0, inner);
     }
 }

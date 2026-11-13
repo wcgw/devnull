@@ -3,7 +3,7 @@
 use devnull_api::model::Thread;
 
 use super::feed::Source;
-use super::{App, Effect};
+use super::{Dn, Effects, Kit};
 use crate::doc::{Content, Cursor};
 use crate::render::{commit_block, focused_block};
 
@@ -39,9 +39,9 @@ pub(super) fn head(thread: &Thread, now: u64, cell: (u16, u16)) -> Vec<(String, 
         .collect()
 }
 
-impl App {
+impl Dn {
     /// Shows the thread about commit `id` in the current window, at the commit, loading it if needed.
-    pub(super) fn open_thread(&mut self, id: &str) -> Vec<Effect> {
-        self.open_feed(Source::Thread(id.to_owned()), Cursor::on_block(id))
+    pub(super) fn open_thread(&mut self, kit: &mut Kit, id: &str) -> Effects {
+        self.open_feed(kit, Source::Thread(id.to_owned()), Cursor::on_block(id))
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/devnull/src/app/tests.rs
-assertion_line: 930
 expression: "screen(&app).rows.join(\"\\n\")"
 ---
  log/following
@@ -25,4 +24,4 @@ Pinned the timezone in the fixture and deleted the weekday logic.
 
 Tom Okafor @tokafor · 1h · 5e11f02
 Does anyone else use jj for everything now? Asking for @adaq.
- NORMAL  log/following                                           @ada  1,1  Top
+ NORMAL  log/following                                         @ada  Top  1:1

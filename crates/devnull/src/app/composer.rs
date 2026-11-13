@@ -7,10 +7,9 @@ use devnull_api::body::{self, MAX_LENGTH};
 use devnull_api::model::{Commit, Preview};
 use devnull_api::{Answering, Draft};
 
-use super::actions::{Confirm, Pending};
 use super::feed::Source;
 use super::threads::short_hash;
-use super::{App, AppMode, Effect, FetchError, NetEvent, Request};
+use super::{Dn, Effect, Effects, FetchError, Kit, NetEvent, Request, fetch};
 use crate::doc::Document;
 use crate::render::{commit_block, preview_block};
 
@@ -61,15 +60,16 @@ fn parse(saved: &str) -> &str {
     saved[..end].trim_end()
 }
 
-impl App {
+impl Dn {
     /// `:commit` (`c`), `:reply` (`r`) and `:quote` (`R`): opens the editor on the draft kept for that, or an
     /// empty one; a reply or quote is of the commit under the cursor. It is posted as the organization `author`, if
     /// any (the server refuses one the account is not a member of).
     pub(super) fn compose(
         &mut self,
+        kit: &mut Kit,
         answering: Answering,
         author: Option<String>,
-    ) -> Result<Vec<Effect>, String> {
+    ) -> Result<Effects, String> {
         let me = self
             .connection
             .handle()
@@ -83,12 +83,12 @@ impl App {
                 author,
             },
             _ => {
-                let commit = self
-                    .commit_under_cursor()
+                let commit = Self::commit_under_cursor(kit)
                     .ok_or_else(|| "No commit under the cursor".to_owned())?;
                 let to = commit.author.unwrap_or_default();
-                let excerpt = self.buffers[self.windows.current().buffer]
-                    .doc
+                let excerpt = kit
+                    .buffer(kit.current_buffer())
+                    .doc()
                     .line_text(commit.id.as_str(), 1)
                     .map(|line| line.chars().take(EXCERPT).collect::<String>());
                 let verb = if matches!(answering, Answering::Reply(_)) {
@@ -119,12 +119,12 @@ impl App {
             .unwrap_or_default();
         let text = template(&body, &composing);
         self.composing = Some(composing);
-        Ok(vec![Effect::Edit { text }])
+        Ok(vec![Effect::Edit(wcgw_kit::Edit::new(text))])
     }
 
     /// The editor closed, with what it saved or why there is nothing: an empty draft aborts, others are kept, counted
     /// and sent for a preview.
-    pub(super) fn edited(&mut self, saved: Result<String, String>) -> Vec<Effect> {
+    pub(super) fn saved(&mut self, kit: &mut Kit, saved: Result<String, String>) -> Effects {
         let Some(composing) = &self.composing else {
             return Vec::new();
         };
@@ -133,7 +133,7 @@ impl App {
             Ok(saved) => saved,
             Err(reason) => {
                 self.composing = None;
-                self.error(format!("Not committed: {reason}"));
+                kit.error(format!("Not committed: {reason}"));
                 return Vec::new();
             }
         };
@@ -141,32 +141,33 @@ impl App {
         if body::normalize(&draft).is_empty() {
             self.composing = None;
             self.drafts.remove(&answering);
-            self.error("Aborting commit due to empty commit message.");
+            kit.error("Aborting commit due to empty commit message.");
             return Vec::new();
         }
         self.drafts.insert(answering, draft.clone());
         if let Err(refused) = body::check(&draft) {
             self.composing = None;
-            self.error(format!("Not committed: {refused}"));
+            kit.error(format!("Not committed: {refused}"));
             return Vec::new();
         }
-        vec![Effect::Fetch(Request::Preview { body: draft })]
+        vec![fetch(Request::Preview { body: draft })]
     }
 
     /// The server's preview of `draft`, or why it refuses it: asks to publish it, showing it.
     pub(super) fn previewed(
         &mut self,
+        kit: &mut Kit,
         draft: String,
         result: Result<Preview, FetchError>,
-    ) -> Vec<Effect> {
+    ) -> Effects {
         let Some(composing) = self.composing.take() else {
             return Vec::new();
         };
         let preview = match result {
             Ok(preview) => preview,
-            Err(FetchError::NotApproved) => return self.net(NetEvent::NotApproved),
+            Err(FetchError::NotApproved) => return self.net(kit, NetEvent::NotApproved),
             Err(FetchError::Failed(reason)) => {
-                self.error(format!("Not committed: {reason}"));
+                kit.error(format!("Not committed: {reason}"));
                 return Vec::new();
             }
         };
@@ -185,28 +186,33 @@ impl App {
         shown.push_back("preview", preview_block(&preview));
         let mut draft = Draft::new(composing.answering.clone(), draft);
         draft.author.clone_from(&composing.author);
-        self.mode = AppMode::Confirm(Confirm::new(
-            format!(
-                "{kind} {count}/{MAX_LENGTH}{to}{}? [y]es/[e]dit/[n]o",
-                posted_as(composing.author.as_deref())
-            ),
-            Pending::Publish { draft, composing },
-            Some(shown),
-        ));
+        let question = format!(
+            "{kind} {count}/{MAX_LENGTH}{to}{}? [y]es/[e]dit/[n]o",
+            posted_as(composing.author.as_deref())
+        );
+        kit.confirm(question, Some(shown), move |dn: &mut Dn, kit, answer| {
+            dn.publish(kit, answer, draft, composing)
+        });
         Vec::new()
     }
 
     /// The answer to "publish?": `y` publishes, `e` edits again, anything else keeps the draft.
-    pub(super) fn publish(&mut self, key: char, draft: Draft, composing: Composing) -> Vec<Effect> {
+    pub(super) fn publish(
+        &mut self,
+        kit: &mut Kit,
+        key: char,
+        draft: Draft,
+        composing: Composing,
+    ) -> Effects {
         match key {
-            'y' => vec![Effect::Fetch(Request::Publish { draft })],
+            'y' => vec![fetch(Request::Publish { draft })],
             'e' => {
                 let text = template(&draft.body, &composing);
                 self.composing = Some(composing);
-                vec![Effect::Edit { text }]
+                vec![Effect::Edit(wcgw_kit::Edit::new(text))]
             }
             _ => {
-                self.info("Kept as a draft");
+                kit.info("Kept as a draft");
                 Vec::new()
             }
         }
@@ -215,23 +221,24 @@ impl App {
     /// `draft` published, or why not: the draft goes, and a reply joins its thread if it is open.
     pub(super) fn published(
         &mut self,
+        kit: &mut Kit,
         draft: &Draft,
         result: Result<Box<Commit>, FetchError>,
         now: u64,
-    ) -> Vec<Effect> {
+    ) -> Effects {
         let commit = match result {
             Ok(commit) => commit,
-            Err(FetchError::NotApproved) => return self.net(NetEvent::NotApproved),
+            Err(FetchError::NotApproved) => return self.net(kit, NetEvent::NotApproved),
             Err(FetchError::Failed(reason)) => {
-                self.error(format!("Not published: {reason}"));
+                kit.error(format!("Not published: {reason}"));
                 return Vec::new();
             }
         };
         self.drafts.remove(&draft.answering);
         if let Answering::Reply(to) = &draft.answering
-            && let Some(index) = self.feed_buffer(&Source::Thread(to.clone()))
+            && let Some(id) = self.feed_buffer(&Source::Thread(to.clone()))
         {
-            let doc = &mut self.buffers[index].doc;
+            let doc = kit.buffer_mut(id).doc_mut();
             if !doc.contains(commit.id.as_str()) {
                 doc.push_back(commit.id.as_str(), commit_block(&commit, now));
             }
@@ -246,9 +253,9 @@ impl App {
         let posted_as = commit.author.as_ref().map(|author| author.handle.as_str());
         match (draft.author.as_deref(), posted_as) {
             (Some(asked), Some(posted)) if !asked.eq_ignore_ascii_case(posted) => {
-                self.error(format!("{published} as @{posted}, not @{asked}{held}"));
+                kit.error(format!("{published} as @{posted}, not @{asked}{held}"));
             }
-            _ => self.info(format!("{published}{held}")),
+            _ => kit.info(format!("{published}{held}")),
         }
         Vec::new()
     }

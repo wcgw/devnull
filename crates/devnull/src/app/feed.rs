@@ -338,7 +338,10 @@ impl Feed {
         self.list.more()?;
         doc.push_back(
             MORE,
-            vec![Line::Text(vec![Span::new("Loading more…", Group::Time)])],
+            vec![Line::Text(vec![Span::new(
+                "Loading more…",
+                crate::hl::TIME,
+            )])],
         );
         Some(request)
     }
@@ -434,7 +437,7 @@ impl Feed {
             }
         }
         if doc.is_empty() {
-            doc.push_back(NOTICE, notice_lines("Nothing here yet.", Group::Time));
+            doc.push_back(NOTICE, notice_lines("Nothing here yet.", crate::hl::TIME));
         }
         self.list.loaded = true;
         arrived

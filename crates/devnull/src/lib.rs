@@ -4,10 +4,8 @@
 
 pub mod app;
 pub mod doc;
-pub mod ex;
-pub mod graphics;
 pub mod hl;
-pub mod key;
+pub use wcgw_kit::key;
 pub mod keymap;
 mod net;
 pub mod render;

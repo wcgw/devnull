@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use devnull_api::Log;
 
-use super::{App, Effect, Kind, Request, Wake, WakePurpose};
+use super::{Dn, Effect, Effects, Kit, Msg, Request, fetch};
 
 /// How often chronological logs are checked for new commits while the terminal has focus, and without it.
 const POLL_FOCUSED: Duration = Duration::from_secs(15);
@@ -28,45 +28,46 @@ pub(super) fn names() -> impl Iterator<Item = String> {
     LOGS.into_iter().map(buffer_name)
 }
 
-impl App {
+impl Dn {
     /// Starts polling chronological logs for new commits, once.
-    pub(super) fn start_polling(&mut self) -> Vec<Effect> {
+    pub(super) fn start_polling(&mut self, kit: &Kit) -> Effects {
         if self.polling {
             return Vec::new();
         }
         self.polling = true;
-        vec![self.next_poll()]
+        vec![self.next_poll(kit)]
     }
 
     /// The wake-up for the next poll, sooner while the terminal has focus.
-    fn next_poll(&self) -> Effect {
-        Effect::Wake {
-            after: if self.focused {
+    fn next_poll(&self, kit: &Kit) -> Effect {
+        Effect::After {
+            after: if kit.is_focused() {
                 POLL_FOCUSED
             } else {
                 POLL_UNFOCUSED
             },
-            token: Wake {
-                purpose: WakePurpose::Poll,
+            msg: Msg::Poll {
                 generation: self.poll_generation,
             },
         }
     }
 
     /// Time to poll: refresh every loaded chronological log, and plan the next poll.
-    pub(super) fn poll(&mut self) -> Vec<Effect> {
-        let polled: Vec<usize> = (0..self.buffers.len())
-            .filter(
-                |&index| matches!(&self.buffers[index].kind, Kind::Feed(feed) if feed.is_polled()),
-            )
+    pub(super) fn poll(&mut self, kit: &mut Kit) -> Effects {
+        let mut polled: Vec<_> = self
+            .feeds
+            .iter()
+            .filter(|(_, feed)| feed.is_polled())
+            .map(|(&id, _)| id)
             .collect();
-        let mut effects: Vec<Effect> = polled
+        polled.sort();
+        let mut effects: Effects = polled
             .into_iter()
-            .filter_map(|index| self.refresh(index))
+            .filter_map(|id| self.refresh(kit, id))
             .flatten()
             .collect();
-        effects.push(Effect::Fetch(Request::UnreadCount));
-        effects.push(self.next_poll());
+        effects.push(fetch(Request::UnreadCount));
+        effects.push(self.next_poll(kit));
         effects
     }
 }

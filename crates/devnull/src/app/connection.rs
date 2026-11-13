@@ -3,7 +3,6 @@
 use devnull_api::model::Me;
 
 use crate::doc::{Document, Line, Span, Target};
-use crate::hl::Group;
 
 /// What the network reports about the connection, sent back by the runtime.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,11 +95,11 @@ impl Connection {
                 plain("Approve this device in your browser:"),
                 plain(""),
                 Line::Text(vec![
-                    Span::new(url.clone(), Group::Link).with_target(Target::Url(url.clone())),
+                    Span::new(url.clone(), crate::hl::LINK).with_target(Target::Url(url.clone())),
                 ]),
                 plain(""),
                 plain("Check that the page shows this fingerprint:"),
-                Line::Text(vec![Span::new(fingerprint.clone(), Group::Hash)]),
+                Line::Text(vec![Span::new(fingerprint.clone(), crate::hl::HASH)]),
                 plain(""),
                 plain("Waiting for the browser to come back…"),
                 plain("Over SSH, paste the link the browser ends on with :connect <link>."),
