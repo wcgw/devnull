@@ -86,7 +86,7 @@ Defaults:
 | `s` | Toggle star | `:star` |
 | `dd` | Delete own commit (confirms) | `:delete` |
 | `yy`, `v…y` | Yank text (Vim semantics) | |
-| `gy` | Yank commit URL to the clipboard (OSC 52) | `:yanklink` |
+| `gy` | Yank the link under the cursor, else the commit's URL, to the clipboard (OSC 52) | `:yanklink` |
 | `:e!`, `<C-l>` | Refresh buffer | `:e!` |
 | `q`, `:q` | Close window; the last one quits | |
 | — | Follow/unfollow (no plain key; `f` stays a motion) | `:follow`, `:unfollow` |

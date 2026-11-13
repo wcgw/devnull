@@ -258,23 +258,29 @@ impl Dn {
         })
     }
 
+    /// The link under the cursor, a link card's too: what `:browse link` opens.
+    fn link_under_cursor(kit: &Kit) -> Option<String> {
+        match kit.target_under_cursor() {
+            Some(Target::Url(url) | Target::LinkCard(LinkCard { url, .. })) => Some(url),
+            _ => None,
+        }
+    }
+
     /// `:browse`: the commit or account under the cursor on the web; `:browse link`, the link under it.
     fn browse(kit: &Kit, link: bool) -> Result<Effects, String> {
         let url = if link {
-            match kit.target_under_cursor() {
-                Some(Target::Url(url) | Target::LinkCard(LinkCard { url, .. })) => url,
-                _ => return Err("No link under the cursor".to_owned()),
-            }
+            Self::link_under_cursor(kit).ok_or_else(|| "No link under the cursor".to_owned())?
         } else {
             Self::web_page(kit).ok_or_else(|| "No commit or account under the cursor".to_owned())?
         };
         Ok(vec![Effect::OpenUrl(url)])
     }
 
-    /// `:yanklink`: the link `:browse` opens, to the clipboard.
+    /// `:yanklink`: the link under the cursor, else the one `:browse` opens, to the clipboard, as in every app.
     fn yank_link(kit: &mut Kit) -> Result<Effects, String> {
-        let url = Self::web_page(kit)
-            .ok_or_else(|| "No commit or account under the cursor".to_owned())?;
+        let url = Self::link_under_cursor(kit)
+            .or_else(|| Self::web_page(kit))
+            .ok_or_else(|| "No link, commit or account under the cursor".to_owned())?;
         kit.info(format!("Yanked {url}"));
         Ok(vec![Effect::Copy(url)])
     }

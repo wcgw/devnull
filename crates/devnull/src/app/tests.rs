@@ -3027,6 +3027,11 @@ fn k_on_a_link_card_shows_it_whole() {
         "a link card is a link"
     );
     assert_eq!(
+        without_wakes(press(&mut app, "gy")),
+        [Effect::Copy("https://example.org/post".into())],
+        "gy yanks what gx opens"
+    );
+    assert_eq!(
         press(&mut app, "<CR>"),
         [Effect::OpenUrl("https://example.org/post".into())],
         "the card still opens"
