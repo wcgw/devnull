@@ -6,9 +6,7 @@ pub use wcgw_kit::keymap::*;
 pub const COMMITTING: Topic = Topic::new(75, "Commits");
 
 /// `dn`'s default bindings: keys, the ex command each runs, what which-key says of it, and its `:help` topic.
-const DEFAULTS: [(&str, &str, &str, Topic); 19] = [
-    ("<CR>", "open", "open under cursor", Topic::OPENING),
-    ("<C-]>", "open", "open under cursor", Topic::OPENING),
+const DEFAULTS: [(&str, &str, &str, Topic); 17] = [
     ("gd", "profile", "author's profile", Topic::OPENING),
     ("K", "hover", "hover card", Topic::OPENING),
     ("gx", "browse link", "open link in browser", Topic::OPENING),
