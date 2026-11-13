@@ -14,6 +14,7 @@ pub use notifications::notification_block;
 use crate::doc::{AccountRef, Content, Fold, Line, LinkCard, Span, Target};
 use crate::hl::Group;
 use wcgw_kit::gfx::{fit, natural};
+use wcgw_kit::jiff::Timestamp;
 
 /// Lines of text shown before the rest of a long commit folds away.
 const SHOWN_LINES: usize = 6;
@@ -458,30 +459,17 @@ fn plain_text(html: &str) -> String {
     text
 }
 
-/// How long ago `then` was at `now` (both Unix seconds), as the web says it: `now`, `5m`, `3h`, `2d`, then the date
-/// (`Oct 1`, with the year when it is not this year's).
+/// How long ago `then` was at `now` (both Unix seconds), as every wcgw app says it: `now`, `5m`, `3h`, `2d`, `6w`,
+/// `1y` (the kit's `when::ago`).
 #[must_use]
 pub fn age(then: u64, now: u64) -> String {
-    let seconds = now.saturating_sub(then);
-    match seconds {
-        0..60 => "now".to_owned(),
-        60..3600 => format!("{}m", seconds / 60),
-        3600..86_400 => format!("{}h", seconds / 3600),
-        86_400..604_800 => format!("{}d", seconds / 86_400),
-        _ => {
-            const MONTHS: [&str; 12] = [
-                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-            ];
-            let (year, month, day) = civil(then / 86_400);
-            let (this_year, ..) = civil(now / 86_400);
-            let date = format!("{} {day}", MONTHS[usize::from(month - 1)]);
-            if year == this_year {
-                date
-            } else {
-                format!("{date}, {year}")
-            }
-        }
-    }
+    let at = |seconds: u64| {
+        i64::try_from(seconds)
+            .ok()
+            .and_then(|seconds| Timestamp::from_second(seconds).ok())
+            .unwrap_or_default()
+    };
+    wcgw_kit::when::ago(at(then), at(now))
 }
 
 /// Unix seconds for an RFC 3339 UTC time such as `2026-11-12T15:13:40.000000Z`; `None` when it is not one.
@@ -514,24 +502,4 @@ fn days_from_civil(year: u64, month: u64, day: u64) -> Option<u64> {
     let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     (era * 146_097 + day_of_era).checked_sub(719_468)
-}
-
-/// The date of day `days` since 1970-01-01, as (year, month, day).
-fn civil(days: u64) -> (u64, u8, u8) {
-    let days = days + 719_468;
-    let era = days / 146_097;
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = u8::try_from(day_of_year - (153 * month_index + 2) / 5 + 1).unwrap_or(1);
-    let month = u8::try_from(if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    })
-    .unwrap_or(1);
-    let year = year_of_era + era * 400 + u64::from(month <= 2);
-    (year, month, day)
 }

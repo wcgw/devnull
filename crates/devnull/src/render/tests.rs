@@ -315,7 +315,7 @@ fn a_long_commit_folds_after_its_first_lines() {
 }
 
 #[test]
-fn ages_read_like_the_web() {
+fn ages_read_as_every_app_says_them() {
     let at = |seconds_ago: u64| age(NOW - seconds_ago, NOW);
 
     assert_eq!(
@@ -324,14 +324,18 @@ fn ages_read_like_the_web() {
     );
     assert_eq!(
         age(parse_time("2026-10-01T08:00:00Z").expect("time"), NOW),
-        "Oct 1"
+        "6w"
     );
     assert_eq!(
         age(
             parse_time("2025-12-24T08:00:00.123456Z").expect("time"),
             NOW
         ),
-        "Dec 24, 2025"
+        "46w"
+    );
+    assert_eq!(
+        age(parse_time("2025-10-01T08:00:00Z").expect("time"), NOW),
+        "1y"
     );
     assert_eq!(parse_time("not a time"), None);
 }
