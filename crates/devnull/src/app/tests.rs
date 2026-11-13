@@ -4575,6 +4575,23 @@ fn animations_in_view_move_on_each_after_its_own_delay() {
 }
 
 #[test]
+fn leader_bd_closes_a_feed_and_opening_it_again_starts_it_anew() {
+    let mut app = with_log(Log::Following, page_of(1, 1, None));
+    let opened = press(&mut app, ":e log/latest<CR>");
+    assert!(!fetches(&opened).is_empty(), "{opened:?}");
+
+    let _ = press(&mut app, "<Space>bd");
+    assert!(
+        statusline(&app).contains("log/following"),
+        "{}",
+        statusline(&app)
+    );
+
+    let again = press(&mut app, ":e log/latest<CR>");
+    assert_eq!(fetches(&again), fetches(&opened), "fetched anew");
+}
+
+#[test]
 fn an_animation_out_of_view_waits_until_it_is_back() {
     let (mut app, _) = pictured(wcgw_kit::gfx::Graphics::HalfBlocks, with_picture());
     let effects = picture_arrives(&mut app, animated(&[((255, 0, 0), 50), ((0, 0, 255), 120)]));

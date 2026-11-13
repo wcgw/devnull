@@ -381,6 +381,12 @@ impl wcgw_kit::App for Dn {
         self.load(kit, buffer)
     }
 
+    /// `:bd` (`<leader>bd`): the feed goes; opening it again starts it anew.
+    fn deleting(&mut self, _kit: &mut Kit, buffer: BufferId) -> Result<Effects, String> {
+        self.feeds.remove(&buffer);
+        Ok(Vec::new())
+    }
+
     fn keyed(&mut self, kit: &mut Kit) -> Effects {
         self.load_more(kit)
     }

@@ -60,6 +60,7 @@ accept its terms with `:agree`. The device key is kept in `~/.config/devnull/dev
 | `s` | Star |
 | `<leader><leader>` | Find a buffer |
 | `q` | Close the window; the last one quits |
+| `<leader>bd`, a middle click on its tab | Close the feed or profile (`:bdelete`); opening it again starts it anew |
 
 ## Configuration
 
