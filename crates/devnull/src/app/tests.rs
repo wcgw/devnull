@@ -3360,7 +3360,7 @@ fn the_picker_moves_with_ctrl_n_and_ctrl_p_and_escape_leaves_it() {
 #[test]
 fn the_user_picker_searches_once_typing_pauses_and_opens_who_is_picked() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    let _ = press(&mut app, "<Space>/");
+    let _ = press(&mut app, "<Space>ff");
     assert!(shows(&app, "Type to find people and organizations"));
 
     let first = press(&mut app, "a");
@@ -3402,7 +3402,7 @@ fn the_user_picker_searches_once_typing_pauses_and_opens_who_is_picked() {
 #[test]
 fn answers_to_an_older_search_are_ignored() {
     let mut app = with_log(Log::Following, page_of(1, 1, None));
-    let _ = press(&mut app, "<Space>/ad");
+    let _ = press(&mut app, "<Space>ffad");
 
     let found = serde_json::from_value(
         serde_json::json!({ "users": [{ "id": "u1", "handle": "a", "name": "Old" }] }),

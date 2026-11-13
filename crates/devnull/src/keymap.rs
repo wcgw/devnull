@@ -11,7 +11,7 @@ const DEFAULTS: [(&str, &str, &str, Topic); 17] = [
     ("K", "details", "details card", Topic::OPENING),
     ("gx", "browse link", "open link in browser", Topic::OPENING),
     ("gX", "browse", "open commit on the web", Topic::OPENING),
-    ("<leader>/", "pick users", "find user", Topic::OPENING),
+    ("<leader>ff", "pick users", "find people", Topic::OPENING),
     ("gy", "yanklink", "yank commit link", Topic::YANKING),
     ("c", "commit", "new commit", COMMITTING),
     ("r", "reply", "reply", COMMITTING),

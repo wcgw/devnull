@@ -1,5 +1,6 @@
-//! The user picker (`<leader>/`, `:pick users`): people and organizations, as dev-null.sh's search finds them once
-//! typing pauses; and a commit's links, for `:browse link` off any of them.
+//! The user picker (`<leader>ff`, `:pick users`, as every app finds its own with `<leader>ff`): people and
+//! organizations, as dev-null.sh's search finds them once typing pauses; and a commit's links, for `:browse link` off
+//! any of them.
 
 use devnull_api::model::{AccountKind, ProfileSearch};
 use wcgw_kit::shell::{Choice, Pick, Picker};
