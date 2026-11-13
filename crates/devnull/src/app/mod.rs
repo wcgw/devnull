@@ -146,8 +146,8 @@ impl Dn {
             |dn: &Dn, _| dn.account_segment(),
         ));
         let mut dn = Self::new();
-        // dn has always shown its buffers at the top.
-        let _ = kit.run_ex(&mut dn, "set showtabline=2");
+        // dn has always shown its buffers at the top, and left the mouse to the terminal (its D1).
+        let _ = kit.run_ex(&mut dn, "set showtabline=2 mouse=");
         kit
     }
 

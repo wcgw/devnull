@@ -182,6 +182,8 @@ impl From<super::Effect> for Effect {
                 },
             },
             K::After { msg, .. } => panic!("dn sends nothing else later: {msg:?}"),
+            K::CaptureMouse(on) => panic!("dn leaves the mouse alone, yet asked for {on}"),
+            K::Notify { title, .. } => panic!("dn notifies nothing, yet asked to say {title}"),
             K::App(Io::Connect) => Self::Connect,
             K::App(Io::Unlock(passphrase)) => Self::Unlock(passphrase),
             K::App(Io::Enroll) => Self::Enroll,
