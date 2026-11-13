@@ -294,6 +294,8 @@ impl Dn {
     pub(super) fn feed_buffer_or_new(&mut self, kit: &mut Kit, source: Source) -> BufferId {
         self.feed_buffer(&source).unwrap_or_else(|| {
             let id = kit.add_buffer(source.name(), Document::new(), true);
+            // A feed is prose: laid out up to the kit's 'textwidth' (120), as every app's.
+            kit.set_prose(id, true);
             self.feeds.insert(id, Feed::new(source));
             id
         })

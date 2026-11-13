@@ -2839,6 +2839,30 @@ fn one_commit(text: &str, extra: serde_json::Value) -> Page<Commit> {
 }
 
 #[test]
+fn a_commit_is_laid_out_no_wider_than_textwidth_however_wide_the_window() {
+    let mut app = with_log(
+        Log::Following,
+        one_commit(&"words ".repeat(60), serde_json::json!({})),
+    );
+    let _ = app.update(Msg::Resize {
+        width: 200,
+        height: 20,
+    });
+
+    let widest = screen(&app)
+        .rows
+        .iter()
+        .filter(|row| row.contains("words"))
+        .map(|row| unicode_width::UnicodeWidthStr::width(row.trim_end()))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        (101..=120).contains(&widest),
+        "as wide as 'textwidth', 120, in a window of 200: {widest}"
+    );
+}
+
+#[test]
 fn gx_opens_the_link_under_the_cursor_else_the_commit_s_only_one() {
     let mut app = with_log(
         Log::Following,

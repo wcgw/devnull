@@ -146,8 +146,11 @@ impl Dn {
             |dn: &Dn, _| dn.account_segment(),
         ));
         let mut dn = Self::new();
-        // dn has always shown its buffers at the top, and left the mouse to the terminal (its D1).
-        let _ = kit.run_ex(&mut dn, "set showtabline=2 mouse=");
+        // dn has always left the mouse to the terminal (its D1); its buffers at the top are the kit's default now.
+        let _ = kit.run_ex(&mut dn, "set mouse=");
+        // A feed is prose: laid out up to the kit's 'textwidth' (120), as every app's.
+        let first = kit.current_buffer();
+        kit.set_prose(first, true);
         kit
     }
 
